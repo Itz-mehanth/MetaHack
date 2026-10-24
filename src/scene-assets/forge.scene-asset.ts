@@ -145,13 +145,15 @@ export function createWorkTable(width = 1.0, depth = 0.6): Group {
   legs.name = 'Legs';
   const insetX = width / 2 - 0.07;
   const insetZ = depth / 2 - 0.07;
-  for (const [x, z] of [
+  const corners = [
     [-insetX, -insetZ],
     [insetX, -insetZ],
     [-insetX, insetZ],
     [insetX, insetZ],
-  ]) {
+  ];
+  for (const [index, [x, z]] of corners.entries()) {
     const leg = new Mesh(legGeometry, woodMaterial);
+    leg.name = `Leg-${index}`;
     leg.position.set(x, legHeight / 2, z);
     leg.castShadow = true;
     legs.add(leg);
