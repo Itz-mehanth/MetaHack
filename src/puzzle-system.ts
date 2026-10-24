@@ -82,6 +82,8 @@ export class PuzzleSystem extends createSystem({
       this.queries.held.subscribe('qualify', (entity) => this.onGrab(entity)),
       this.queries.held.subscribe('disqualify', (entity) => this.onRelease(entity)),
     );
+    // The level may have loaded before this system was registered.
+    for (const rig of this.queries.rigs.entities) void this.setupRig(rig);
   }
 
   /** Registers a callback for placement, completion and restart. */
@@ -116,6 +118,7 @@ export class PuzzleSystem extends createSystem({
   }
 
   private async setupRig(rig: Entity): Promise<void> {
+    if (this.rig === rig) return;
     const levelId = rig.getValue(PuzzleRig, 'levelId') ?? '';
     const puzzle = puzzles[levelId];
     if (puzzle == null || rig.object3D == null) {
