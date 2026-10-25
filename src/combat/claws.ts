@@ -3,6 +3,7 @@ import {
   type Color,
   CylinderGeometry,
   Group,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   Quaternion,
@@ -41,6 +42,9 @@ export class Claws {
   private readonly q = new Quaternion();
   private readonly up = new Vector3();
   private readonly p = new Vector3();
+  private readonly side = new Vector3();
+  private readonly back = new Vector3();
+  private readonly basis = new Matrix4();
 
   constructor(handedness: 'left' | 'right', color: Color) {
     this.group.name = `Claws-${handedness}`;
@@ -79,11 +83,18 @@ export class Claws {
     this.group.visible = pose.tracked && this.extension > 0.01;
     if (!this.group.visible) return;
 
-    // Blades follow the hand's forward axis (wrist to knuckles), which stays
-    // stable while the fingers are curled into a fist.
+    // Blades run along the back-of-hand bone line (wrist to middle knuckle),
+    // which matches where the fist actually points better than any single
+    // joint's orientation.
+    pose.position(J.wrist, this.p);
+    pose.position(J.middleProx, this.direction);
+    this.direction.sub(this.p).normalize();
     pose.quaternion(J.middleMeta, this.q);
     this.up.set(0, 1, 0).applyQuaternion(this.q);
-    this.direction.set(0, 0, -1).applyQuaternion(this.q);
+    this.up.addScaledVector(this.direction, -this.up.dot(this.direction)).normalize();
+    this.side.crossVectors(this.up, this.direction).negate();
+    this.basis.makeBasis(this.side, this.up, this.back.copy(this.direction).negate());
+    this.q.setFromRotationMatrix(this.basis);
     const length = BLADE_LENGTH * this.extension;
     const flicker = 1 + Math.sin(time * 40) * 0.04;
     for (let i = 0; i < this.blades.length; i += 1) {

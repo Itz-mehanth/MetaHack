@@ -708,19 +708,29 @@ export class CombatSystem extends createSystem({
   }
 
   /** Sets the hammer in the fist: handle toward the thumb, head pointing forward. */
+  /**
+   * Seats the hammer in the fist. In a real grip the handle runs through the
+   * tube formed by the curled fingers, so its axis goes from the pinky's to
+   * the index finger's middle joint (thumb side up) and its centre sits
+   * between that tube and the palm. The head points along wrist-to-knuckles.
+   */
   private poseInHand(index: number, out: Vector3): void {
-    const hand = this.hands[index];
-    const pose = hand.pose;
-    pose.quaternion(J.middleMeta, this.hammerQuat);
-    this.hx.set(0, 0, -1).applyQuaternion(this.hammerQuat);
-    pose.position(5, this.v1);
-    pose.position(20, this.v2);
+    const pose = this.hands[index].pose;
+    pose.position(7, this.v1);
+    pose.position(22, this.v2);
     this.hy.subVectors(this.v1, this.v2).normalize();
-    this.hy.addScaledVector(this.hx, -this.hy.dot(this.hx)).normalize();
+    out.addVectors(this.v1, this.v2);
+    pose.position(12, this.v1);
+    pose.position(17, this.v2);
+    out.add(this.v1).add(this.v2).multiplyScalar(0.25);
+    out.lerp(this.hands[index].gauntlet.palmPoint, 0.35);
+    pose.position(J.wrist, this.v1);
+    pose.position(J.middleProx, this.v2);
+    this.hx.subVectors(this.v2, this.v1);
+    this.hx.addScaledVector(this.hy, -this.hx.dot(this.hy)).normalize();
     this.hz.crossVectors(this.hx, this.hy);
     this.hammerBasis.makeBasis(this.hx, this.hy, this.hz);
     this.hammer!.quaternion.setFromRotationMatrix(this.hammerBasis);
-    out.copy(hand.gauntlet.palmPoint).addScaledVector(hand.gauntlet.palmNormal, 0.02);
   }
 
   private updateHammer(dt: number, time: number): void {
