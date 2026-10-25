@@ -5,6 +5,7 @@ import {
   CylinderGeometry,
   DoubleSide,
   Group,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   type Object3D,
@@ -19,9 +20,10 @@ import {
 } from '@iwsdk/core';
 import { Claws } from './combat/claws.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
-import { type HandJoints, isBlastPose, isFist } from './combat/gestures.js';
+import { type HandJoints, isBlastPose, isFist, isOpenPalm } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { HeroHub } from './combat/hub.js';
+import { Lightning } from './combat/lightning.js';
 import { ENEMIES, type EnemyKind, missionFor } from './combat/missions.js';
 import { applyTheme, setFlash, type Theme, THEMES } from './combat/themes.js';
 import { WristButton } from './combat/wrist.js';
@@ -41,6 +43,15 @@ const AIM_ASSIST_COS = 0.985;
 const CRESCENT_SPEED = 9;
 const CRESCENT_MIN_SWING = 2.4;
 const CRESCENT_COOLDOWN = 0.35;
+const HAMMER_REACH = 0.2;
+const HAMMER_THROW_MIN = 1.3;
+const HAMMER_RETURN_SPEED = 13;
+const HAMMER_HEAD_RADIUS = 0.14;
+const HAMMER_FLIGHT = 2.6;
+const RECALL_DELAY = 0.45;
+const PINCH_DISTANCE = 0.03;
+
+type HammerState = 'floating' | 'gripped' | 'docked' | 'flying' | 'returning';
 const HOMING_RATE = 3;
 const AIM_SMOOTHING = 0.45;
 const EMERGE_TIME = 0.9;
@@ -108,6 +119,8 @@ interface Drone {
   offset: Vector3;
   portal: Mesh;
   portalMaterial: MeshBasicMaterial;
+  /** Elapsed time when the hammer last hit it, so one contact = one hit. */
+  hammerHitAt: number;
 }
 
 interface Bolt {
@@ -180,6 +193,21 @@ export class CombatSystem extends createSystem({
   private drones: Drone[] = [];
   private bolts: Bolt[] = [];
   private hub!: HeroHub;
+  private lightningFx!: Lightning;
+  private hammer: Object3D | null = null;
+  private hammerHead: Object3D | null = null;
+  private hammerState: HammerState = 'floating';
+  private hammerHand = 1;
+  private hammerTime = 0;
+  private hammerVelocity = new Vector3();
+  private hammerPrev = new Vector3();
+  private hammerHeadPos = new Vector3();
+  private hammerHeadPrev = new Vector3();
+  private hammerBasis = new Matrix4();
+  private hammerQuat = new Quaternion();
+  private hx = new Vector3();
+  private hy = new Vector3();
+  private hz = new Vector3();
   private theme: Theme = THEMES['neon-grid'];
   private ambientTimer = 0;
   private lightning = 0;
@@ -215,7 +243,8 @@ export class CombatSystem extends createSystem({
     this.wrist = new WristButton();
     this.root.add(this.wrist.group);
     this.wrist.setHero('ARC', CYAN);
-    this.hub = new HeroHub(['tempest']);
+    this.hub = new HeroHub();
+    this.lightningFx = new Lightning(this.root);
     this.root.add(this.hub.group);
 
     // Unit-length beam along +Z, starting at its origin.
@@ -386,9 +415,15 @@ export class CombatSystem extends createSystem({
           offset: new Vector3(),
           portal,
           portalMaterial,
+          hammerHitAt: -10,
         });
       }
     }
+    this.hammer = await this.world.assets.instantiate('hammer');
+    this.hammer.name = 'StormHammer';
+    this.hammer.visible = false;
+    this.root.add(this.hammer);
+    this.hammerHead = this.hammer.getObjectByName('Head') ?? this.hammer;
     this.showHub();
     this.ready = true;
   }
@@ -413,6 +448,7 @@ export class CombatSystem extends createSystem({
     if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.openMenu();
     this.updateHands(realDt);
     this.updateClaws(realDt);
+    this.updateHammer(realDt, time);
 
     this.tips.length = 0;
     for (const hand of this.hands) {
@@ -433,6 +469,7 @@ export class CombatSystem extends createSystem({
 
     this.particles.update(dt);
     this.flashes.update(dt);
+    this.lightningFx.update(dt);
     if (this.damageMaterial.opacity > 0) {
       this.damageMaterial.opacity = Math.max(0, this.damageMaterial.opacity - realDt * 1.2);
       this.damage.visible = this.damageMaterial.opacity > 0;
@@ -571,6 +608,7 @@ export class CombatSystem extends createSystem({
     const mission = missionFor(hero.id);
     this.setTheme(mission.id);
     this.run.start(mission);
+    if (hero.id === 'tempest') this.summonHammer();
   }
 
   /** Wrist button: abandon the mission and return to hero select. */
@@ -629,6 +667,233 @@ export class CombatSystem extends createSystem({
       this.lightning = Math.max(0, this.lightning - dt * 1.8);
       const flicker = this.lightning * (0.55 + 0.45 * Math.sin(time * 60));
       setFlash(this.arena, flicker);
+    }
+  }
+
+  // ---------------------------------------------------------------- TEMPEST
+
+  /** Puts the hammer hovering in front of the right shoulder. */
+  private summonHammer(): void {
+    if (this.hammer == null) return;
+    this.v1.set(this.forward.x, 0, this.forward.z);
+    if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
+    this.v1.normalize();
+    this.hammer.position.copy(this.head).addScaledVector(this.v1, 0.4);
+    this.hammer.position.x += -this.v1.z * 0.2;
+    this.hammer.position.z += this.v1.x * 0.2;
+    this.hammer.position.y -= 0.3;
+    this.hammer.quaternion.identity();
+    this.hammerState = 'floating';
+    this.hammerVelocity.set(0, 0, 0);
+    this.flashes.spawn(this.hammer.position, VIOLET, 0.1, 0.6, 0.4);
+    this.lightningFx.strike(this.head, this.hammer.position, VIOLET);
+  }
+
+  private isGripping(index: number): boolean {
+    const hand = this.hands[index];
+    if (!hand.tracked) return false;
+    if (isFist(hand.joints)) return true;
+    hand.pose.position(4, this.v1);
+    hand.pose.position(9, this.v2);
+    return this.v1.distanceTo(this.v2) < PINCH_DISTANCE;
+  }
+
+  /** Open palm pointed at the hammer. */
+  private isRecalling(index: number): boolean {
+    const hand = this.hands[index];
+    if (!hand.tracked || this.hammer == null || !isOpenPalm(hand.joints)) return false;
+    this.v1.subVectors(this.hammer.position, hand.gauntlet.palmPoint);
+    if (this.v1.length() < 0.35) return false;
+    return this.v1.normalize().dot(hand.gauntlet.palmNormal) > 0.6;
+  }
+
+  /** Sets the hammer in the fist: handle toward the thumb, head pointing forward. */
+  private poseInHand(index: number, out: Vector3): void {
+    const hand = this.hands[index];
+    const pose = hand.pose;
+    pose.quaternion(J.middleMeta, this.hammerQuat);
+    this.hx.set(0, 0, -1).applyQuaternion(this.hammerQuat);
+    pose.position(5, this.v1);
+    pose.position(20, this.v2);
+    this.hy.subVectors(this.v1, this.v2).normalize();
+    this.hy.addScaledVector(this.hx, -this.hy.dot(this.hx)).normalize();
+    this.hz.crossVectors(this.hx, this.hy);
+    this.hammerBasis.makeBasis(this.hx, this.hy, this.hz);
+    this.hammer!.quaternion.setFromRotationMatrix(this.hammerBasis);
+    out.copy(hand.gauntlet.palmPoint).addScaledVector(hand.gauntlet.palmNormal, 0.02);
+  }
+
+  private updateHammer(dt: number, time: number): void {
+    const hammer = this.hammer;
+    if (hammer == null || this.hammerHead == null) return;
+    hammer.visible = this.hero === 'tempest';
+    if (!hammer.visible || dt <= 0) return;
+    this.hammerTime += dt;
+    this.hammerPrev.copy(hammer.position);
+    this.hammerHead.getWorldPosition(this.hammerHeadPrev);
+
+    switch (this.hammerState) {
+      case 'floating': {
+        hammer.position.y += Math.sin(time * 2) * 0.03 * dt;
+        hammer.rotation.y += dt * 0.6;
+        for (let i = 0; i < this.hands.length; i += 1) {
+          const hand = this.hands[i];
+          if (!hand.tracked) continue;
+          if (this.isGripping(i) && hand.gauntlet.palmPoint.distanceTo(hammer.position) < HAMMER_REACH) {
+            this.grabHammer(i);
+            break;
+          }
+          if (this.isRecalling(i)) {
+            this.recallHammer(i);
+            break;
+          }
+        }
+        break;
+      }
+      case 'gripped': {
+        const i = this.hammerHand;
+        if (!this.hands[i].tracked) {
+          this.hammerState = 'floating';
+          break;
+        }
+        this.poseInHand(i, this.v3);
+        hammer.position.copy(this.v3);
+        this.v4.subVectors(hammer.position, this.hammerPrev).divideScalar(dt);
+        this.hammerVelocity.lerp(this.v4, 0.5);
+        if (!this.isGripping(i)) {
+          const speed = this.hammerVelocity.length();
+          if (speed > HAMMER_THROW_MIN) this.throwHammer(speed);
+          else this.hammerState = 'docked';
+        }
+        break;
+      }
+      case 'docked': {
+        const i = this.hammerHand;
+        const hand = this.hands[i];
+        if (!hand.tracked) {
+          this.hammerState = 'floating';
+          break;
+        }
+        this.v3.copy(hand.gauntlet.palmPoint).addScaledVector(hand.gauntlet.palmNormal, 0.07);
+        hammer.position.lerp(this.v3, Math.min(1, dt * 18));
+        hammer.rotation.y += dt * 2;
+        if (this.isGripping(i)) this.grabHammer(i);
+        else if (!isOpenPalm(hand.joints) && this.hammerTime > 0.6) this.hammerState = 'floating';
+        break;
+      }
+      case 'flying': {
+        this.hammerVelocity.y -= 2.5 * dt;
+        hammer.position.addScaledVector(this.hammerVelocity, dt);
+        hammer.rotateX(-dt * 18);
+        if (this.hammerTime > HAMMER_FLIGHT || hammer.position.distanceTo(this.head) > 14) {
+          this.hammerState = 'floating';
+          this.hammerVelocity.set(0, 0, 0);
+          break;
+        }
+        if (this.hammerTime > RECALL_DELAY) {
+          for (let i = 0; i < this.hands.length; i += 1) {
+            if (this.isRecalling(i)) {
+              this.recallHammer(i);
+              break;
+            }
+          }
+        }
+        break;
+      }
+      case 'returning': {
+        const hand = this.hands[this.hammerHand];
+        if (!hand.tracked) {
+          this.hammerState = 'floating';
+          break;
+        }
+        this.v3.copy(hand.gauntlet.palmPoint).addScaledVector(hand.gauntlet.palmNormal, 0.07);
+        this.v4.subVectors(this.v3, hammer.position);
+        const distance = this.v4.length();
+        const step = HAMMER_RETURN_SPEED * dt;
+        if (distance <= Math.max(0.1, step)) {
+          hammer.position.copy(this.v3);
+          this.hammerState = 'docked';
+          this.hammerTime = 0;
+          this.flashes.spawn(this.v3, VIOLET, 0.1, 0.5, 0.25);
+          this.particles.burst(this.v3, VIOLET, 30, 1.5, 0.3, this.v2);
+          this.sfx.catchHammer();
+          break;
+        }
+        this.hammerVelocity.copy(this.v4).setLength(HAMMER_RETURN_SPEED);
+        hammer.position.addScaledVector(this.v4.normalize(), step);
+        hammer.rotateX(-dt * 22);
+        break;
+      }
+    }
+
+    // Trail and hits for a moving hammer.
+    this.hammerHead.getWorldPosition(this.hammerHeadPos);
+    const moving = this.hammerState === 'flying' || this.hammerState === 'returning';
+    const swinging = this.hammerState === 'gripped' && this.hammerVelocity.length() > 1.2;
+    if (moving || swinging) {
+      this.v2.set(0, 0, 0);
+      this.particles.emit(this.hammerHeadPos, this.v2, Math.random() < 0.3 ? WHITE : VIOLET, 0.35, 0, 0);
+      if (Math.random() < (moving ? 0.25 : 0.08)) {
+        this.v1.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.5).add(this.hammerHeadPos);
+        this.lightningFx.strike(this.hammerHeadPos, this.v1, VIOLET, 0.12);
+      }
+      const card = this.hub.hitBySegment(this.hammerHeadPrev, this.hammerHeadPos, this.v3, this.v4);
+      if (card >= 0) {
+        this.selectHero(card);
+        return;
+      }
+      for (const drone of this.drones) {
+        if (drone.state === 'off' || drone.state === 'emerging') continue;
+        if (this.elapsed - drone.hammerHitAt < 0.35) continue;
+        const radius = ENEMIES[drone.kind].radius + HAMMER_HEAD_RADIUS;
+        if (!this.segmentHits(this.hammerHeadPrev, this.hammerHeadPos, drone.object.position, radius)) continue;
+        drone.hammerHitAt = this.elapsed;
+        this.v1.copy(drone.object.position);
+        this.sfx.thunderHit();
+        this.flashes.spawn(this.v1, WHITE, 0.1, 0.7, 0.2);
+        this.damageDrone(drone, this.hammerState === 'flying' ? 3 : 2);
+        this.chainLightning(this.v1, drone);
+        if (this.hammerState === 'flying') this.hammerVelocity.multiplyScalar(0.8);
+      }
+    }
+  }
+
+  private grabHammer(index: number): void {
+    this.hammerHand = index;
+    this.hammerState = 'gripped';
+    this.hammerTime = 0;
+    this.hammerVelocity.set(0, 0, 0);
+    this.sfx.catchHammer();
+  }
+
+  private throwHammer(speed: number): void {
+    const boosted = Math.min(16, Math.max(7, speed * 2.4));
+    this.hammerVelocity.setLength(boosted);
+    this.hammerState = 'flying';
+    this.hammerTime = 0;
+    this.sfx.crescent();
+    this.flashes.spawn(this.hammer!.position, VIOLET, 0.1, 0.5, 0.2);
+  }
+
+  private recallHammer(index: number): void {
+    this.hammerHand = index;
+    this.hammerState = 'returning';
+    this.hammerTime = 0;
+    this.sfx.portal();
+    this.lightningFx.strike(this.hands[index].gauntlet.palmPoint, this.hammer!.position, VIOLET, 0.3);
+  }
+
+  /** Arcs lightning from `from` to up to three nearby enemies for 1 damage each. */
+  private chainLightning(from: Vector3, skip: Drone): void {
+    let jumps = 0;
+    for (const drone of this.drones) {
+      if (jumps >= 3) break;
+      if (drone === skip || drone.state === 'off' || drone.state === 'emerging') continue;
+      if (drone.object.position.distanceTo(from) > 3) continue;
+      jumps += 1;
+      this.lightningFx.strike(from, drone.object.position, VIOLET, 0.3);
+      this.particles.burst(drone.object.position, VIOLET, 16, 1.5, 0.3, this.v2);
+      this.damageDrone(drone, 1);
     }
   }
 

@@ -1,6 +1,6 @@
 import { AssetType, defineAssets } from '@iwsdk/core';
 import { createArena } from './scene-assets/arena.scene-asset.js';
-import { createCore, createDrone, createSwarmer, createTitan } from './scene-assets/combat.scene-asset.js';
+import { createCore, createDrone, createHammer, createSwarmer, createTitan } from './scene-assets/combat.scene-asset.js';
 import {
   createForgePlate,
   createGhost,
@@ -27,6 +27,7 @@ export default defineAssets({
   'drone-armored': createDrone(true),
   swarmer: createSwarmer(),
   titan: createTitan(),
+  hammer: createHammer(),
   core: createCore(),
   'work-table': createWorkTable(),
   'forge-plate': createForgePlate(),

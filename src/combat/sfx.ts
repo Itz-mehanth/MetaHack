@@ -124,6 +124,19 @@ export class Sfx {
     this.tone('square', 990, 1320, 0.1, 0.08, 0.08);
   }
 
+  /** Hammer smacks into a hand. */
+  catchHammer(): void {
+    this.tone('square', 180, 90, 0.12, 0.25);
+    this.hiss(0.1, 2500, 0.25);
+  }
+
+  /** Hammer impact with a lightning crack. */
+  thunderHit(): void {
+    this.hiss(0.5, 5000, 0.6);
+    this.tone('sawtooth', 160, 40, 0.35, 0.4);
+    this.tone('square', 1800, 400, 0.08, 0.1);
+  }
+
   thunder(): void {
     this.hiss(1.8, 900, 0.6);
     this.tone('sine', 70, 30, 1.4, 0.4);

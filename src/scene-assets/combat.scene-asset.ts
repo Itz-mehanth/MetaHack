@@ -1,5 +1,7 @@
 import {
+  BoxGeometry,
   ConeGeometry,
+  CylinderGeometry,
   Group,
   IcosahedronGeometry,
   Mesh,
@@ -123,6 +125,58 @@ export function createTitan(): Group {
     s.scale.set(1, 1, 0.45);
     root.add(s);
   }
+  return root;
+}
+
+/**
+ * TEMPEST's storm hammer. Origin at the grip point; handle along +Y, head
+ * (named `Head`) centred at y = 0.2 with its long axis along X.
+ */
+export function createHammer(): Group {
+  const root = new Group();
+  root.name = 'Hammer';
+  const steel = new MeshStandardMaterial({ color: '#3A3F55', roughness: 0.25, metalness: 0.95 });
+  const grip = new MeshStandardMaterial({ color: '#1A1420', roughness: 0.8, metalness: 0.1 });
+  const rune = glow('#9D8CFF', 3);
+  const spark = glow('#D9F2FF', 4);
+
+  const handle = new Mesh(new CylinderGeometry(0.016, 0.018, 0.3, 12), grip);
+  handle.name = 'Handle';
+  handle.position.y = 0.04;
+  const pommel = new Mesh(new IcosahedronGeometry(0.024, 1), spark);
+  pommel.name = 'Pommel';
+  pommel.position.y = -0.115;
+  root.add(handle, pommel);
+  for (let i = 0; i < 3; i += 1) {
+    const band = new Mesh(new TorusGeometry(0.018, 0.004, 6, 16), rune);
+    band.rotation.x = Math.PI / 2;
+    band.position.y = -0.06 + i * 0.07;
+    root.add(band);
+  }
+
+  const head = new Group();
+  head.name = 'Head';
+  head.position.y = 0.2;
+  const block = new Mesh(new CylinderGeometry(0.05, 0.05, 0.17, 8), steel);
+  block.rotation.z = Math.PI / 2;
+  const capL = new Mesh(new CylinderGeometry(0.056, 0.05, 0.02, 8), steel);
+  capL.rotation.z = Math.PI / 2;
+  capL.position.x = -0.095;
+  const capR = capL.clone();
+  capR.position.x = 0.095;
+  const faceL = new Mesh(new CylinderGeometry(0.03, 0.03, 0.004, 6), spark);
+  faceL.rotation.z = Math.PI / 2;
+  faceL.position.x = -0.107;
+  const faceR = faceL.clone();
+  faceR.position.x = 0.107;
+  head.add(block, capL, capR, faceL, faceR);
+  for (let i = 0; i < 4; i += 1) {
+    const strip = new Mesh(new BoxGeometry(0.12, 0.006, 0.006), rune);
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    strip.position.set(0, Math.cos(a) * 0.051, Math.sin(a) * 0.051);
+    head.add(strip);
+  }
+  root.add(head);
   return root;
 }
 
