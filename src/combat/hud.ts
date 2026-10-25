@@ -17,10 +17,12 @@ export class Hud {
   private readonly texture: CanvasTexture;
   private lastKey = '';
   /** Extra readouts set by the combat system each frame. */
-  readonly extras: { boss: { name: string; fraction: number } | null; overdrive: number | null; buffs: string } = {
+  readonly extras: { boss: { name: string; fraction: number } | null; overdrive: number | null; buffs: string; left: number; right: number } = {
     boss: null,
     overdrive: null,
     buffs: '',
+    left: 0,
+    right: 0,
   };
 
   constructor() {
@@ -50,7 +52,7 @@ export class Hud {
     const x = this.extras;
     const boss = x.boss ? `${x.boss.name}:${x.boss.fraction.toFixed(2)}` : '';
     const od = x.overdrive == null ? '' : x.overdrive >= 1 ? `R${Math.floor(performance.now() / 300) % 2}` : x.overdrive.toFixed(2);
-    const key = `${run.phase}|${run.wave}|${run.health}|${run.maxHealth}|${run.score}|${run.coins}|${run.combo}|${message}|${hint}|${boss}|${od}|${x.buffs}`;
+    const key = `${run.phase}|${run.wave}|${run.health}|${run.maxHealth}|${run.score}|${run.coins}|${run.combo}|${message}|${hint}|${boss}|${od}|${x.buffs}|${x.left}|${x.right}`;
     if (key === this.lastKey) return;
     this.lastKey = key;
     const c = this.ctx;
@@ -97,6 +99,30 @@ export class Hud {
       c.font = `900 26px ${FONT}`;
       c.fillText(buffs, 40, 200);
       c.shadowBlur = 0;
+    }
+    // Threat chevrons: enemies out of view to the left or right.
+    for (const [count, side] of [
+      [this.extras.left, -1],
+      [this.extras.right, 1],
+    ] as const) {
+      if (count <= 0) continue;
+      const cx = side < 0 ? 46 : WIDTH - 46;
+      c.save();
+      c.fillStyle = '#FF3B5C';
+      c.shadowColor = '#FF3B5C';
+      c.shadowBlur = 20;
+      c.beginPath();
+      c.moveTo(cx - side * 6, 290);
+      c.lineTo(cx + side * 30, 330);
+      c.lineTo(cx - side * 6, 370);
+      c.lineTo(cx + side * 4, 330);
+      c.closePath();
+      c.fill();
+      c.shadowBlur = 0;
+      c.font = `900 28px ${FONT}`;
+      c.textAlign = 'center';
+      c.fillText(String(count), cx - side * 2, 400);
+      c.restore();
     }
     if (boss) {
       const x = 212;

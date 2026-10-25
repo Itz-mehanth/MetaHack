@@ -463,6 +463,7 @@ export class GameMenus {
         { id: 'aim', x: 64, y: 530, w: 460, h: 110, label: 'AIM ASSIST', sub: s.aimAssist ? 'ON' : 'OFF', selected: s.aimAssist },
         { id: 'difficulty', x: 544, y: 530, w: 460, h: 110, label: 'DIFFICULTY', sub: s.difficulty.toUpperCase() },
         { id: 'lefty', x: 1024, y: 530, w: 512, h: 110, label: 'BOW HAND', sub: s.leftHanded ? 'RIGHT HAND' : 'LEFT HAND' },
+        { id: 'spawns', x: 704, y: 690, w: 560, h: 110, label: 'ENEMIES COME FROM', sub: s.allAround ? 'ALL AROUND (ROOM-SCALE)' : 'AHEAD', selected: s.allAround },
         {
           id: 'reset',
           x: 64,
@@ -661,6 +662,10 @@ export class GameMenus {
         return;
       case 'aim':
         p.settings.aimAssist = !p.settings.aimAssist;
+        this.actions.changed();
+        return;
+      case 'spawns':
+        p.settings.allAround = !p.settings.allAround;
         this.actions.changed();
         return;
       case 'lefty':

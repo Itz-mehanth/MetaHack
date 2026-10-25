@@ -197,6 +197,8 @@ export interface Settings {
   difficulty: Difficulty;
   aimAssist: boolean;
   leftHanded: boolean;
+  /** Enemies come from every wall in the room, not just ahead. */
+  allAround: boolean;
 }
 
 export interface Profile {
@@ -223,7 +225,7 @@ export function defaultProfile(): Profile {
     equipped: {},
     stars: {},
     unlocks: [],
-    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false },
+    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false },
   };
 }
 

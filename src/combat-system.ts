@@ -299,6 +299,17 @@ export class CombatSystem extends createSystem({
   private shockwaveTime = -1;
   private hostagesSaved = 0;
   private hostagesTotal = 0;
+  /** Seconds since entering MR, for the room-scan sweep (-1: idle). */
+  private scanTime = -1;
+  private scanMaterial = new MeshBasicMaterial({
+    color: '#3DF5FF',
+    transparent: true,
+    opacity: 0,
+    wireframe: true,
+    blending: AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
   private carousel = new HeroCarousel();
   private armory = new Armory();
   private weaponDisplays = new Map<string, Object3D>();
@@ -581,6 +592,7 @@ export class CombatSystem extends createSystem({
       this.hudPlaced = false;
       if (this.panel.visible) this.replaceMenuAt = this.elapsed + 0.6;
       this.music.play(this.run.phase === 'title' ? 'menu' : this.run.stage.world.id);
+      this.scanTime = 0;
     };
     xr.addEventListener('sessionstart', onSessionStart);
     const canvas = this.world.renderer.domElement;
@@ -869,6 +881,7 @@ export class CombatSystem extends createSystem({
       this.comic.update(realDt);
     }
     this.comicCooldown -= realDt;
+    this.updateRoomScan(realDt);
     this.carousel.update(realDt, time, this.head);
     this.armory.update(time);
     for (const aura of [this.hammerAura, this.gunAura, this.bowAura]) aura?.update(time);
@@ -1328,6 +1341,49 @@ export class CombatSystem extends createSystem({
   }
 
   /** Shows the hero carousel only on the hero screen, in sync with its focus. */
+  /**
+   * Room-scan sweep on entering MR: every detected wall and surface lights
+   * up as a pulsing hologram grid for a few seconds, then fades away.
+   */
+  private updateRoomScan(dt: number): void {
+    if (this.scanTime < 0) return;
+    this.scanTime += dt;
+    if (!this.isPassthrough()) {
+      if (this.scanTime > 1) this.scanTime = -1;
+      return;
+    }
+    const duration = 4;
+    const done = this.scanTime >= duration;
+    let walls = 0;
+    let surfaces = 0;
+    for (const entity of this.queries.planes.entities) {
+      const plane = entity.getValue(XRPlane, '_plane') as XRPlane | undefined;
+      const mesh = entity.object3D as Mesh | undefined;
+      if (plane == null || mesh == null || !(mesh as Mesh).isMesh) continue;
+      if (plane.orientation === 'vertical') walls += 1;
+      else surfaces += 1;
+      if (done) {
+        if (mesh.userData.scanOriginal) {
+          mesh.material = mesh.userData.scanOriginal;
+          mesh.userData.scanOriginal = undefined;
+          mesh.visible = false;
+        }
+        continue;
+      }
+      if (!mesh.userData.scanOriginal) mesh.userData.scanOriginal = mesh.material;
+      mesh.material = this.scanMaterial;
+      mesh.visible = true;
+    }
+    const t = this.scanTime / duration;
+    this.scanMaterial.opacity = (1 - t) * (0.55 + 0.35 * Math.sin(this.scanTime * 14));
+    if (this.scanTime - dt < 0.8 && this.scanTime >= 0.8 && walls + surfaces > 0) {
+      this.v1.copy(this.head).addScaledVector(this.forward, 1.2);
+      this.comic.pop('ROOM SCANNED!', this.v1, CYAN, 0.7);
+      this.sfx.radio();
+    }
+    if (done) this.scanTime = -1;
+  }
+
   /** Shows the holographic armory only on the garage screen. */
   private syncArmory(): void {
     const on = this.panel.visible && this.menus.screen === 'garage';
@@ -2717,7 +2773,14 @@ export class CombatSystem extends createSystem({
       if (plane == null || object == null || plane.orientation !== 'vertical') continue;
       object.getWorldPosition(this.v1);
       const d = this.v1.distanceTo(this.head);
-      if (d > 1.8 && d < 7) walls.push(object);
+      if (d <= 1.8 || d >= 7) continue;
+      if (!this.profile.settings.allAround) {
+        // Front arc only (about +/-100 degrees from where the player faces).
+        this.v2.subVectors(this.v1, this.head).setY(0).normalize();
+        this.v3.set(this.forward.x, 0, this.forward.z).normalize();
+        if (this.v2.dot(this.v3) < -0.17) continue;
+      }
+      walls.push(object);
     }
     if (walls.length > 0) {
       const wall = walls[Math.floor(Math.random() * walls.length)];
@@ -2733,7 +2796,7 @@ export class CombatSystem extends createSystem({
     this.v1.set(this.forward.x, 0, this.forward.z);
     if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
     this.v1.normalize();
-    const angle = (Math.random() - 0.5) * (Math.PI * 0.8);
+    const angle = (Math.random() - 0.5) * (this.profile.settings.allAround ? Math.PI * 2 : Math.PI * 0.8);
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
     const x = this.v1.x * cos - this.v1.z * sin;
@@ -3093,6 +3156,20 @@ export class CombatSystem extends createSystem({
     this.hud.mesh.visible = run.phase !== 'title' && !(this.panel.visible && !this.paused);
     const boss = this.drones.find((d) => d.kind === 'boss' && (d.state === 'boss' || d.state === 'emerging'));
     this.hud.extras.boss = boss ? { name: chapterForWorld(boss.world)?.villain.name ?? 'BOSS', fraction: boss.hp / boss.maxHp } : null;
+    // Threats out of view: count hostiles beyond ~55 degrees to each side.
+    let left = 0;
+    let right = 0;
+    this.v3.set(this.forward.x, 0, this.forward.z).normalize();
+    this.v4.set(-this.v3.z, 0, this.v3.x);
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'orb') continue;
+      this.v1.subVectors(drone.object.position, this.head).setY(0).normalize();
+      if (this.v1.dot(this.v3) > 0.57) continue;
+      if (this.v1.dot(this.v4) >= 0) right += 1;
+      else left += 1;
+    }
+    this.hud.extras.left = left;
+    this.hud.extras.right = right;
     this.hud.extras.overdrive = hasUnlock(this.profile, `overdrive-${this.hero}`) ? this.overdrive : null;
     this.hud.extras.buffs = [
       this.buffRapid > 0 ? `RAPID ${Math.ceil(this.buffRapid)}s` : '',
