@@ -3,17 +3,16 @@
   "units": "meters",
   "components": {
     "com.iwsdk.components.IBLGradient": {
-      "sky": [0.96, 0.94, 0.9, 1],
-      "equator": [0.8, 0.76, 0.7, 1],
-      "ground": [0.46, 0.42, 0.38, 1],
-      "intensity": 0.35
+      "sky": [0.75, 0.85, 1, 1],
+      "equator": [0.55, 0.5, 0.6, 1],
+      "ground": [0.25, 0.2, 0.25, 1],
+      "intensity": 0.6
     }
   },
   "environment": {
     "toneMapping": "aces",
     "exposure": 1,
-    "shadows": true,
-    "shadowMapType": "pcf"
+    "shadows": false
   },
   "resources": {},
   "authoring": {
@@ -22,92 +21,40 @@
         "id": "hero",
         "role": "hero",
         "projection": "perspective",
-        "position": [0, 1.22, 0.08],
-        "target": [0, 0.86, -0.5],
-        "fov": 60
+        "position": [0, 1.6, 0.6],
+        "target": [0, 1.45, -1.5],
+        "fov": 70
       }
     ]
   },
   "nodes": [
     {
-      "id": "shadow-catcher",
-      "name": "Shadow Catcher",
-      "framingRole": "support",
-      "transform": { "position": [0, 0.001, -0.5] },
-      "components": {
-        "ShadowCatcher": { "size": [3, 3], "opacity": 0.25 }
-      }
-    },
-    {
-      "id": "work-table",
-      "name": "Work Table",
-      "content": {
-        "type": "asset",
-        "asset": "work-table",
-        "castShadow": true,
-        "receiveShadow": true
-      },
-      "transform": { "position": [0, 0, -0.5] },
-      "components": {
-        "ContactShadow": { "size": [1.15, 0.75], "opacity": 0.35 }
-      }
-    },
-    {
-      "id": "puzzle-rig",
-      "name": "Puzzle Rig",
-      "transform": { "position": [0, 0.82, -0.5] },
-      "components": {
-        "PuzzleRig": { "levelId": "level-1" },
-        "AudioSource": {
-          "src": "./audio/chime.mp3",
-          "maxInstances": 3,
-          "playbackMode": "fade-restart"
-        }
-      },
-      "children": [
-        {
-          "id": "forge-plate",
-          "name": "Forge Plate",
-          "metadata": { "iwsdk.validation": { "allowFloating": true } },
-          "content": {
-            "type": "asset",
-            "asset": "forge-plate",
-            "castShadow": true,
-            "receiveShadow": true
-          }
-        }
-      ]
-    },
-    {
-      "id": "welcome-panel",
-      "name": "Welcome Panel",
-      "content": { "type": "asset", "asset": "welcome-panel" },
-      "transform": {
-        "position": [0, 1.2, -0.95],
-        "rotationDeg": [-12, 0, 0],
-        "scale": 0.16
-      },
-      "components": { "RayInteractable": {} }
-    },
-    {
       "id": "key-light",
       "name": "Key Light",
       "transform": {
-        "position": [-1.2, 4, 1.0],
-        "rotationDeg": [-65, -20, 0]
+        "position": [-1.5, 4, 1.5],
+        "rotationDeg": [-55, -25, 0]
       },
       "components": {
         "DirectionalLight": {
-          "color": [1, 0.945, 0.87, 1],
-          "intensity": 2,
-          "castShadow": true,
-          "shadowMapSize": "1024",
-          "shadowCameraSize": 2,
-          "shadowCameraNear": 1,
-          "shadowCameraFar": 10,
-          "shadowRadius": 4,
-          "shadowBias": -0.0004,
-          "shadowNormalBias": 0.02
+          "color": [1, 0.92, 0.85, 1],
+          "intensity": 2.2,
+          "castShadow": false
+        }
+      }
+    },
+    {
+      "id": "rim-light",
+      "name": "Rim Light",
+      "transform": {
+        "position": [2, 3, -4],
+        "rotationDeg": [-30, 150, 0]
+      },
+      "components": {
+        "DirectionalLight": {
+          "color": [0.4, 0.9, 1, 1],
+          "intensity": 1.5,
+          "castShadow": false
         }
       }
     },
@@ -116,9 +63,9 @@
       "name": "Fill Light",
       "components": {
         "HemisphereLight": {
-          "skyColor": [0.96, 0.94, 0.9, 1],
-          "groundColor": [0.55, 0.52, 0.48, 1],
-          "intensity": 1
+          "skyColor": [0.8, 0.85, 1, 1],
+          "groundColor": [0.3, 0.25, 0.3, 1],
+          "intensity": 0.8
         }
       }
     }

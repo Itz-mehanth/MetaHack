@@ -1,4 +1,5 @@
 import { AssetType, defineAssets } from '@iwsdk/core';
+import { createCore, createDrone } from './scene-assets/combat.scene-asset.js';
 import {
   createForgePlate,
   createGhost,
@@ -16,10 +17,13 @@ const uikitml = (fileName: string, name: string) => ({
 });
 
 /**
- * Pieces and ghosts follow the `piece-<shape>` / `ghost-<shape>` naming that
- * the puzzle systems use to spawn a level's shapes from its data.
+ * Combat assets drive the game. The forge/puzzle assets belong to the parked
+ * puzzle prototype and are kept registered so its code still resolves.
  */
 export default defineAssets({
+  drone: createDrone(false),
+  'drone-armored': createDrone(true),
+  core: createCore(),
   'work-table': createWorkTable(),
   'forge-plate': createForgePlate(),
   'piece-pillar': createPiece('pillar'),
