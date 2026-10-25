@@ -144,6 +144,7 @@ export class CombatSystem extends createSystem({
   private drones: Drone[] = [];
   private bolts: Bolt[] = [];
   private core: Object3D | null = null;
+  private arena: Object3D | null = null;
   private coreVisible = false;
   private damage!: Mesh;
   private damageMaterial!: MeshBasicMaterial;
@@ -244,6 +245,9 @@ export class CombatSystem extends createSystem({
   }
 
   private async loadModels(): Promise<void> {
+    this.arena = await this.world.assets.instantiate('arena');
+    this.arena.name = 'Arena';
+    this.root.add(this.arena);
     const portalGeometry = new RingGeometry(0.17, 0.26, 48);
     for (let i = 0; i < 22; i += 1) {
       const armored = i >= 14;
@@ -289,6 +293,7 @@ export class CombatSystem extends createSystem({
 
   update(delta: number, time: number): void {
     if (!this.ready) return;
+    if (this.arena) this.arena.visible = !this.isPassthrough();
     if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) return;
     const realDt = Math.min(delta, 0.05);
     if (this.slowmo > 0) this.slowmo -= realDt;
@@ -317,6 +322,12 @@ export class CombatSystem extends createSystem({
       this.damage.visible = this.damageMaterial.opacity > 0;
     }
     this.updateHud(realDt);
+  }
+
+  /** True in an MR session, where the real room replaces the arena. */
+  private isPassthrough(): boolean {
+    const session = this.world.renderer.xr.getSession();
+    return session != null && session.environmentBlendMode !== 'opaque';
   }
 
   // ---------------------------------------------------------------- hands

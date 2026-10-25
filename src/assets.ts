@@ -1,4 +1,5 @@
 import { AssetType, defineAssets } from '@iwsdk/core';
+import { createArena } from './scene-assets/arena.scene-asset.js';
 import { createCore, createDrone } from './scene-assets/combat.scene-asset.js';
 import {
   createForgePlate,
@@ -21,6 +22,7 @@ const uikitml = (fileName: string, name: string) => ({
  * puzzle prototype and are kept registered so its code still resolves.
  */
 export default defineAssets({
+  arena: createArena(),
   drone: createDrone(false),
   'drone-armored': createDrone(true),
   core: createCore(),
