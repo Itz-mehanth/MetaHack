@@ -10,6 +10,7 @@ import {
   SRGBColorSpace,
   Vector3,
 } from '@iwsdk/core';
+import { drawIcon, iconsReady } from './icons.js';
 
 const RADIUS = 1.65;
 const SPACING = 0.5;
@@ -94,6 +95,7 @@ export class HeroCarousel {
     this.group.add(root);
     this.items.push({ id, root, figure, accents, rim, canvas, texture, label, name: id, status: '', color: '#FFFFFF' });
     void document.fonts?.load(`48px Bangers`).then(() => this.items.forEach((item) => this.drawLabel(item)));
+    void iconsReady.then(() => this.items.forEach((item) => this.drawLabel(item)));
   }
 
   /** Sets a hero's display name, status line (price, OWNED...) and colour. */
@@ -119,21 +121,24 @@ export class HeroCarousel {
   private drawLabel(item: Item): void {
     const c = item.canvas.getContext('2d')!;
     c.clearRect(0, 0, 512, 192);
+    // Hero emblem on the left, ink-outlined like the lettering.
+    drawIcon(c, item.id, 78, 82, 128, '#0A0A12');
+    drawIcon(c, item.id, 78, 82, 112, item.color, 18);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.font = `96px ${FONT}`;
     c.lineWidth = 14;
     c.lineJoin = 'round';
     c.strokeStyle = '#0A0A12';
-    c.strokeText(item.name, 256, 70);
+    c.strokeText(item.name, 310, 70);
     c.fillStyle = item.color;
-    c.fillText(item.name, 256, 70);
+    c.fillText(item.name, 310, 70);
     if (item.status) {
       c.font = `48px ${FONT}`;
       c.lineWidth = 10;
-      c.strokeText(item.status, 256, 150);
+      c.strokeText(item.status, 310, 150);
       c.fillStyle = '#FFF6D6';
-      c.fillText(item.status, 256, 150);
+      c.fillText(item.status, 310, 150);
     }
     item.texture.needsUpdate = true;
   }

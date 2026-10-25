@@ -1,0 +1,17 @@
+SURGE: Hands of Heroes - credits
+
+Icons from game-icons.net, licensed under Creative Commons BY 3.0
+(https://creativecommons.org/licenses/by/3.0/):
+  - Lorc (http://lorcblog.blogspot.com): laser-blast, claw-slashes, high-shot,
+    spider-web, checked-shield, daemon-skull, skull-crack, gears, cog,
+    sunbeams, sprint, muscle-up, shining-heart, treasure-map, crossed-swords,
+    padlock, trophy, broken-shield, wingfoot, stopwatch, radar-sweep
+  - Delapouite (http://delapouite.com): thor-hammer (used as a generic hammer
+    icon), two-coins, prisoner, round-star
+Icons were recoloured (background removed, tinted at runtime).
+
+Fonts from Google Fonts under the SIL Open Font License: Bangers, Orbitron,
+Rajdhani.
+
+All characters, story, models, music and sound effects are original and
+generated in code for this project.

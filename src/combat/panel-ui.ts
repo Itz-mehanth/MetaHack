@@ -8,6 +8,7 @@ import {
   SRGBColorSpace,
   Vector3,
 } from '@iwsdk/core';
+import { drawIcon, iconsReady } from './icons.js';
 
 /** Canvas pixels; widgets are laid out in this space. */
 export const PANEL_PX_W = 1600;
@@ -42,6 +43,8 @@ export interface Widget {
   badge?: string;
   size?: number;
   align?: 'left' | 'center';
+  /** Icon name from public/icons, drawn on buttons and tiles. */
+  icon?: string;
 }
 
 export interface PanelContent {
@@ -109,6 +112,9 @@ export class Panel {
     this.group.add(halo, this.face);
     this.group.visible = false;
     void document.fonts?.ready.then(() => {
+      this.dirty = true;
+    });
+    void iconsReady.then(() => {
       this.dirty = true;
     });
   }
@@ -299,17 +305,12 @@ export class Panel {
     c.font = `900 48px ${FONT}`;
     const width = c.measureText(text).width;
     const x = PANEL_PX_W - 70 - width;
-    c.beginPath();
-    c.arc(x - 40, 92, 24, 0, Math.PI * 2);
-    c.fillStyle = '#FFD23F';
-    c.shadowColor = '#FF8A1F';
-    c.shadowBlur = 18;
-    c.fill();
-    c.shadowBlur = 0;
-    c.fillStyle = '#7A4A00';
-    c.font = `900 28px ${FONT}`;
-    c.textAlign = 'center';
-    c.fillText('C', x - 40, 93);
+    if (!drawIcon(c, 'coins', x - 42, 92, 64, '#FFD23F', 18)) {
+      c.beginPath();
+      c.arc(x - 40, 92, 24, 0, Math.PI * 2);
+      c.fillStyle = '#FFD23F';
+      c.fill();
+    }
     c.textAlign = 'left';
     c.fillStyle = '#FFE58A';
     c.font = `900 48px ${FONT}`;
@@ -343,6 +344,11 @@ export class Panel {
         ? color
         : `rgba(255,255,255,${0.06 + (hover ? 0.08 : 0) + flash * 0.3})`;
     this.roundBox(w, Math.min(36, w.h / 2), fill, w.disabled ? null : color, hover ? 30 : 12);
+    if (w.icon) {
+      const size = Math.min(w.h * 0.62, 110);
+      const tint = w.disabled ? 'rgba(255,255,255,0.35)' : primary ? '#06020F' : color;
+      drawIcon(c, w.icon, w.x + size * 0.5 + 26, w.y + w.h / 2, size, tint, primary ? 0 : 14);
+    }
     c.textAlign = 'center';
     c.fillStyle = w.disabled ? 'rgba(255,255,255,0.35)' : primary ? '#06020F' : '#FFFFFF';
     c.font = `900 ${w.size ?? 40}px ${FONT}`;
@@ -365,6 +371,11 @@ export class Panel {
     c.textAlign = 'center';
     const cx = w.x + w.w / 2;
     let y = w.y + 56;
+    if (w.icon) {
+      const size = Math.min(130, w.h * 0.26);
+      drawIcon(c, w.icon, cx, w.y + 24 + size / 2, size, w.disabled ? 'rgba(255,255,255,0.3)' : color, 26);
+      y += size + 4;
+    }
     c.fillStyle = w.disabled ? 'rgba(255,255,255,0.45)' : '#FFFFFF';
     c.shadowColor = color;
     c.shadowBlur = w.disabled ? 0 : 16;

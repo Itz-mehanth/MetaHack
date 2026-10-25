@@ -196,6 +196,7 @@ export class GameMenus {
           color: accent,
           badge: 'CHANGE',
           size: 64,
+          icon: hero.id,
         },
         {
           id: 'play',
@@ -204,14 +205,15 @@ export class GameMenus {
           w: 896,
           h: 200,
           label: 'PLAY',
+          icon: 'play',
           sub: `${chapterFor(this.hero).region}: ${chapterFor(this.hero).levels[next.number - 1].location}`,
           selected: true,
           color: accent,
           size: 80,
         },
-        { id: 'garage', x: 640, y: 450, w: 438, h: 150, label: 'GARAGE', sub: 'Upgrades & skins' },
-        { id: 'settings', x: 1098, y: 450, w: 438, h: 150, label: 'SETTINGS', sub: 'Sound & difficulty' },
-        { id: 'howto', x: 640, y: 630, w: 438, h: 150, label: 'HOW TO PLAY' },
+        { id: 'garage', x: 640, y: 450, w: 438, h: 150, label: 'GARAGE', sub: 'Upgrades & skins', icon: 'garage' },
+        { id: 'settings', x: 1098, y: 450, w: 438, h: 150, label: 'SETTINGS', sub: 'Sound & difficulty', icon: 'settings' },
+        { id: 'howto', x: 640, y: 630, w: 438, h: 150, label: 'HOW TO PLAY', icon: 'map' },
         {
           id: 'stats',
           kind: 'text',
@@ -279,9 +281,10 @@ export class GameMenus {
           detail: `${hero.how}\n\n${this.heroStatus(hero.id)}`,
           color,
           size: 84,
+          icon: hero.id,
         },
         { id: 'hero-next', x: 1316, y: 250, w: 220, h: 520, label: '>', size: 110, disabled: this.heroFocus === HEROES.length - 1, color },
-        { id: 'hero-pick', x: 310, y: 800, w: 980, h: 140, label: pick, selected: playable, disabled: !playable, color, size: 48 },
+        { id: 'hero-pick', x: 310, y: 800, w: 980, h: 140, label: pick, selected: playable, disabled: !playable, color, size: 48, icon: owned ? 'play' : 'coins' },
       ],
     };
   }
@@ -309,6 +312,7 @@ export class GameMenus {
         color: i === stages.length - 1 ? chapter.villain.color : accent,
         selected: i === this.mapLevel,
         disabled: !unlocked,
+        icon: !unlocked ? 'lock' : i === stages.length - 1 ? 'skull' : 'radar',
       });
     });
     const unlocked = this.profile.unlocks.includes(story.reward.id);
@@ -335,7 +339,7 @@ export class GameMenus {
         size: 32,
         color: accent,
       },
-      { id: 'start', x: 64, y: 790, w: 960, h: 150, label: boss ? 'FACE THE BOSS' : 'START MISSION', selected: true, color: accent, size: 56 },
+      { id: 'start', x: 64, y: 790, w: 960, h: 150, label: boss ? 'FACE THE BOSS' : 'START MISSION', selected: true, color: accent, size: 56, icon: boss ? 'skull' : 'play' },
       { id: 'difficulty', x: 1056, y: 790, w: 480, h: 150, label: 'DIFFICULTY', sub: this.profile.settings.difficulty.toUpperCase(), color: accent },
     );
     return {
@@ -404,6 +408,7 @@ export class GameMenus {
           disabled: cost == null,
           color: cost != null && p.coins >= cost ? accent : '#888899',
           size: 34,
+          icon: u.hero === 'all' ? 'shield' : u.hero,
         },
       );
     });
@@ -421,6 +426,7 @@ export class GameMenus {
         color: skin.color,
         selected: equipped,
         size: 32,
+        icon: hero,
       });
     });
     return { title: 'GARAGE', subtitle: `${HEROES.find((h) => h.id === hero)!.name} upgrades & skins`, coins: p.coins, accent, widgets };
@@ -481,7 +487,7 @@ export class GameMenus {
           w: 1440,
           h: 200,
           label:
-            'Chain kills for a combo multiplier. Earn coins to unlock heroes, upgrades and skins.\nThree stars: finish a stage without losing shield. Left wrist button: pause.',
+            'Chain kills for a combo multiplier. Free hostages and keep your shield for 3 stars.\nLeft wrist button: pause. Clap when OVERDRIVE is full.\nIcons: game-icons.net (Lorc, Delapouite), CC BY 3.0.',
           size: 32,
           color: 'rgba(233,252,255,0.7)',
         },
@@ -495,10 +501,10 @@ export class GameMenus {
       coins: this.profile.coins,
       accent,
       widgets: [
-        { id: 'resume', x: 400, y: 230, w: 800, h: 150, label: 'RESUME', selected: true, color: accent, size: 56 },
-        { id: 'restart', x: 400, y: 410, w: 800, h: 130, label: 'RESTART STAGE' },
-        { id: 'pause-settings', x: 400, y: 570, w: 800, h: 130, label: 'SETTINGS' },
-        { id: 'quit', x: 400, y: 730, w: 800, h: 130, label: 'QUIT TO MENU', color: '#FF3B5C' },
+        { id: 'resume', x: 400, y: 230, w: 800, h: 150, label: 'RESUME', selected: true, color: accent, size: 56, icon: 'play' },
+        { id: 'restart', x: 400, y: 410, w: 800, h: 130, label: 'RESTART STAGE', icon: 'timer' },
+        { id: 'pause-settings', x: 400, y: 570, w: 800, h: 130, label: 'SETTINGS', icon: 'settings' },
+        { id: 'quit', x: 400, y: 730, w: 800, h: 130, label: 'QUIT TO WAR MAP', color: '#FF3B5C', icon: 'map' },
       ],
     };
   }
@@ -528,9 +534,9 @@ export class GameMenus {
           size: 38,
           label: `Score ${r.score.toLocaleString('en-US')}   |   Kills ${r.kills}   |   Best combo x${r.bestCombo}\n${r.hostages > 0 ? `Hostages saved ${r.saved}/${r.hostages}   |   ` : ''}+${r.reward.coins} coins${r.reward.newBest ? '   |   NEW BEST!' : ''}${unlockedLine}`,
         },
-        { id: 'next', x: 64, y: 780, w: 470, h: 140, label: 'NEXT MISSION', disabled: !canNext, selected: canNext, color: accent },
-        { id: 'retry', x: 565, y: 780, w: 470, h: 140, label: 'RETRY' },
-        { id: 'menu', x: 1066, y: 780, w: 470, h: 140, label: 'WAR MAP' },
+        { id: 'next', x: 64, y: 780, w: 470, h: 140, label: 'NEXT MISSION', disabled: !canNext, selected: canNext, color: accent, icon: 'play' },
+        { id: 'retry', x: 565, y: 780, w: 470, h: 140, label: 'RETRY', icon: 'timer' },
+        { id: 'menu', x: 1066, y: 780, w: 470, h: 140, label: 'WAR MAP', icon: 'map' },
       ],
     };
   }
