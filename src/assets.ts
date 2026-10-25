@@ -66,6 +66,7 @@ export default defineAssets({
   'alien-brute': createAlien('brute'),
   'alien-stalker': createAlien('stalker'),
   'alien-colossus': createAlien('colossus'),
+  'alien-reaver': createAlien('reaver'),
   'boss-neon-grid': createBoss('#FF2E8C'),
   'boss-ember-foundry': createBoss('#FF6A00'),
   'boss-storm-peak': createBoss('#B6A6FF'),

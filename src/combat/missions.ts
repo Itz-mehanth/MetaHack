@@ -3,10 +3,11 @@
 /**
  * Enemy kinds. The walking Hollow Legion aliens keep their original ids:
  * drone = Grunt (rifle), armored = Brute (heavy), swarmer = Stalker
- * (melee sprinter), titan = Colossus (giant cannon). boss, orb (enemy
+ * (melee sprinter), titan = Colossus (giant cannon), blade = Reaver
+ * (energy swordsman). boss, orb (enemy
  * shot) and pod (hostage cage) are special.
  */
-export type EnemyKind = 'drone' | 'armored' | 'swarmer' | 'titan' | 'boss' | 'orb' | 'pod';
+export type EnemyKind = 'drone' | 'armored' | 'swarmer' | 'titan' | 'blade' | 'boss' | 'orb' | 'pod';
 
 export interface EnemyDef {
   readonly name: string;
@@ -69,6 +70,17 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     damage: 2,
     score: 700,
     ground: { chest: 1.72, stopDistance: 3.2, fireInterval: 3.6, shotSpeed: 2.2, shots: 3 },
+  },
+  blade: {
+    name: 'REAVER',
+    hp: 3,
+    radius: 0.34,
+    chargeDistance: 0,
+    chargeTime: 99,
+    weave: 0.25,
+    damage: 1,
+    score: 300,
+    ground: { chest: 1.17, stopDistance: 0, fireInterval: 0, shotSpeed: 0, shots: 0 },
   },
   boss: { name: 'BOSS', hp: 40, radius: 0.6, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 3, score: 5000 },
   orb: { name: 'SHOT', hp: 1, radius: 0.1, chargeDistance: 0.35, chargeTime: 0.05, weave: 0, damage: 1, score: 25 },

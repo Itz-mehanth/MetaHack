@@ -26,6 +26,15 @@ throughout (no Marvel or other third-party names/designs).
   fast swings throw slash waves, crossing both blades fires an X-strike).
   PSION telekinesis (open palm locks onto a prop or alien, close to lift,
   fling and open to throw; impacts blast nearby enemies).
+- Enemy bodies: anatomical aliens (merged parts per rigid limb). Hits make
+  them flinch and step back; kills topple them (knockback, knees buckle,
+  thud, lie, sink). Blade kills sever along the cut: horizontal = waist,
+  high = head, else an arm; parts fly as physics gibs with ichor. All
+  walkers end in melee: telegraphed wind-up, dodge by stepping back, PARRY
+  by meeting their weapon with a sword/claw (stuns, double damage). REAVER
+  = energy-sword alien; Stalkers dash. Gunners fire 1-2 volleys then push.
+  Player hits: directional blood splatter, low-health pulse.
+- Gloves: per-hero gauntlet style (finish, trim, extras; HAVOC fingerless).
 - Enemies: walking humanoid aliens (Grunt, Brute, Stalker, Colossus) from
   wall portals, plasma shots you dodge or shoot; flying boss mechs.
 - Flow: landing page -> 3D hero carousel -> holographic war map -> mission

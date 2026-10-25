@@ -34,7 +34,7 @@ export const PROLOGUE: Stage = {
   objective: 'Channel three heroes, then face the Unmaker',
   waves: [
     { count: 3, interval: 2.4, speed: 0.45, kinds: ['drone'] },
-    { count: 3, interval: 2.2, speed: 0.55, kinds: ['swarmer'] },
+    { count: 3, interval: 2.6, speed: 0.6, kinds: ['blade'] },
     { count: 3, interval: 2.6, speed: 0.4, kinds: ['drone', 'armored'] },
     { count: 0, interval: 3, speed: 0.6, kinds: ['drone'], boss: true },
   ],

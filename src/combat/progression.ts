@@ -19,12 +19,12 @@ export interface World {
 
 export const WORLDS: readonly World[] = [
   { id: 'neon-grid', name: 'NEON GRID', color: '#3DF5FF', enemies: ['drone', 'armored'] },
-  { id: 'ember-foundry', name: 'EMBER FOUNDRY', color: '#FF6A1A', enemies: ['swarmer', 'armored'] },
+  { id: 'ember-foundry', name: 'EMBER FOUNDRY', color: '#FF6A1A', enemies: ['swarmer', 'blade', 'armored'] },
   { id: 'storm-peak', name: 'STORM PEAK', color: '#9D8CFF', enemies: ['drone', 'titan'] },
   { id: 'frost-spire', name: 'FROST SPIRE', color: '#9FE8FF', enemies: ['swarmer', 'drone', 'armored'] },
-  { id: 'void-rift', name: 'VOID RIFT', color: '#C04DFF', enemies: ['swarmer', 'armored', 'titan'] },
+  { id: 'void-rift', name: 'VOID RIFT', color: '#C04DFF', enemies: ['swarmer', 'blade', 'armored', 'titan'] },
   { id: 'scrap-wastes', name: 'SCRAP WASTES', color: '#FFB01F', enemies: ['drone', 'armored', 'swarmer'] },
-  { id: 'moon-temple', name: 'MOON TEMPLE', color: '#4DA6FF', enemies: ['swarmer', 'drone', 'armored'] },
+  { id: 'moon-temple', name: 'MOON TEMPLE', color: '#4DA6FF', enemies: ['blade', 'swarmer', 'armored'] },
   { id: 'sky-ruins', name: 'SKY RUINS', color: '#E05CFF', enemies: ['drone', 'armored', 'titan'] },
 ];
 
@@ -118,6 +118,7 @@ export const ENEMY_COINS: Readonly<Record<EnemyKind, number>> = {
   armored: 10,
   swarmer: 4,
   titan: 40,
+  blade: 12,
   boss: 150,
   orb: 0,
   pod: 10,

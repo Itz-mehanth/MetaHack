@@ -51,6 +51,7 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
     { gesture: 'fist', title: 'MAKE A FIST', sub: 'Each fist ignites a katana.' },
     { gesture: 'swing', title: 'SWING HARD', sub: 'A hard swing sends a slash wave.' },
     { gesture: 'cross', title: 'CROSS BOTH BLADES', sub: 'Unleashes an X-STRIKE.' },
+    { gesture: 'swing', title: 'BLOCK THEIR SWING', sub: 'Meet an enemy blade with yours to PARRY.' },
   ],
   psion: [
     { gesture: 'palm', title: 'PALM AT A CRATE', sub: 'Or at an alien. A ring locks on.' },
