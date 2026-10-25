@@ -22,6 +22,7 @@ import {
 import { Bow, MAX_DRAW } from './combat/bow.js';
 import { Armory, TierAura } from './combat/armory.js';
 import { HeroCarousel } from './combat/carousel.js';
+import { applyRealism, loadSurfaceMaps } from './combat/materials.js';
 import { Claws } from './combat/claws.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
@@ -55,7 +56,7 @@ import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
 import { type Phase, Run } from './combat/run.js';
 import { Sfx } from './combat/sfx.js';
-import { createGlowSprite, Flashes, Particles } from './combat/vfx.js';
+import { createGlowSprite, Flashes, getGlowTexture, Particles } from './combat/vfx.js';
 
 type Handedness = 'left' | 'right';
 type Triple = [number, number, number];
@@ -200,6 +201,8 @@ interface Drone {
   bossPhase: number;
   rig: Rig | null;
   stride: number;
+  /** Soft contact shadow on the floor (walkers only). */
+  blob: Mesh | null;
 }
 
 interface Pickup {
@@ -660,6 +663,7 @@ export class CombatSystem extends createSystem({
           bossPhase: 1,
           rig: this.findRig(object),
           stride: 0,
+          blob: ENEMIES[kind].ground ? this.makeBlob() : null,
         });
       }
     }
@@ -708,6 +712,7 @@ export class CombatSystem extends createSystem({
         bossPhase: 1,
         rig: null,
         stride: 0,
+        blob: null,
       });
     }
     for (const kind of ['heal', 'rapid', 'power'] as const) {
@@ -756,6 +761,30 @@ export class CombatSystem extends createSystem({
     this.showMenu('main');
     this.ready = true;
     this.installDebugHooks();
+    void this.loadRealism();
+  }
+
+  /** Swaps flat materials for CC0 PBR surface maps once they have loaded. */
+  private async loadRealism(): Promise<void> {
+    const maps = await loadSurfaceMaps();
+    if (maps == null) return;
+    for (const drone of this.drones) {
+      if (ENEMIES[drone.kind].ground) applyRealism(drone.object, maps, 'skin');
+    }
+    applyRealism(this.root, maps, 'fabric');
+    for (const marker of this.markers.values()) applyRealism(marker, maps, 'fabric');
+  }
+
+  private blobMaterial = new MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.5, depthWrite: false });
+
+  private makeBlob(): Mesh {
+    if (this.blobMaterial.map == null) this.blobMaterial.map = getGlowTexture();
+    const blob = new Mesh(new PlaneGeometry(1, 1), this.blobMaterial);
+    blob.rotation.x = -Math.PI / 2;
+    blob.visible = false;
+    blob.renderOrder = 1;
+    this.root.add(blob);
+    return blob;
   }
 
   private findRig(object: Object3D): Rig | null {
@@ -866,6 +895,7 @@ export class CombatSystem extends createSystem({
       const order = this.run.update(dt);
       if (order) this.spawnDrone(order.kind, order.speed);
       this.updateDrones(dt, time);
+      this.updateBlobs();
       this.updateBolts(dt);
       this.onPhaseChange();
       this.updateCountdown();
@@ -2928,6 +2958,19 @@ export class CombatSystem extends createSystem({
   }
 
   /** `raw` skips the hero damage multiplier (already applied, or environmental). */
+  /** Keeps each walker's contact shadow under its feet. */
+  private updateBlobs(): void {
+    for (const drone of this.drones) {
+      const blob = drone.blob;
+      if (blob == null) continue;
+      blob.visible = drone.state !== 'off' && drone.state !== 'shot';
+      if (!blob.visible) continue;
+      const position = drone.object.position;
+      blob.position.set(position.x, 0.006, position.z);
+      blob.scale.setScalar(ENEMIES[drone.kind].radius * 3.2 * Math.max(0.01, drone.object.scale.x));
+    }
+  }
+
   /** Turns an upright walker to face the player (yaw only). */
   private faceHead(object: Object3D): void {
     object.rotation.set(0, Math.atan2(this.head.x - object.position.x, this.head.z - object.position.z), 0);

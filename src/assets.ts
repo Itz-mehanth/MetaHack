@@ -84,4 +84,10 @@ export default defineAssets({
   'ghost-lintel': createGhost('lintel'),
   'ghost-capstone': createGhost('capstone'),
   'welcome-panel': uikitml('welcome.uikitml', 'Welcome Panel'),
+  // CC0 Poly Haven surface maps (applied at runtime by combat/materials.ts).
+  'tex-metal-color': { url: publicAssetUrl('textures/metal_plate_diffuse_1k.jpg'), type: AssetType.Texture },
+  'tex-metal-normal': { url: publicAssetUrl('textures/metal_plate_nor_gl_1k.jpg'), type: AssetType.Texture },
+  'tex-metal-arm': { url: publicAssetUrl('textures/metal_plate_arm_1k.jpg'), type: AssetType.Texture },
+  'tex-skin-normal': { url: publicAssetUrl('textures/brown_leather_nor_gl_1k.jpg'), type: AssetType.Texture },
+  'tex-fabric-normal': { url: publicAssetUrl('textures/fabric_leather_02_nor_gl_1k.jpg'), type: AssetType.Texture },
 });
