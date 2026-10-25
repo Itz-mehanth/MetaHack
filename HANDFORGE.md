@@ -3,38 +3,46 @@
 Meta VR Start Developer Competition 2026 · Gaming track · New Experience division.
 Submission deadline: **Nov 18, 2026, 12:00 PM PST (Nov 19, 1:30 AM IST)**. Aim to submit by Nov 17.
 
-## The game
-A seated, hands-first spatial puzzle. A 3D target structure floats above a table;
-the player grabs loose pieces with their hands, rotates and positions them, and
-snaps them into place. A correct placement gives a satisfying visual + audio
-payoff. A full session takes 10 minutes or less.
+## The game (pivot, 2026-10-25)
+A standing, in-place MR action game. Drones breach the player's real walls in
+waves; the player fights with hero powers made from their own hands and
+switches hero with a wrist button. Visually loud: emissive bolts, trails,
+lightning, dissolve kills, slow-motion on the last kill of a wave.
+
+All heroes and weapons are **original IP** (no Marvel/third-party names or
+designs). Powers, in build order (cut from the bottom if time runs out):
+1. **Palm blaster**: open palm toward a target fires an energy bolt.
+2. **Energy claws**: fist extends knuckle blades; fast swings slash.
+3. **Storm hammer**: grab and throw; lightning on hit; open hand recalls it.
+4. **Rebound disc**: thrown disc bounces between enemies.
+5. **Light bow**: two-hand draw with an invisible string. Stretch goal.
+
+The earlier block-puzzle prototype (`src/gameplay`, `src/puzzles`,
+`src/puzzle-system.ts`) is parked, not the product.
 
 ## Hard requirements
 - Every core interaction works **without controllers** (hand tracking only).
-  Controllers may work too, but never be required.
-- Seated, small physical space, no locomotion.
-- MR (passthrough, puzzle on a real table) is the headline mode; a reliable
-  fallback must exist when plane detection / hit test is unavailable.
-- Judges must be able to open the deployed URL, understand it, and finish a level within minutes.
+- Standing in place, no locomotion.
+- MR passthrough is the headline mode; enemies spawn from detected walls, with
+  a fallback ring of spawn points when plane/mesh detection is unavailable.
+- Judges open the deployed URL, understand it in seconds, finish a run in minutes.
+- Quest 3 at 72 fps: no full-screen post-processing; fake glow with additive
+  sprites, instanced/pooled particles, no per-frame allocation.
 
 ## MVP scope
 | Feature | Status |
 |---|---|
-| Hand grab, rotate, place, snap | Required |
-| One complete puzzle with a win condition | Required |
-| Tutorial + restart | Required |
-| Works on Quest via deployed HTTPS URL | Required |
-| MR table placement | Target — validate on device early |
-| Three polished levels | After level 1 is solid |
-| Accounts, cloud saves, multiplayer, AI content, backend | Out of scope |
+| Palm blaster + drone enemy + waves + health/score | Day 1 |
+| Energy claws, storm hammer, wrist hero switch, VFX pass | Day 2 |
+| Rebound disc, light bow | Day 2-3, cut first |
+| Title, 30 s tutorial, restart, perf on Quest, video | Day 3 |
+| Accounts, saves, multiplayer, backend | Out of scope |
 
 ## Architecture
-- **Presentation** — UIKitML spatial panels (`public/ui/*.uikitml`): level select, tutorial, progress, pause/restart. Large text, hand-friendly targets.
-- **Gameplay** — pure TypeScript, no Three.js or input imports: puzzle definitions (piece ids, target position/rotation, snap tolerance), placement validation, progression, scoring. Unit-testable on its own.
-- **Interaction** — ECS systems that bridge IWSDK grabbing/hand input to gameplay: release → validate → snap or return, plus feedback.
-- **Runtime** — IWSDK (`iwsdk.config.json` is the project authority).
-
-Puzzle definitions start as local data in `src/puzzles/`. No backend.
+- **Presentation**: UIKitML panels (`public/ui/*.uikitml`): title, wrist hero switcher, HUD, game over.
+- **Gameplay**: pure TypeScript with no Three.js or input imports: wave definitions, enemy stats, damage, scoring. Unit-testable on its own.
+- **Interaction**: ECS systems that read hand joints and poses (palm direction, fist, swing speed) and drive powers, enemies and feedback.
+- **Runtime**: IWSDK (`iwsdk.config.json` is the project authority).
 
 ## How to work
 For every feature:
@@ -49,14 +57,8 @@ For every feature:
 Do not start the next major feature until the current one passes its checks.
 
 ## Schedule
-- Oct 24–26 Foundation (done: scaffold, typecheck, build, starter renders)
-- Oct 27–30 First playable puzzle: grab, snap, win
-- Oct 31–Nov 4 Tutorial, progression, pause/restart, feedback
-- Nov 5–8 MR table placement on Quest + fallback
-- Nov 9–12 Polish, performance, comfort
-- Nov 13–15 Release candidate, feature freeze
-- Nov 16–17 Video (<3 min, public YouTube/Vimeo), screenshots, Devpost text
-- Nov 18 Submit early; no updates during judging
+Compressed to 2-3 days from 2026-10-25, pushing to `main` (auto-deployed on
+Vercel) after every working step and testing on Quest the same day.
 
 ## Windows setup notes
 - Start the dev server with `start-dev.bat` (5-minute startup limit; output goes to `dev-log.txt`). Keep that window open while working; closing it stops the server.
