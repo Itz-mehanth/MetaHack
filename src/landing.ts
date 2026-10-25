@@ -36,8 +36,8 @@ const CSS = `
 const HTML = `
 <div class="card">
   <div class="kicker">Hands-only mixed reality</div>
-  <h1>HANDFORGE</h1>
-  <p class="tag">Your hands are the weapon. Hold the line.</p>
+  <h1>SURGE</h1>
+  <p class="tag"><b>Hands of Heroes</b> &mdash; your hands are the superpower.</p>
   <div class="buttons">
     <button class="vr" id="enter-vr">ENTER VR</button>
     <button class="mr" id="enter-mr">ENTER MR</button>
@@ -58,7 +58,7 @@ const HTML = `
 export function setupLanding(world: World): void {
   const fonts = document.createElement('link');
   fonts.rel = 'stylesheet';
-  fonts.href = 'https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;600&display=swap';
+  fonts.href = 'https://fonts.googleapis.com/css2?family=Bangers&family=Orbitron:wght@700;900&family=Rajdhani:wght@500;600&display=swap';
   document.head.appendChild(fonts);
   const style = document.createElement('style');
   style.textContent = CSS;

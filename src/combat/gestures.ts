@@ -83,3 +83,12 @@ export function isBlastPose(
   const l = Math.max(1e-6, len(d));
   return (n[0] * d[0] + n[1] * d[1] + n[2] * d[2]) / l > minFacing;
 }
+
+/**
+ * Web-shooter pose: index and pinky extended, middle and ring curled into
+ * the palm (thumb is ignored, so both "horns" and the classic flick count).
+ */
+export function isWebPose(hand: HandJoints): boolean {
+  const e = fingerExtension(hand);
+  return e[0] > OPEN_RATIO && e[3] > OPEN_RATIO - 0.1 && e[1] < FIST_RATIO && e[2] < FIST_RATIO;
+}

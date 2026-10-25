@@ -18,9 +18,12 @@ import {
   VisibilityState,
   XRPlane,
 } from '@iwsdk/core';
+import { Bow, MAX_DRAW } from './combat/bow.js';
+import { HeroCarousel } from './combat/carousel.js';
 import { Claws } from './combat/claws.js';
+import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
-import { type HandJoints, isBlastPose, isFist, isOpenPalm } from './combat/gestures.js';
+import { type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { GameMenus } from './combat/menus.js';
@@ -38,6 +41,7 @@ import {
 } from './combat/progression.js';
 import { loadProfile, resetProfile, saveProfile } from './combat/save.js';
 import { applyTheme, setFlash, type Theme, THEMES } from './combat/themes.js';
+import { createCocoon, WebStrand } from './combat/web.js';
 import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
 import { type Phase, Run } from './combat/run.js';
@@ -64,6 +68,15 @@ const RECALL_DELAY = 0.45;
 const PINCH_DISTANCE = 0.03;
 
 type HammerState = 'floating' | 'gripped' | 'docked' | 'flying' | 'returning';
+type WebState = 'idle' | 'flying' | 'tethered' | 'retracting';
+
+const ARROW_GRAVITY = 1.2;
+const NOCK_REACH = 0.15;
+const PINCH_RELEASE = 0.045;
+const WEB_SPEED = 16;
+const WEB_FLIGHT = 0.7;
+const WEB_COOLDOWN = 0.45;
+const YANK_SPEED = 1.3;
 const HOMING_RATE = 3;
 const AIM_SMOOTHING = 0.45;
 const EMERGE_TIME = 0.9;
@@ -108,6 +121,13 @@ interface HandState {
   gauntlet: Gauntlet;
   visualHidden: boolean;
   claws: Claws;
+  web: WebStrand;
+  webState: WebState;
+  webVelocity: Vector3;
+  webTarget: Drone | null;
+  webTime: number;
+  webCooldown: number;
+  wristPrev: Vector3;
   indexTip?: Vector3;
   prevTip: Vector3;
   hasPrevTip: boolean;
@@ -133,13 +153,19 @@ interface Drone {
   portalMaterial: MeshBasicMaterial;
   /** Elapsed time when the hammer last hit it, so one contact = one hit. */
   hammerHitAt: number;
+  /** Seconds left webbed in place. */
+  snare: number;
+  cocoon: Mesh;
 }
 
 interface Bolt {
   object: Group;
   bolt: Object3D;
   crescent: Object3D;
-  kind: 'bolt' | 'crescent';
+  kind: 'bolt' | 'crescent' | 'arrow';
+  arrow: Object3D;
+  pierceLeft: number;
+  gravity: number;
   radius: number;
   damage: number;
   speed: number;
@@ -213,6 +239,15 @@ export class CombatSystem extends createSystem({
   private lastCount = -1;
   private accent = new Color('#3DF5FF');
   private lightningFx!: Lightning;
+  private carousel = new HeroCarousel();
+  private comic!: Onomatopoeia;
+  private comicCooldown = 0;
+  private swipeCooldown = 0;
+  private swipePrev = [new Vector3(), new Vector3()];
+  private swipeValid = [false, false];
+  private bow!: Bow;
+  private drawing = false;
+  private nock = new Vector3();
   private hammer: Object3D | null = null;
   private hammerHead: Object3D | null = null;
   private hammerState: HammerState = 'floating';
@@ -266,6 +301,10 @@ export class CombatSystem extends createSystem({
     this.root.add(this.wrist.group);
     this.wrist.setHero('ARC', CYAN);
     this.lightningFx = new Lightning(this.root);
+    this.bow = new Bow(new Color('#5DFFB0'));
+    this.root.add(this.bow.group);
+    this.root.add(this.carousel.group);
+    this.comic = new Onomatopoeia(this.root);
     this.panel = new Panel();
     this.root.add(this.panel.group);
     this.music = new Music(this.sfx);
@@ -279,6 +318,7 @@ export class CombatSystem extends createSystem({
       preview: (worldId) => this.setTheme(worldId),
       denied: () => this.sfx.denied(),
       bought: () => this.sfx.coin(),
+      focus: (index) => this.focusHero(index),
       resetProgress: () => {
         this.profile = resetProfile();
         this.menus.setProfile(this.profile);
@@ -299,6 +339,7 @@ export class CombatSystem extends createSystem({
       this.root.add(gauntlet.group);
       const claws = new Claws(handedness, PINK);
       this.root.add(claws.group);
+      const web = new WebStrand(this.root, PINK);
       const beamMaterial = new MeshBasicMaterial({
         color: CYAN,
         transparent: true,
@@ -326,6 +367,13 @@ export class CombatSystem extends createSystem({
         gauntlet,
         visualHidden: false,
         claws,
+        web,
+        webState: 'idle',
+        webVelocity: new Vector3(),
+        webTarget: null,
+        webTime: 0,
+        webCooldown: 0,
+        wristPrev: new Vector3(),
         prevTip: new Vector3(),
         hasPrevTip: false,
         slashCooldown: 0,
@@ -348,7 +396,16 @@ export class CombatSystem extends createSystem({
       depthWrite: false,
       toneMapped: false,
     });
-    for (let i = 0; i < 28; i += 1) {
+    // Flying arrow: shaft and head along +Z (bolts look along their velocity).
+    const arrowShaftGeometry = new CylinderGeometry(0.004, 0.004, 0.55, 6);
+    arrowShaftGeometry.rotateX(Math.PI / 2);
+    arrowShaftGeometry.translate(0, 0, -0.25);
+    const arrowShaftMaterial = new MeshBasicMaterial({ color: '#E8FFF4', toneMapped: false });
+    const arrowHeadGeometry = new CylinderGeometry(0, 0.016, 0.06, 4);
+    arrowHeadGeometry.rotateX(Math.PI / 2);
+    arrowHeadGeometry.translate(0, 0, 0.03);
+    const arrowHeadMaterial = new MeshBasicMaterial({ color: '#5DFFB0', toneMapped: false });
+    for (let i = 0; i < 40; i += 1) {
       const object = new Group();
       object.name = `Bolt-${i}`;
       const boltVisual = new Group();
@@ -361,13 +418,23 @@ export class CombatSystem extends createSystem({
       const outer = new Mesh(crescentGeometry, crescentSheath);
       outer.scale.set(1, 1, 2.5);
       crescent.add(inner, outer);
-      object.add(boltVisual, crescent);
+      const arrow = new Group();
+      const arrowShaft = new Mesh(arrowShaftGeometry, arrowShaftMaterial);
+      const arrowHead = new Mesh(arrowHeadGeometry, arrowHeadMaterial);
+      const arrowGlow = createGlowSprite('#5DFFB0', 0.8);
+      arrowGlow.scale.setScalar(0.12);
+      arrowGlow.position.z = 0.05;
+      arrow.add(arrowShaft, arrowHead, arrowGlow);
+      object.add(boltVisual, crescent, arrow);
       object.visible = false;
       this.root.add(object);
       this.bolts.push({
         object,
         bolt: boltVisual,
         crescent,
+        arrow,
+        pierceLeft: 0,
+        gravity: 0,
         kind: 'bolt',
         radius: 0.06,
         damage: 1,
@@ -426,6 +493,7 @@ export class CombatSystem extends createSystem({
         const i = index++;
         const object = await this.world.assets.instantiate(ENEMY_ASSET[kind]);
         object.name = `Enemy-${kind}-${n}`;
+        addOutline(object, 0.1, (m) => m.name === 'Body');
         object.visible = false;
         this.root.add(object);
         const portalMaterial = new MeshBasicMaterial({
@@ -436,6 +504,8 @@ export class CombatSystem extends createSystem({
           side: DoubleSide,
           depthWrite: false,
         });
+        const cocoon = createCocoon();
+        this.root.add(cocoon);
         const portal = new Mesh(portalGeometry, portalMaterial);
         portal.name = `Portal-${i}`;
         portal.visible = false;
@@ -456,6 +526,8 @@ export class CombatSystem extends createSystem({
           portal,
           portalMaterial,
           hammerHitAt: -10,
+          snare: 0,
+          cocoon,
         });
       }
     }
@@ -464,6 +536,13 @@ export class CombatSystem extends createSystem({
     this.hammer.visible = false;
     this.root.add(this.hammer);
     this.hammerHead = this.hammer.getObjectByName('Head') ?? this.hammer;
+    addOutline(this.hammer, 0.08, (m) => m.parent?.name === 'Head' || m.name === 'Handle');
+    for (const hero of HEROES) {
+      const figure = await this.world.assets.instantiate(`hero-${hero.id}`);
+      const pedestal = await this.world.assets.instantiate('pedestal');
+      addOutline(figure, 0.07, (m) => (m.material as { name?: string }).name !== 'accent');
+      this.carousel.add(hero.id, figure, pedestal);
+    }
     this.showMenu('main');
     this.ready = true;
   }
@@ -508,6 +587,8 @@ export class CombatSystem extends createSystem({
     this.updateHands(realDt);
     this.updateClaws(realDt);
     this.updateHammer(realDt, time);
+    this.updateBow();
+    this.updateWebs(realDt, time);
 
     if (!this.paused) {
       const order = this.run.update(dt);
@@ -524,7 +605,11 @@ export class CombatSystem extends createSystem({
       this.particles.update(dt);
       this.flashes.update(dt);
       this.lightningFx.update(dt);
+      this.comic.update(realDt);
     }
+    this.comicCooldown -= realDt;
+    this.carousel.update(realDt, time, this.head);
+    this.updateSwipe(realDt);
     if (this.damageMaterial.opacity > 0) {
       this.damageMaterial.opacity = Math.max(0, this.damageMaterial.opacity - realDt * 1.2);
       this.damage.visible = this.damageMaterial.opacity > 0;
@@ -692,9 +777,11 @@ export class CombatSystem extends createSystem({
 
   private applySkin(): void {
     this.accent.set(equippedColor(this.profile, this.hero));
+    this.bow.setColor(this.accent);
     for (const hand of this.hands) {
       hand.gauntlet.setAccent(this.accent);
       hand.claws.setColor(this.accent);
+      hand.web.setColor(this.accent);
       hand.beamMaterial.color.copy(this.accent);
       hand.glow.material.color.copy(this.accent);
     }
@@ -740,9 +827,68 @@ export class CombatSystem extends createSystem({
     this.world.camera.getWorldDirection(this.forward);
     this.menus.open(screen);
     this.panel.setContent(this.menus.content());
-    this.panel.place(this.head, this.forward);
+    this.placePanel();
     this.panel.show();
+    this.syncCarousel();
     if (screen !== 'pause') this.music.play('menu');
+  }
+
+  /** The hero screen sits low and close so the 3D heroes stay in view. */
+  private placePanel(): void {
+    if (this.menus.screen === 'heroes') this.panel.place(this.head, this.forward, 0.42, 0.58);
+    else this.panel.place(this.head, this.forward);
+  }
+
+  /** Shows the hero carousel only on the hero screen, in sync with its focus. */
+  private syncCarousel(): void {
+    const on = this.panel.visible && this.menus.screen === 'heroes';
+    if (on && !this.carousel.visible) {
+      this.carousel.setFocus(this.menus.heroFocus);
+      this.carousel.show(this.head, this.forward);
+    } else if (!on && this.carousel.visible) this.carousel.hide();
+    if (!on) return;
+    this.carousel.setFocus(this.menus.heroFocus);
+    for (const hero of HEROES) {
+      this.carousel.setInfo(hero.id, hero.name, this.menus.heroStatus(hero.id), equippedColor(this.profile, hero.id));
+    }
+  }
+
+  /** Spotlight a hero in the carousel with a little show of their power. */
+  private focusHero(index: number): void {
+    this.carousel.setFocus(index);
+    const hero = HEROES[index];
+    const color = new Color(equippedColor(this.profile, hero.id));
+    this.carousel.focusPoint(this.v1);
+    this.flashes.spawn(this.v1, color, 0.1, 0.8, 0.4);
+    this.particles.burst(this.v1, color, 40, 1.5, 0.6, this.v2);
+    this.comic.random(hero.id, this.v1.setY(this.v1.y + 0.5), color, 0.45);
+    this.sfx.swap();
+  }
+
+  /** Sideways hand swipes spin the carousel. */
+  private updateSwipe(dt: number): void {
+    this.swipeCooldown -= dt;
+    if (!this.carousel.visible || dt <= 0) return;
+    this.v3.set(-this.forward.z, 0, this.forward.x).normalize();
+    for (let i = 0; i < this.hands.length; i += 1) {
+      const hand = this.hands[i];
+      if (!hand.pose.tracked || hand.indexTip == null) {
+        this.swipeValid[i] = false;
+        continue;
+      }
+      const prev = this.swipePrev[i];
+      const speed = this.v4.subVectors(hand.indexTip, prev).dot(this.v3) / dt;
+      const valid = this.swipeValid[i];
+      prev.copy(hand.indexTip);
+      this.swipeValid[i] = true;
+      if (!valid || this.swipeCooldown > 0 || Math.abs(speed) < 1.0) continue;
+      if (hand.indexTip.distanceTo(this.head) > 0.8) continue;
+      if (this.menus.moveFocus(speed < 0 ? 1 : -1)) {
+        this.swipeCooldown = 0.45;
+        this.focusHero(this.menus.heroFocus);
+        this.panel.setContent(this.menus.content());
+      }
+    }
   }
 
   /** Touch feedback for a panel press, then the menu action and a redraw. */
@@ -750,8 +896,15 @@ export class CombatSystem extends createSystem({
     this.flashes.spawn(point, this.accent, 0.02, 0.14, 0.2);
     this.particles.burst(point, this.accent, 10, 0.4, 0.2, this.v2);
     this.sfx.click();
+    const before = this.menus.screen;
     handle();
-    if (this.panel.visible) this.panel.setContent(this.menus.content());
+    if (!this.panel.visible) {
+      this.syncCarousel();
+      return;
+    }
+    if (this.menus.screen !== before) this.placePanel();
+    this.panel.setContent(this.menus.content());
+    this.syncCarousel();
   }
 
   private profileChanged(): void {
@@ -842,6 +995,236 @@ export class CombatSystem extends createSystem({
       const flicker = this.lightning * (0.55 + 0.45 * Math.sin(time * 60));
       setFlash(this.arena, flicker);
     }
+  }
+
+  // ---------------------------------------------------------------- ORION
+
+  /** Midpoint of thumb and index tips into `out`; returns their distance. */
+  private pinchPoint(index: number, out: Vector3): number {
+    const pose = this.hands[index].pose;
+    pose.position(4, this.v1);
+    pose.position(9, out);
+    const distance = this.v1.distanceTo(out);
+    out.add(this.v1).multiplyScalar(0.5);
+    return distance;
+  }
+
+  /** Bow in one hand, draw the string with a pinch of the other. */
+  private updateBow(): void {
+    const active = this.powersLive && this.hero === 'orion';
+    const bowIndex = this.profile.settings.leftHanded ? 1 : 0;
+    const drawIndex = 1 - bowIndex;
+    const bowHand = this.hands[bowIndex];
+    if (!active || !bowHand.tracked) {
+      this.bow.group.visible = false;
+      this.drawing = false;
+      return;
+    }
+    // Grip in the finger tube, as with the hammer.
+    const pose = bowHand.pose;
+    pose.position(7, this.v1);
+    pose.position(22, this.v2);
+    this.v3.addVectors(this.v1, this.v2);
+    pose.position(12, this.v1);
+    pose.position(17, this.v2);
+    this.v3.add(this.v1).add(this.v2).multiplyScalar(0.25).lerp(bowHand.gauntlet.palmPoint, 0.35);
+
+    const drawHand = this.hands[drawIndex];
+    if (drawHand.tracked) {
+      const pinch = this.pinchPoint(drawIndex, this.nock);
+      if (!this.drawing && pinch < PINCH_DISTANCE && this.nock.distanceTo(this.bow.restNock) < NOCK_REACH) {
+        this.drawing = true;
+        this.sfx.creak();
+      }
+      if (this.drawing) {
+        const draw = this.bow.update(pose, this.v3, this.nock);
+        if (pinch > PINCH_RELEASE) {
+          this.drawing = false;
+          if (draw > 0.1) this.loose(draw);
+        }
+        return;
+      }
+    } else this.drawing = false;
+    this.bow.update(pose, this.v3, null);
+  }
+
+  private loose(draw: number): void {
+    const full = MAX_DRAW * (1 - 0.08 * this.level('orion-draw'));
+    const power = Math.min(1, draw / full);
+    const fullDraw = power >= 0.95;
+    const speed = 10 + 18 * power;
+    const extra = fullDraw ? this.level('orion-volley') : 0;
+    for (let k = 0; k <= extra; k += 1) {
+      const bolt = this.bolts.find((b) => !b.active);
+      if (bolt == null) break;
+      this.v4.copy(this.bow.aim);
+      if (k > 0) {
+        this.v1.set(0, 1, 0).cross(this.v4).normalize();
+        this.v4.addScaledVector(this.v1, (k % 2 === 1 ? 1 : -1) * 0.07 * Math.ceil(k / 2)).normalize();
+      }
+      bolt.kind = 'arrow';
+      bolt.radius = 0.05;
+      bolt.damage = fullDraw ? 2 : 1;
+      bolt.speed = speed;
+      bolt.pierceLeft = this.level('orion-pierce') + (fullDraw ? 1 : 0);
+      bolt.gravity = ARROW_GRAVITY * (1 - power * 0.6);
+      bolt.target = null;
+      if (this.profile.settings.aimAssist) {
+        let best = AIM_ASSIST_COS;
+        for (const drone of this.drones) {
+          if (drone.state === 'off') continue;
+          const cos = this.v2.subVectors(drone.object.position, this.bow.riser).normalize().dot(this.v4);
+          if (cos > best) {
+            best = cos;
+            bolt.target = drone;
+          }
+        }
+      }
+      bolt.bolt.visible = false;
+      bolt.crescent.visible = false;
+      bolt.arrow.visible = true;
+      bolt.active = true;
+      bolt.life = BOLT_LIFE * 1.5;
+      bolt.position.copy(this.bow.riser).addScaledVector(this.v4, 0.1);
+      bolt.previous.copy(bolt.position);
+      bolt.velocity.copy(this.v4).multiplyScalar(speed);
+      bolt.object.up.set(0, 1, 0);
+      bolt.object.position.copy(bolt.position);
+      bolt.object.visible = true;
+    }
+    this.flashes.spawn(this.bow.riser, this.accent, 0.05, fullDraw ? 0.5 : 0.25, 0.2);
+    this.sfx.twang(power);
+  }
+
+  // ---------------------------------------------------------------- WEAVER
+
+  /** Web origin (just past the wrist) and aim (wrist to knuckles). */
+  private webAim(index: number, origin: Vector3, direction: Vector3): void {
+    const pose = this.hands[index].pose;
+    pose.position(J.wrist, origin);
+    pose.position(J.middleProx, direction);
+    direction.sub(origin).normalize();
+    origin.addScaledVector(direction, 0.04);
+  }
+
+  private updateWebs(dt: number, time: number): void {
+    const active = this.powersLive && this.hero === 'weaver';
+    for (let index = 0; index < this.hands.length; index += 1) {
+      const hand = this.hands[index];
+      hand.webCooldown -= dt;
+      if (!active || !hand.tracked) {
+        hand.web.hide();
+        hand.webState = 'idle';
+        hand.webTarget = null;
+        continue;
+      }
+      this.webAim(index, this.v3, this.v4);
+      // Wrist velocity, for the yank.
+      hand.pose.position(J.wrist, this.v1);
+      if (dt > 0) this.v2.subVectors(this.v1, hand.wristPrev).divideScalar(dt);
+      else this.v2.set(0, 0, 0);
+      hand.wristPrev.copy(this.v1);
+      hand.webTime += dt;
+
+      switch (hand.webState) {
+        case 'idle':
+          hand.web.hide();
+          if (hand.webCooldown <= 0 && isWebPose(hand.joints)) this.shootWeb(index);
+          break;
+        case 'flying': {
+          this.v1.copy(hand.web.head);
+          hand.web.head.addScaledVector(hand.webVelocity, dt);
+          let hit: Drone | null = null;
+          for (const drone of this.drones) {
+            if (drone.state === 'off' || drone.state === 'emerging') continue;
+            if (this.segmentHits(this.v1, hand.web.head, drone.object.position, ENEMIES[drone.kind].radius + 0.06)) {
+              hit = drone;
+              break;
+            }
+          }
+          if (hit) {
+            hit.snare = 2.5 + 0.8 * this.level('weaver-snare');
+            hand.webTarget = hit;
+            hand.webState = 'tethered';
+            hand.webTime = 0;
+            this.particles.burst(hit.object.position, WHITE, 20, 1.5, 0.3, this.v1);
+            this.sfx.splat();
+            this.damageDrone(hit, 1);
+          } else if (hand.webTime > WEB_FLIGHT) {
+            hand.webState = 'retracting';
+          }
+          hand.web.draw(this.v3, time, 1);
+          break;
+        }
+        case 'tethered': {
+          const target = hand.webTarget;
+          if (target == null || target.state === 'off' || target.snare <= 0) {
+            hand.webState = 'retracting';
+            hand.webTarget = null;
+            break;
+          }
+          hand.web.head.copy(target.object.position);
+          hand.web.draw(this.v3, time, 0.3);
+          // Yank: fist and pull back toward the body.
+          this.v1.subVectors(this.head, target.object.position).normalize();
+          if (isFist(hand.joints) && this.v2.dot(this.v1) > YANK_SPEED) this.yank(hand, target);
+          break;
+        }
+        case 'retracting': {
+          this.v1.subVectors(this.v3, hand.web.head);
+          const step = 25 * dt;
+          if (this.v1.length() <= step) {
+            hand.webState = 'idle';
+            hand.web.hide();
+            break;
+          }
+          hand.web.head.addScaledVector(this.v1.normalize(), step);
+          hand.web.draw(this.v3, time, 0.6);
+          break;
+        }
+      }
+    }
+  }
+
+  private shootWeb(index: number): void {
+    const hand = this.hands[index];
+    this.webAim(index, this.v3, this.v4);
+    // Gentle aim assist toward the most centred enemy.
+    if (this.profile.settings.aimAssist) {
+      let best = 0.97;
+      for (const drone of this.drones) {
+        if (drone.state === 'off' || drone.state === 'emerging') continue;
+        const cos = this.v1.subVectors(drone.object.position, this.v3).normalize().dot(this.v4);
+        if (cos > best) {
+          best = cos;
+          this.v2.copy(this.v1);
+        }
+      }
+      if (best > 0.97) this.v4.copy(this.v2);
+    }
+    hand.web.head.copy(this.v3);
+    hand.webVelocity.copy(this.v4).multiplyScalar(WEB_SPEED * (1 + 0.15 * this.level('weaver-range')));
+    hand.webState = 'flying';
+    hand.webTime = 0;
+    hand.webCooldown = WEB_COOLDOWN;
+    this.sfx.thwip();
+  }
+
+  /** Rips a webbed enemy apart; the blast hurts enemies around it. */
+  private yank(hand: HandState, target: Drone): void {
+    const damage = 3 + this.level('weaver-yank');
+    this.v1.copy(target.object.position);
+    this.sfx.yank();
+    this.flashes.spawn(this.v1, this.accent, 0.1, 0.9, 0.3);
+    this.particles.burst(this.v1, WHITE, 40, 3, 0.5, this.v2);
+    target.snare = 0;
+    this.damageDrone(target, damage);
+    for (const drone of this.drones) {
+      if (drone === target || drone.state === 'off') continue;
+      if (drone.object.position.distanceTo(this.v1) < 0.9) this.damageDrone(drone, 2);
+    }
+    hand.webTarget = null;
+    hand.webState = 'retracting';
   }
 
   // ---------------------------------------------------------------- TEMPEST
@@ -1129,6 +1512,9 @@ export class CombatSystem extends createSystem({
     bolt.target = null;
     bolt.bolt.visible = false;
     bolt.crescent.visible = true;
+    bolt.arrow.visible = false;
+    bolt.pierceLeft = 99;
+    bolt.gravity = 0;
     bolt.crescent.scale.setScalar(1);
     bolt.active = true;
     bolt.life = BOLT_LIFE;
@@ -1168,6 +1554,9 @@ export class CombatSystem extends createSystem({
     bolt.speed = BOLT_SPEED;
     bolt.bolt.visible = true;
     bolt.crescent.visible = false;
+    bolt.arrow.visible = false;
+    bolt.pierceLeft = 0;
+    bolt.gravity = 0;
     bolt.active = true;
     bolt.life = BOLT_LIFE;
     bolt.position.copy(origin);
@@ -1183,6 +1572,7 @@ export class CombatSystem extends createSystem({
 
   /** Turns a bolt toward its target by `amount` (1 = straight at it). */
   private steer(bolt: Bolt, amount: number): void {
+    if (bolt.gravity > 0 && bolt.target == null) return;
     const target = bolt.target;
     if (target == null) return;
     const point = target.state === 'off' ? null : target.object.position;
@@ -1203,6 +1593,7 @@ export class CombatSystem extends createSystem({
         continue;
       }
       this.steer(bolt, Math.min(1, dt * HOMING_RATE));
+      if (bolt.gravity > 0) bolt.velocity.y -= bolt.gravity * dt;
       bolt.previous.copy(bolt.position);
       bolt.position.addScaledVector(bolt.velocity, dt);
       bolt.object.position.copy(bolt.position);
@@ -1210,7 +1601,7 @@ export class CombatSystem extends createSystem({
       bolt.object.lookAt(this.v1);
       this.v2.set(0, 0, 0);
       const crescent = bolt.kind === 'crescent';
-      this.particles.emit(bolt.previous, this.v2, crescent ? PINK : CYAN, crescent ? 0.3 : 0.18, 0);
+      this.particles.emit(bolt.previous, this.v2, bolt.kind === 'bolt' ? CYAN : this.accent, crescent ? 0.3 : 0.18, 0);
       if (crescent) bolt.crescent.scale.setScalar(1 + (BOLT_LIFE - bolt.life) * 1.2);
 
 
@@ -1219,11 +1610,13 @@ export class CombatSystem extends createSystem({
         const radius = ENEMIES[drone.kind].radius + bolt.radius;
         if (this.segmentHits(bolt.previous, bolt.position, drone.object.position, radius)) {
           this.damageDrone(drone, bolt.damage);
-          // Crescents cut through everything in their path.
-          if (!crescent) {
-            this.retireBolt(bolt);
-            break;
+          // Crescents and piercing arrows cut through what they hit.
+          if (bolt.pierceLeft > 0) {
+            bolt.pierceLeft -= 1;
+            continue;
           }
+          this.retireBolt(bolt);
+          break;
         }
       }
     }
@@ -1335,6 +1728,16 @@ export class CombatSystem extends createSystem({
       }
 
       const def = ENEMIES[drone.kind];
+      if (drone.snare > 0) {
+        drone.snare = Math.max(0, drone.snare - dt);
+        drone.cocoon.visible = drone.snare > 0;
+        drone.cocoon.position.copy(object.position);
+        drone.cocoon.scale.setScalar(def.radius * 1.35 * (1 + Math.sin(time * 6) * 0.04));
+        drone.cocoon.rotation.y += dt * 0.8;
+        if (drone.state === 'charge') drone.t -= dt;
+        object.position.x += (Math.random() - 0.5) * 0.004;
+        continue;
+      }
       if (drone.state === 'approach') {
         // Hover point: in front of the face, offset so drones fan out.
         this.v1.copy(this.head).addScaledVector(this.forward, 0.3);
@@ -1366,6 +1769,8 @@ export class CombatSystem extends createSystem({
         this.damageMaterial.opacity = 0.55;
         this.damage.visible = true;
         this.sfx.hurt();
+        this.v1.copy(this.head).addScaledVector(this.forward, 0.6);
+        this.comic.random('hurt', this.v1, MAGENTA, 0.3);
       }
     }
   }
@@ -1379,7 +1784,13 @@ export class CombatSystem extends createSystem({
       return;
     }
     const last = this.run.kill(drone.kind);
-    this.explodeDrone(drone, last || drone.kind === 'titan');
+    const big = last || drone.kind === 'titan';
+    // Comic word for the kill, rate-limited so swarms don't flood the view.
+    if (big || this.comicCooldown <= 0) {
+      this.comicCooldown = 0.35;
+      this.comic.random(big ? 'big' : this.hero, drone.object.position, big ? GOLD : this.accent, big ? 0.6 : 0.35);
+    }
+    this.explodeDrone(drone, big);
     if (last) this.slowmo = SLOWMO_SECONDS;
   }
 
@@ -1394,6 +1805,8 @@ export class CombatSystem extends createSystem({
     drone.state = 'off';
     drone.object.visible = false;
     drone.eye.scale.setScalar(1);
+    drone.snare = 0;
+    drone.cocoon.visible = false;
   }
 
   /** Removes an enemy silently (restart or quit). */
@@ -1402,6 +1815,8 @@ export class CombatSystem extends createSystem({
     drone.object.visible = false;
     drone.portal.visible = false;
     drone.eye.scale.setScalar(1);
+    drone.snare = 0;
+    drone.cocoon.visible = false;
   }
 
   // ---------------------------------------------------------------- phases

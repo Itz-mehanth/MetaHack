@@ -180,6 +180,34 @@ export class Sfx {
     this.tone('square', 990, 1320, 0.1, 0.08, 0.08);
   }
 
+  /** Bowstring being drawn. */
+  creak(): void {
+    this.tone('triangle', 120, 220, 0.5, 0.08);
+  }
+
+  /** Arrow released; `power` 0..1 brightens it. */
+  twang(power: number): void {
+    this.tone('triangle', 180 + power * 120, 90, 0.25, 0.25);
+    this.hissHigh(0.15 + power * 0.15, 0.2 + power * 0.25);
+  }
+
+  /** Web fired. */
+  thwip(): void {
+    this.hissHigh(0.12, 0.35);
+    this.tone('sine', 1600, 500, 0.08, 0.12);
+  }
+
+  /** Web sticks to something. */
+  splat(): void {
+    this.hiss(0.12, 1200, 0.35);
+  }
+
+  /** Webbed enemy ripped apart. */
+  yank(): void {
+    this.tone('sawtooth', 120, 600, 0.15, 0.25);
+    this.hiss(0.4, 3000, 0.5);
+  }
+
   /** Hammer smacks into a hand. */
   catchHammer(): void {
     this.tone('square', 180, 90, 0.12, 0.25);

@@ -1,6 +1,7 @@
 import { AssetType, defineAssets } from '@iwsdk/core';
 import { createArena } from './scene-assets/arena.scene-asset.js';
 import { createCore, createDrone, createHammer, createSwarmer, createTitan } from './scene-assets/combat.scene-asset.js';
+import { createHeroFigure, createPedestal } from './scene-assets/heroes.scene-asset.js';
 import {
   createForgePlate,
   createGhost,
@@ -28,6 +29,12 @@ export default defineAssets({
   swarmer: createSwarmer(),
   titan: createTitan(),
   hammer: createHammer(),
+  'hero-arc': createHeroFigure('arc'),
+  'hero-talon': createHeroFigure('talon'),
+  'hero-tempest': createHeroFigure('tempest'),
+  'hero-orion': createHeroFigure('orion'),
+  'hero-weaver': createHeroFigure('weaver'),
+  pedestal: createPedestal(),
   core: createCore(),
   'work-table': createWorkTable(),
   'forge-plate': createForgePlate(),

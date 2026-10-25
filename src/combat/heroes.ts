@@ -11,4 +11,4 @@ export type HeroId = (typeof HEROES)[number]['id'];
 export type Hero = (typeof HEROES)[number];
 
 /** Heroes whose powers are implemented; others show as coming soon. */
-export const PLAYABLE: readonly HeroId[] = ['arc', 'talon', 'tempest'];
+export const PLAYABLE: readonly HeroId[] = ['arc', 'talon', 'tempest', 'orion', 'weaver'];

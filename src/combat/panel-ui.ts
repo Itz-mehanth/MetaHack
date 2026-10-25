@@ -119,13 +119,16 @@ export class Panel {
     this.dirty = true;
   }
 
-  /** Floats the panel at arm's reach in front of `head`, tilted toward it. */
-  place(head: Vector3, forward: Vector3): void {
+  /**
+   * Floats the panel at arm's reach in front of `head`, tilted toward it.
+   * `drop` lowers it (e.g. to keep 3D content above it visible).
+   */
+  place(head: Vector3, forward: Vector3, distance = 0.5, drop = 0.18): void {
     this.flat.set(forward.x, 0, forward.z);
     if (this.flat.lengthSq() < 1e-4) this.flat.set(0, 0, -1);
     this.flat.normalize();
-    this.group.position.copy(head).addScaledVector(this.flat, 0.5);
-    this.group.position.y = head.y - 0.18;
+    this.group.position.copy(head).addScaledVector(this.flat, distance);
+    this.group.position.y = head.y - drop;
     this.local.copy(head);
     this.local.y -= 0.05;
     this.group.lookAt(this.local);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type HandJoints, isBlastPose, isFist, isOpenPalm, palmNormal } from './gestures.js';
+import { type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose, palmNormal } from './gestures.js';
 import { STAGES } from './progression.js';
 import { Run } from './run.js';
 
@@ -46,6 +46,20 @@ function mirror(hand: HandJoints): HandJoints {
 const HEAD = [0, 1.5, 0] as const;
 
 describe('gestures', () => {
+  it('detects the web pose: index and pinky out, middle and ring curled', () => {
+    const open = rightHand(false);
+    const fist = rightHand(true);
+    const web: HandJoints = {
+      ...open,
+      tips: [open.tips[0], fist.tips[1], fist.tips[2], open.tips[3]],
+    };
+    expect(isWebPose(web)).toBe(true);
+    expect(isWebPose(open)).toBe(false);
+    expect(isWebPose(fist)).toBe(false);
+    expect(isOpenPalm(web)).toBe(false);
+    expect(isFist(web)).toBe(false);
+  });
+
   it('classifies open palm and fist', () => {
     expect(isOpenPalm(rightHand(false))).toBe(true);
     expect(isFist(rightHand(false))).toBe(false);

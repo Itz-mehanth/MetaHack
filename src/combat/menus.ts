@@ -36,6 +36,8 @@ export interface MenuActions {
   denied(): void;
   /** Feedback for a purchase. */
   bought(): void;
+  /** Carousel focus moved to hero `index`. */
+  focus(index: number): void;
   resetProgress(): void;
 }
 
@@ -62,6 +64,8 @@ function totalStars(profile: Profile): number {
 export class GameMenus {
   screen: Screen = 'main';
   hero: HeroId = 'arc';
+  /** Hero under the carousel spotlight. */
+  heroFocus = 0;
   private worldTab = 0;
   private garageHero: HeroId = 'arc';
   private confirmReset = false;
@@ -82,6 +86,7 @@ export class GameMenus {
     this.screen = screen;
     this.confirmReset = false;
     if (screen === 'stages') this.actions.preview(WORLDS[this.worldTab].id);
+    if (screen === 'heroes') this.heroFocus = Math.max(0, HEROES.findIndex((h) => h.id === this.hero));
     if (screen === 'main' || screen === 'heroes' || screen === 'garage') this.actions.preview('neon-grid');
   }
 
@@ -123,8 +128,8 @@ export class GameMenus {
     const hero = HEROES.find((h) => h.id === this.hero)!;
     const next = this.nextStage();
     return {
-      title: 'HANDFORGE',
-      subtitle: 'Hand-powered hero combat',
+      title: 'SURGE',
+      subtitle: 'Hands of Heroes',
       coins: this.profile.coins,
       accent,
       widgets: [
@@ -182,30 +187,53 @@ export class GameMenus {
     };
   }
 
-  private heroesScreen(accent: string): PanelContent {
-    const widgets: Widget[] = [BACK];
-    HEROES.forEach((hero, i) => {
-      const owned = this.profile.heroes.includes(hero.id);
-      const playable = PLAYABLE.includes(hero.id);
-      const price = HERO_PRICE[hero.id];
-      widgets.push({
-        id: `hero:${hero.id}`,
-        kind: 'tile',
-        x: 64 + i * 298,
-        y: 250,
-        w: 280,
-        h: 660,
-        label: hero.name,
-        sub: hero.power.toUpperCase(),
-        detail: hero.how.replace(/, /g, ',\n'),
-        color: equippedColor(this.profile, hero.id),
-        selected: hero.id === this.hero,
-        disabled: !playable,
-        badge: !playable ? 'SOON' : hero.id === this.hero ? 'SELECTED' : owned ? 'SELECT' : `${price} C`,
-        size: 40,
-      });
-    });
-    return { title: 'HEROES', subtitle: 'Buy heroes with coins from battle', coins: this.profile.coins, accent, widgets };
+  /** Status line for a hero in the carousel. */
+  heroStatus(id: HeroId): string {
+    if (!PLAYABLE.includes(id)) return 'COMING SOON';
+    if (id === this.hero) return 'SELECTED';
+    return this.profile.heroes.includes(id) ? 'READY' : `UNLOCK ${HERO_PRICE[id]} C`;
+  }
+
+  /** Moves the carousel focus; returns true if it changed. */
+  moveFocus(direction: number): boolean {
+    const next = Math.max(0, Math.min(HEROES.length - 1, this.heroFocus + direction));
+    if (next === this.heroFocus) return false;
+    this.heroFocus = next;
+    return true;
+  }
+
+  private heroesScreen(_accent: string): PanelContent {
+    const hero = HEROES[this.heroFocus];
+    const color = equippedColor(this.profile, hero.id);
+    const owned = this.profile.heroes.includes(hero.id);
+    const playable = PLAYABLE.includes(hero.id);
+    const price = HERO_PRICE[hero.id];
+    const pick = !playable ? 'COMING SOON' : hero.id === this.hero ? 'SELECTED - TAP TO PLAY' : owned ? 'SELECT HERO' : `UNLOCK FOR ${price} C`;
+    return {
+      title: 'CHOOSE YOUR HERO',
+      subtitle: 'Swipe your hand sideways, or use the arrows',
+      coins: this.profile.coins,
+      accent: color,
+      widgets: [
+        BACK,
+        { id: 'hero-prev', x: 64, y: 250, w: 220, h: 520, label: '<', size: 110, disabled: this.heroFocus === 0, color },
+        {
+          id: 'hero-info',
+          kind: 'tile',
+          x: 310,
+          y: 250,
+          w: 980,
+          h: 520,
+          label: hero.name,
+          sub: hero.power.toUpperCase(),
+          detail: `${hero.how}\n\n${this.heroStatus(hero.id)}`,
+          color,
+          size: 84,
+        },
+        { id: 'hero-next', x: 1316, y: 250, w: 220, h: 520, label: '>', size: 110, disabled: this.heroFocus === HEROES.length - 1, color },
+        { id: 'hero-pick', x: 310, y: 800, w: 980, h: 140, label: pick, selected: playable, disabled: !playable, color, size: 48 },
+      ],
+    };
   }
 
   private stagesScreen(): PanelContent {
@@ -459,18 +487,26 @@ export class GameMenus {
       case 'howto':
         this.open('howto');
         return;
-      case 'hero': {
-        const id = arg as HeroId;
+      case 'hero-prev':
+      case 'hero-next':
+        if (this.moveFocus(kind === 'hero-prev' ? -1 : 1)) this.actions.focus(this.heroFocus);
+        return;
+      case 'hero-pick': {
+        const id = HEROES[this.heroFocus].id;
+        if (!PLAYABLE.includes(id)) return;
+        if (id === this.hero && p.heroes.includes(id)) {
+          this.handle({ ...event, id: 'play' });
+          return;
+        }
         if (!p.heroes.includes(id)) {
           if (!buyHero(p, id)) {
             this.actions.denied();
             return;
           }
           this.actions.bought();
-          this.actions.changed();
         }
         this.hero = id;
-        this.open('main');
+        this.actions.changed();
         return;
       }
       case 'world':
