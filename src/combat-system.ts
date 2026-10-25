@@ -17,7 +17,7 @@ import {
   XRPlane,
 } from '@iwsdk/core';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
-import { type HandJoints, isBlastPose, palmCenter, palmNormal } from './combat/gestures.js';
+import { type HandJoints, isBlastPose } from './combat/gestures.js';
 import { Hud } from './combat/hud.js';
 import { type Phase, Run } from './combat/run.js';
 import { Sfx } from './combat/sfx.js';
@@ -31,7 +31,9 @@ const FIRE_COOLDOWN = 0.26;
 const ARM_TIME = 0.08;
 const BOLT_SPEED = 14;
 const BOLT_LIFE = 1.6;
-const AIM_ASSIST_COS = 0.9;
+const AIM_ASSIST_COS = 0.985;
+const HOMING_RATE = 3;
+const AIM_SMOOTHING = 0.45;
 const CHARGE_DISTANCE = 0.75;
 const CHARGE_TIME = 0.9;
 const EMERGE_TIME = 0.9;
@@ -53,6 +55,8 @@ interface HandState {
   palm: Vector3;
   normal: Vector3;
   glow: Sprite;
+  beam: Mesh;
+  beamMaterial: MeshBasicMaterial;
   pose: HandPose;
   gauntlet: Gauntlet;
   visualHidden: boolean;
@@ -167,6 +171,10 @@ export class CombatSystem extends createSystem({
     this.hud = new Hud();
     this.root.add(this.hud.mesh);
 
+    // Unit-length beam along +Z, starting at its origin.
+    const beamGeometry = new CylinderGeometry(0.0025, 0.0012, 1, 6, 1, true);
+    beamGeometry.rotateX(Math.PI / 2);
+    beamGeometry.translate(0, 0, 0.5);
     for (const handedness of ['left', 'right'] as const) {
       const glow = createGlowSprite(CYAN, 0);
       glow.name = `PalmGlow-${handedness}`;
@@ -174,6 +182,18 @@ export class CombatSystem extends createSystem({
       const joints = emptyHand();
       const gauntlet = new Gauntlet(handedness, CYAN);
       this.root.add(gauntlet.group);
+      const beamMaterial = new MeshBasicMaterial({
+        color: CYAN,
+        transparent: true,
+        opacity: 0,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      });
+      const beam = new Mesh(beamGeometry, beamMaterial);
+      beam.name = `AimBeam-${handedness}`;
+      beam.visible = false;
+      this.root.add(beam);
       this.hands.push({
         handedness,
         tracked: false,
@@ -183,6 +203,8 @@ export class CombatSystem extends createSystem({
         palm: new Vector3(),
         normal: new Vector3(),
         glow,
+        beam,
+        beamMaterial,
         pose: new HandPose(),
         gauntlet,
         visualHidden: false,
@@ -306,8 +328,8 @@ export class CombatSystem extends createSystem({
     this.world.camera.getWorldDirection(this.forward);
 
     this.readHands();
-    this.updateHands(realDt);
     for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
+    this.updateHands(realDt);
 
     const order = this.run.update(dt);
     if (order) this.spawnDrone(order.armored, order.speed);
@@ -393,13 +415,23 @@ export class CombatSystem extends createSystem({
         hand.armTime = 0;
         hand.glow.material.opacity = Math.max(0, hand.glow.material.opacity - dt * 6);
         hand.glow.visible = hand.glow.material.opacity > 0;
+        hand.beamMaterial.opacity = Math.max(0, hand.beamMaterial.opacity - dt * 6);
+        hand.beam.visible = hand.beamMaterial.opacity > 0;
         continue;
       }
-      const c = palmCenter(hand.joints);
-      const n = palmNormal(hand.joints, hand.handedness);
-      hand.normal.set(n[0], n[1], n[2]);
-      hand.palm.set(c[0], c[1], c[2]).addScaledVector(hand.normal, 0.04);
+      // Aim from the gauntlet's palm emitter so shots leave exactly where the
+      // ring glows; lightly smooth the direction to take out tracking jitter.
+      const gauntlet = hand.gauntlet;
+      if (hand.armTime === 0) hand.normal.copy(gauntlet.palmNormal);
+      else hand.normal.lerp(gauntlet.palmNormal, AIM_SMOOTHING).normalize();
+      hand.palm.copy(gauntlet.palmPoint).addScaledVector(hand.normal, 0.015);
       hand.armTime += dt;
+      hand.beam.visible = true;
+      hand.beam.position.copy(hand.palm);
+      this.v1.copy(hand.palm).add(hand.normal);
+      hand.beam.lookAt(this.v1);
+      hand.beam.scale.set(1, 1, 3);
+      hand.beamMaterial.opacity = 0.12 + 0.28 * Math.min(1, hand.armTime / ARM_TIME);
       hand.glow.visible = true;
       hand.glow.position.copy(hand.palm);
       const ready = Math.min(1, hand.armTime / ARM_TIME);
@@ -425,6 +457,7 @@ export class CombatSystem extends createSystem({
     this.fire(this.v4, this.v3);
   }
 
+
   // ---------------------------------------------------------------- bolts
 
   private fire(origin: Vector3, direction: Vector3): void {
@@ -449,7 +482,6 @@ export class CombatSystem extends createSystem({
     bolt.position.copy(origin);
     bolt.previous.copy(origin);
     bolt.velocity.copy(direction).multiplyScalar(BOLT_SPEED);
-    this.steer(bolt, 1);
     bolt.object.visible = true;
     bolt.object.position.copy(origin);
     this.flashes.spawn(origin, CYAN, 0.05, 0.25, 0.15);
@@ -477,7 +509,7 @@ export class CombatSystem extends createSystem({
         this.retireBolt(bolt);
         continue;
       }
-      this.steer(bolt, Math.min(1, dt * 8));
+      this.steer(bolt, Math.min(1, dt * HOMING_RATE));
       bolt.previous.copy(bolt.position);
       bolt.position.addScaledVector(bolt.velocity, dt);
       bolt.object.position.copy(bolt.position);

@@ -99,6 +99,9 @@ const trimMaterial = new MeshStandardMaterial({
  */
 export class Gauntlet {
   readonly group = new Group();
+  /** Centre of the palm surface and the direction out of it (world space). */
+  readonly palmPoint = new Vector3();
+  readonly palmNormal = new Vector3(0, 0, -1);
   readonly accent: MeshBasicMaterial;
   private readonly plates: InstancedMesh;
   private readonly seams: InstancedMesh;
@@ -204,8 +207,12 @@ export class Gauntlet {
     this.core.quaternion.copy(this.q);
     this.core.scale.setScalar(1 + Math.sin(time * 3) * 0.12);
 
-    // Palm emitter sits on the palm side, facing out of the palm.
-    this.emitter.position.copy(this.a).addScaledVector(this.up, -0.024);
+    // Palm emitter sits on the palm side, facing out of the palm. WebXR's
+    // joint -Y points into the palm, so -Y of the metacarpal is the aim axis.
+    pose.position(J.wrist, this.s);
+    this.palmNormal.copy(this.up).negate();
+    this.palmPoint.copy(this.s).lerp(this.b, 0.5).addScaledVector(this.palmNormal, 0.022);
+    this.emitter.position.copy(this.palmPoint);
     this.emitter.quaternion.copy(this.q);
     this.emitter.rotateX(Math.PI / 2);
     this.emitter.scale.setScalar(1 + charge * 0.5);
