@@ -1373,6 +1373,11 @@ export class CombatSystem extends createSystem({
     }
     this.blood.update(realDt, this.run.phase === 'fighting' && this.run.health <= 1 ? 1 : this.run.phase === 'fighting' && this.run.health <= 2 ? 0.4 : 0);
     this.transit.update(realDt, this.head);
+    // The score follows the action: calm in menus, full in combat, huge at bosses.
+    const run = this.run;
+    let bossFight = this.pending != null;
+    for (const d of this.drones) if ((d.kind === 'boss' || d.champion !== '') && d.state !== 'off') bossFight = true;
+    this.music.setIntensity(run.phase === 'title' || this.panel.visible ? 0 : bossFight ? 2 : 1);
     this.updateHud(realDt);
   }
 
@@ -4686,7 +4691,7 @@ export class CombatSystem extends createSystem({
     this.flashes.spawn(boss.spawn, ENEMY_COLOR.boss, 0.5, 3, 0.8);
     this.sfx.thunder();
     this.riftLevel = Math.min(0.6, this.riftLevel + 0.15);
-    this.music.play(oblivax ? 'oblivion' : 'void-rift');
+    if (oblivax) this.music.play('oblivion');
     const villain = oblivax ? OBLIVAX.name : chapterForWorld(region)?.villain.name ?? 'BOSS';
     this.comic.pop('BOSS!', this.v2.copy(boss.spawn).setY(boss.spawn.y + 0.9), ENEMY_COLOR.boss, 0.9);
     this.taunt = `${villain} has arrived!`;
