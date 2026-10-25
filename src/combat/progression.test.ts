@@ -40,6 +40,8 @@ describe('stages', () => {
     expect(isStageUnlocked(p, STAGES[1])).toBe(false);
     p.stars[STAGES[0].id] = 1;
     expect(isStageUnlocked(p, STAGES[1])).toBe(true);
+    // Every region's first level is open from the start.
+    expect(isStageUnlocked(p, STAGES[STAGES_PER_WORLD])).toBe(true);
   });
 });
 
@@ -88,11 +90,25 @@ describe('economy', () => {
 });
 
 describe('results', () => {
-  it('awards stars by remaining health', () => {
-    expect(starsFor({ won: false, health: 5, maxHealth: 5, killCoins: 0 })).toBe(0);
-    expect(starsFor({ won: true, health: 5, maxHealth: 5, killCoins: 0 })).toBe(3);
-    expect(starsFor({ won: true, health: 3, maxHealth: 5, killCoins: 0 })).toBe(2);
-    expect(starsFor({ won: true, health: 1, maxHealth: 5, killCoins: 0 })).toBe(1);
+  it('awards stars for clearing, saving every hostage and keeping shield', () => {
+    const base = { maxHealth: 5, killCoins: 0, hostagesTotal: 3 };
+    expect(starsFor({ ...base, won: false, health: 5, hostagesSaved: 3 })).toBe(0);
+    expect(starsFor({ ...base, won: true, health: 5, hostagesSaved: 3 })).toBe(3);
+    expect(starsFor({ ...base, won: true, health: 1, hostagesSaved: 3 })).toBe(2);
+    expect(starsFor({ ...base, won: true, health: 5, hostagesSaved: 1 })).toBe(2);
+    expect(starsFor({ ...base, won: true, health: 1, hostagesSaved: 0 })).toBe(1);
+  });
+
+  it('grants each story reward once, and legend skins for free', () => {
+    const p = defaultProfile();
+    const first = recordResult(p, STAGES[0], { won: true, health: 5, maxHealth: 5, killCoins: 0 });
+    expect(first.unlocked).toBe('overdrive-arc');
+    expect(recordResult(p, STAGES[0], { won: true, health: 5, maxHealth: 5, killCoins: 0 }).unlocked).toBeUndefined();
+    const boss = recordResult(p, STAGES[2], { won: true, health: 5, maxHealth: 5, killCoins: 0 });
+    expect(boss.unlocked).toBe('legend-arc');
+    expect(p.skins).toContain('arc-solar');
+    const lost = recordResult(p, STAGES[3], { won: false, health: 0, maxHealth: 5, killCoins: 0 });
+    expect(lost.unlocked).toBeUndefined();
   });
 
   it('records best stars and pays coins, scaled by difficulty', () => {

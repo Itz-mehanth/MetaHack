@@ -180,6 +180,13 @@ export class Sfx {
     this.tone('square', 990, 1320, 0.1, 0.08, 0.08);
   }
 
+  /** Radio blip at the start of a transmission line. */
+  radio(): void {
+    this.hiss(0.08, 4000, 0.15);
+    this.tone('square', 1200, 1200, 0.05, 0.06);
+    this.tone('square', 900, 900, 0.05, 0.06, 0.07);
+  }
+
   /** Bowstring being drawn. */
   creak(): void {
     this.tone('triangle', 120, 220, 0.5, 0.08);

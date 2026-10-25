@@ -26,6 +26,7 @@ import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
 import { type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
+import { HoloMap } from './combat/holomap.js';
 import { GameMenus } from './combat/menus.js';
 import { ENEMIES, type EnemyKind } from './combat/missions.js';
 import { Music } from './combat/music.js';
@@ -33,6 +34,7 @@ import { Panel } from './combat/panel-ui.js';
 import {
   DIFFICULTY,
   equippedColor,
+  isStageUnlocked,
   maxHealth,
   type Profile,
   recordResult,
@@ -41,6 +43,8 @@ import {
 } from './combat/progression.js';
 import { loadProfile, resetProfile, saveProfile } from './combat/save.js';
 import { applyTheme, setFlash, type Theme, THEMES } from './combat/themes.js';
+import { chapterFor, chapterForWorld, type Line, type LevelStory, levelStory } from './combat/story.js';
+import { Voice } from './combat/voice.js';
 import { createCocoon, WebStrand } from './combat/web.js';
 import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
@@ -240,6 +244,15 @@ export class CombatSystem extends createSystem({
   private accent = new Color('#3DF5FF');
   private lightningFx!: Lightning;
   private carousel = new HeroCarousel();
+  private holomap = new HoloMap();
+  private markers = new Map<string, Object3D>();
+  private mapPokeCooldown = 0;
+  private voice = new Voice();
+  private story: LevelStory | null = null;
+  private taunt = '';
+  private tauntWave = -1;
+  private tx: { lines: readonly Line[]; index: number; timer: number; done: () => void } | null = null;
+  private pendingReward: Parameters<GameMenus['showResults']>[0] | null = null;
   private comic!: Onomatopoeia;
   private comicCooldown = 0;
   private swipeCooldown = 0;
@@ -304,6 +317,7 @@ export class CombatSystem extends createSystem({
     this.bow = new Bow(new Color('#5DFFB0'));
     this.root.add(this.bow.group);
     this.root.add(this.carousel.group);
+    this.root.add(this.holomap.group);
     this.comic = new Onomatopoeia(this.root);
     this.panel = new Panel();
     this.root.add(this.panel.group);
@@ -319,6 +333,12 @@ export class CombatSystem extends createSystem({
       denied: () => this.sfx.denied(),
       bought: () => this.sfx.coin(),
       focus: (index) => this.focusHero(index),
+      mapSelect: (index) => {
+        this.holomap.selected = index;
+        this.sfx.swap();
+      },
+      txNext: () => this.advanceTransmission(),
+      txSkip: () => this.endTransmission(),
       resetProgress: () => {
         this.profile = resetProfile();
         this.menus.setProfile(this.profile);
@@ -542,6 +562,8 @@ export class CombatSystem extends createSystem({
       const pedestal = await this.world.assets.instantiate('pedestal');
       addOutline(figure, 0.07, (m) => (m.material as { name?: string }).name !== 'accent');
       this.carousel.add(hero.id, figure, pedestal);
+      const marker = await this.world.assets.instantiate(`hero-${hero.id}`);
+      this.markers.set(hero.id, marker);
     }
     this.showMenu('main');
     this.ready = true;
@@ -597,6 +619,7 @@ export class CombatSystem extends createSystem({
       this.updateBolts(dt);
       this.onPhaseChange();
       this.updateCountdown();
+      this.updateTaunts();
       this.updateResults(realDt);
     }
     this.updateAmbient(realDt, time);
@@ -609,6 +632,9 @@ export class CombatSystem extends createSystem({
     }
     this.comicCooldown -= realDt;
     this.carousel.update(realDt, time, this.head);
+    this.holomap.update(realDt, time, this.head);
+    this.updateMapPoke(realDt);
+    this.updateTransmission(realDt);
     this.updateSwipe(realDt);
     if (this.damageMaterial.opacity > 0) {
       this.damageMaterial.opacity = Math.max(0, this.damageMaterial.opacity - realDt * 1.2);
@@ -749,8 +775,19 @@ export class CombatSystem extends createSystem({
     return upgradeLevel(this.profile, id);
   }
 
-  /** Starts `stage` with `hero`, applying difficulty, upgrades and skin. */
+  /** Plays the level's intro transmission (if any), then the level. */
   private startStage(hero: HeroId, stage: Stage): void {
+    this.hero = hero;
+    this.menus.hero = hero;
+    this.story = levelStory(stage.world.id, stage.number) ?? null;
+    this.setTheme(stage.world.id);
+    this.music.play(stage.world.id);
+    if (this.story) this.beginTransmission(this.story.intro, () => this.launchStage(hero, stage));
+    else this.launchStage(hero, stage);
+  }
+
+  /** Starts `stage` with `hero`, applying difficulty, upgrades and skin. */
+  private launchStage(hero: HeroId, stage: Stage): void {
     this.hero = hero;
     this.menus.hero = hero;
     this.applySkin();
@@ -760,10 +797,13 @@ export class CombatSystem extends createSystem({
     this.paused = false;
     this.resultTimer = -1;
     this.lastCount = -1;
+    this.taunt = '';
+    this.tauntWave = 0;
     for (const drone of this.drones) {
       if (drone.state !== 'off') this.retireDrone(drone);
     }
     for (const bolt of this.bolts) if (bolt.active) this.retireBolt(bolt);
+    this.syncMap();
     this.setTheme(stage.world.id);
     this.music.play(stage.world.id);
     this.run.start(stage, {
@@ -819,7 +859,9 @@ export class CombatSystem extends createSystem({
     for (const drone of this.drones) {
       if (drone.state !== 'off') this.retireDrone(drone);
     }
-    this.showMenu('main');
+    this.voice.stop();
+    this.tx = null;
+    this.showMenu('map');
   }
 
   private showMenu(screen: Parameters<GameMenus['open']>[0]): void {
@@ -830,13 +872,113 @@ export class CombatSystem extends createSystem({
     this.placePanel();
     this.panel.show();
     this.syncCarousel();
-    if (screen !== 'pause') this.music.play('menu');
+    this.syncMap();
+    if (screen !== 'pause' && screen !== 'transmission') this.music.play('menu');
   }
 
   /** The hero screen sits low and close so the 3D heroes stay in view. */
   private placePanel(): void {
     if (this.menus.screen === 'heroes') this.panel.place(this.head, this.forward, 0.42, 0.58);
+    else if (this.menus.screen === 'map') this.panel.place(this.head, this.forward, 0.55, 0.02);
     else this.panel.place(this.head, this.forward);
+  }
+
+  /** Shows the war map only on the map screen, reflecting progress. */
+  private syncMap(): void {
+    const on = this.panel.visible && this.menus.screen === 'map';
+    if (!on) {
+      if (this.holomap.visible) this.holomap.hide();
+      return;
+    }
+    const chapter = chapterFor(this.hero);
+    this.holomap.build(chapter, equippedColor(this.profile, this.hero), this.markers.get(this.hero) ?? null);
+    this.menus.chapterStages().forEach((stage, i) => {
+      const unlocked = isStageUnlocked(this.profile, stage);
+      const stars = this.profile.stars[stage.id] ?? 0;
+      this.holomap.setNode(i, !unlocked ? 'locked' : stars > 0 ? 'cleared' : 'open', stars, `${i + 1}. ${chapter.levels[i].location}`);
+    });
+    this.holomap.selected = this.menus.mapLevel;
+    if (!this.holomap.visible) this.holomap.show(this.head, this.forward);
+  }
+
+  /** Poking a node on the war map selects that level. */
+  private updateMapPoke(dt: number): void {
+    this.mapPokeCooldown -= dt;
+    if (!this.holomap.visible || this.mapPokeCooldown > 0) return;
+    const index = this.holomap.pokedNode(this.tips);
+    if (index < 0 || index === this.menus.mapLevel) return;
+    this.mapPokeCooldown = 0.4;
+    this.menus.mapLevel = index;
+    this.holomap.selected = index;
+    this.sfx.click();
+    this.panel.setContent(this.menus.content());
+  }
+
+  // ---------------------------------------------------------------- story
+
+  /** Shows `lines` as a skippable transmission, then calls `done`. */
+  private beginTransmission(lines: readonly Line[], done: () => void): void {
+    if (lines.length === 0) {
+      done();
+      return;
+    }
+    this.tx = { lines, index: -1, timer: 0, done };
+    this.panel.hide();
+    this.advanceTransmission();
+  }
+
+  private advanceTransmission(): void {
+    const tx = this.tx;
+    if (tx == null) return;
+    tx.index += 1;
+    if (tx.index >= tx.lines.length) {
+      this.endTransmission();
+      return;
+    }
+    const line = tx.lines[tx.index];
+    const chapter = chapterForWorld(this.run.stage.world.id) ?? chapterFor(this.hero);
+    const hero = HEROES.find((h) => h.id === this.hero)!;
+    const name =
+      line.speaker === 'vex' ? 'WARLORD VEX' : line.speaker === 'villain' ? chapter.villain.name : line.speaker === 'hero' ? hero.name : 'CIVILIAN';
+    const title =
+      line.speaker === 'vex' ? 'Lord of the Hollow Legion' : line.speaker === 'villain' ? chapter.villain.title : line.speaker === 'hero' ? hero.power : 'Rescued';
+    const color =
+      line.speaker === 'vex' ? '#C04DFF' : line.speaker === 'villain' ? chapter.villain.color : line.speaker === 'hero' ? equippedColor(this.profile, this.hero) : '#FFE58A';
+    this.menus.transmission = { speaker: line.speaker, name, title, color, text: line.text, index: tx.index, total: tx.lines.length };
+    // Auto-advance after the line is spoken, or after a reading-time fallback.
+    tx.timer = Math.max(3, line.text.length * 0.075 + 1.5);
+    const index = tx.index;
+    this.voice.speak(line.text, line.speaker, () => {
+      if (this.tx === tx && tx.index === index) tx.timer = Math.min(tx.timer, 0.9);
+    });
+    this.sfx.radio();
+    if (this.menus.screen === 'transmission' && this.panel.visible) this.panel.setContent(this.menus.content());
+    else this.showMenu('transmission');
+  }
+
+  private endTransmission(): void {
+    const tx = this.tx;
+    if (tx == null) return;
+    this.tx = null;
+    this.voice.stop();
+    this.panel.hide();
+    tx.done();
+  }
+
+  private updateTransmission(dt: number): void {
+    if (this.tx == null || this.paused) return;
+    this.tx.timer -= dt;
+    if (this.tx.timer <= 0) this.advanceTransmission();
+  }
+
+  /** The villain shouts at the start of each later wave. */
+  private updateTaunts(): void {
+    const run = this.run;
+    if (this.story == null || run.phase !== 'intro' || run.wave === 0 || run.wave === this.tauntWave) return;
+    this.tauntWave = run.wave;
+    const taunts = this.story.taunts;
+    this.taunt = taunts[(run.wave - 1) % taunts.length];
+    this.voice.speak(this.taunt, 'villain');
   }
 
   /** Shows the hero carousel only on the hero screen, in sync with its focus. */
@@ -900,16 +1042,19 @@ export class CombatSystem extends createSystem({
     handle();
     if (!this.panel.visible) {
       this.syncCarousel();
+      this.syncMap();
       return;
     }
     if (this.menus.screen !== before) this.placePanel();
     this.panel.setContent(this.menus.content());
     this.syncCarousel();
+    this.syncMap();
   }
 
   private profileChanged(): void {
     saveProfile(this.profile);
     this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
+    this.voice.setVolume(this.profile.settings.sfx);
     this.applySkin();
   }
 
@@ -942,8 +1087,18 @@ export class CombatSystem extends createSystem({
       killCoins: run.coins,
     });
     saveProfile(this.profile);
-    if (reward.coins > 0) this.sfx.coin();
-    this.menus.showResults({ won, stage: run.stage, reward, score: run.score, kills: run.kills, bestCombo: run.bestCombo });
+    const info = { won, stage: run.stage, reward, score: run.score, kills: run.kills, bestCombo: run.bestCombo, saved: 0, hostages: 0 };
+    if (won && this.story) {
+      this.beginTransmission(this.story.outro, () => this.presentResults(info));
+      return;
+    }
+    this.presentResults(info);
+  }
+
+  private presentResults(info: Parameters<GameMenus['showResults']>[0]): void {
+    if (info.reward.coins > 0) this.sfx.coin();
+    if (info.reward.unlocked) this.sfx.victory();
+    this.menus.showResults(info);
     this.panel.setContent(this.menus.content());
     this.world.camera.getWorldPosition(this.head);
     this.world.camera.getWorldDirection(this.forward);
@@ -1851,13 +2006,15 @@ export class CombatSystem extends createSystem({
         break;
       case 'intro':
         if (run.wave === 0 && run.elapsedInPhase < 1) {
-          message = `${run.stage.world.name} ${run.stage.number}`;
+          message = this.story ? this.story.location : `${run.stage.world.name} ${run.stage.number}`;
           hint = `${run.stage.name}  |  ${run.stage.objective}`;
         } else if (run.wave === 0) {
           message = String(Math.max(1, 3 - Math.floor(run.elapsedInPhase - 1)));
           hint = 'Get ready  |  left wrist = pause';
         } else {
           message = `WAVE ${run.wave + 1}`;
+          const villain = chapterForWorld(run.stage.world.id)?.villain.name;
+          if (this.taunt && villain) hint = `${villain}: "${this.taunt}"`;
         }
         break;
       case 'fighting':

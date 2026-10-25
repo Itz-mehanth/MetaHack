@@ -17,7 +17,7 @@ const HEIGHT_M = WIDTH_M * (PANEL_PX_H / PANEL_PX_W);
 const FONT = "'Orbitron', 'Rajdhani', system-ui, sans-serif";
 const BODY = "'Rajdhani', system-ui, sans-serif";
 
-export type WidgetKind = 'button' | 'tile' | 'slider' | 'text';
+export type WidgetKind = 'button' | 'tile' | 'slider' | 'text' | 'portrait';
 
 export interface Widget {
   id: string;
@@ -148,7 +148,7 @@ export class Panel {
 
   private widgetAt(px: number, py: number): Widget | undefined {
     for (const w of this.content.widgets) {
-      if (w.kind === 'text') continue;
+      if (w.kind === 'text' || w.kind === 'portrait') continue;
       if (px >= w.x && px <= w.x + w.w && py >= w.y && py <= w.y + w.h) return w;
     }
     return undefined;
@@ -284,6 +284,9 @@ export class Panel {
           break;
         case 'text':
           this.drawText(w);
+          break;
+        case 'portrait':
+          this.drawPortrait(w);
           break;
       }
     }
@@ -431,6 +434,80 @@ export class Panel {
     c.fillText(w.label, w.x + 40, w.y + 34);
     c.textAlign = 'right';
     c.fillText(`${Math.round(value * 100)}%`, w.x + w.w - 40, w.y + 34);
+  }
+
+  /** Stylised holographic face for a transmission; `label` is the speaker kind. */
+  private drawPortrait(w: Widget): void {
+    const c = this.ctx;
+    const color = w.color ?? '#FFFFFF';
+    this.roundBox(w, 28, 'rgba(255,255,255,0.04)', color, 26);
+    const cx = w.x + w.w / 2;
+    const cy = w.y + w.h * 0.46;
+    const r = w.w * 0.3;
+    c.save();
+    c.shadowColor = color;
+    c.shadowBlur = 30;
+    c.strokeStyle = color;
+    c.fillStyle = 'rgba(10, 6, 24, 0.9)';
+    c.lineWidth = 6;
+    // Head / helmet.
+    c.beginPath();
+    c.ellipse(cx, cy, r, r * 1.2, 0, 0, Math.PI * 2);
+    c.fill();
+    c.stroke();
+    c.fillStyle = color;
+    const speaker = w.label;
+    if (speaker === 'vex') {
+      // Crown of spikes and burning slit eyes.
+      for (let i = -2; i <= 2; i += 1) {
+        c.beginPath();
+        c.moveTo(cx + i * r * 0.35 - r * 0.12, cy - r * 1.05);
+        c.lineTo(cx + i * r * 0.35, cy - r * (1.6 - Math.abs(i) * 0.15));
+        c.lineTo(cx + i * r * 0.35 + r * 0.12, cy - r * 1.05);
+        c.fill();
+      }
+      for (const side of [-1, 1]) {
+        c.beginPath();
+        c.moveTo(cx + side * r * 0.15, cy - r * 0.1);
+        c.lineTo(cx + side * r * 0.75, cy - r * 0.35);
+        c.lineTo(cx + side * r * 0.7, cy - r * 0.05);
+        c.fill();
+      }
+      c.fillRect(cx - r * 0.45, cy + r * 0.55, r * 0.9, r * 0.08);
+    } else if (speaker === 'villain') {
+      // Angular mask with a jagged grin.
+      for (const side of [-1, 1]) {
+        c.beginPath();
+        c.moveTo(cx + side * r * 0.12, cy - r * 0.15);
+        c.lineTo(cx + side * r * 0.65, cy - r * 0.3);
+        c.lineTo(cx + side * r * 0.55, cy + r * 0.02);
+        c.fill();
+      }
+      c.beginPath();
+      c.moveTo(cx - r * 0.5, cy + r * 0.45);
+      for (let i = 0; i <= 8; i += 1) c.lineTo(cx - r * 0.5 + i * r * 0.125, cy + r * (i % 2 ? 0.62 : 0.45));
+      c.stroke();
+    } else if (speaker === 'hero') {
+      // Hero visor band.
+      c.beginPath();
+      c.roundRect(cx - r * 0.75, cy - r * 0.25, r * 1.5, r * 0.32, r * 0.16);
+      c.fill();
+      c.fillRect(cx - r * 0.06, cy + r * 0.3, r * 0.12, r * 0.5);
+    } else {
+      // Civilian: simple friendly face.
+      for (const side of [-1, 1]) {
+        c.beginPath();
+        c.arc(cx + side * r * 0.35, cy - r * 0.15, r * 0.1, 0, Math.PI * 2);
+        c.fill();
+      }
+      c.beginPath();
+      c.arc(cx, cy + r * 0.25, r * 0.35, 0.15 * Math.PI, 0.85 * Math.PI);
+      c.stroke();
+    }
+    c.restore();
+    // Scanlines for the hologram look.
+    c.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    for (let y = w.y + 8; y < w.y + w.h - 8; y += 8) c.fillRect(w.x + 8, y, w.w - 16, 3);
   }
 
   private drawText(w: Widget): void {

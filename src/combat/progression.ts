@@ -1,5 +1,6 @@
 import type { HeroId } from './heroes.js';
 import type { EnemyKind, WaveDef } from './missions.js';
+import { levelStory } from './story.js';
 
 /**
  * Pure game progression: worlds and stages, difficulty, rewards, the coin
@@ -195,6 +196,8 @@ export interface Profile {
   equipped: Partial<Record<HeroId, string>>;
   /** Best stars (1-3) per cleared stage id. */
   stars: Record<string, number>;
+  /** Story rewards earned (overdrive-*, core-*, legend-*). */
+  unlocks: string[];
   settings: Settings;
 }
 
@@ -207,6 +210,7 @@ export function defaultProfile(): Profile {
     skins: SKINS.filter((s) => s.price === 0).map((s) => s.id),
     equipped: {},
     stars: {},
+    unlocks: [],
     settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false },
   };
 }
@@ -224,6 +228,7 @@ export function normalizeProfile(raw: unknown): Profile {
     skins: Array.from(new Set([...base.skins, ...(Array.isArray(r.skins) ? r.skins : [])])),
     equipped: { ...(r.equipped ?? {}) },
     stars: { ...(r.stars ?? {}) },
+    unlocks: Array.isArray(r.unlocks) ? [...r.unlocks] : [],
     settings: { ...base.settings, ...(r.settings ?? {}) },
   };
 }
@@ -268,8 +273,9 @@ export function equippedColor(profile: Profile, hero: HeroId): string {
   return skin?.color ?? '#FFFFFF';
 }
 
+/** Levels unlock in order within each hero's region. */
 export function isStageUnlocked(profile: Profile, stage: Stage): boolean {
-  if (stage.index === 0) return true;
+  if (stage.number === 1) return true;
   const previous = STAGES[stage.index - 1];
   return (profile.stars[previous.id] ?? 0) > 0;
 }
@@ -286,18 +292,27 @@ export interface RunResult {
   maxHealth: number;
   /** Coins already collected from kills during the run. */
   killCoins: number;
+  hostagesSaved?: number;
+  hostagesTotal?: number;
 }
 
 export interface Reward {
   stars: number;
   coins: number;
   newBest: boolean;
+  /** Story reward id unlocked by this run, if it was new. */
+  unlocked?: string;
 }
 
+/** One star for clearing, one for saving every hostage, one for finishing above half shield. */
 export function starsFor(result: RunResult): number {
   if (!result.won) return 0;
-  if (result.health >= result.maxHealth) return 3;
-  return result.health >= Math.ceil(result.maxHealth / 2) ? 2 : 1;
+  const allSaved = (result.hostagesSaved ?? 0) >= (result.hostagesTotal ?? 0);
+  return 1 + (allSaved ? 1 : 0) + (result.health >= Math.ceil(result.maxHealth / 2) ? 1 : 0);
+}
+
+export function hasUnlock(profile: Profile, id: string): boolean {
+  return profile.unlocks.includes(id);
 }
 
 /** Applies a finished run to the profile and returns what was earned. */
@@ -309,5 +324,17 @@ export function recordResult(profile: Profile, stage: Stage, result: RunResult):
   const best = profile.stars[stage.id] ?? 0;
   if (stars > best) profile.stars[stage.id] = stars;
   profile.coins += coins;
-  return { stars, coins, newBest: stars > best };
+  let unlocked: string | undefined;
+  const story = levelStory(stage.world.id, stage.number);
+  if (result.won && story && !profile.unlocks.includes(story.reward.id)) {
+    unlocked = story.reward.id;
+    profile.unlocks.push(unlocked);
+    // Legend rewards grant the hero's first paid skin for free.
+    if (unlocked.startsWith('legend-')) {
+      const hero = unlocked.slice('legend-'.length);
+      const skin = SKINS.find((k) => k.hero === hero && k.price > 0);
+      if (skin && !profile.skins.includes(skin.id)) profile.skins.push(skin.id);
+    }
+  }
+  return { stars, coins, newBest: stars > best, unlocked };
 }

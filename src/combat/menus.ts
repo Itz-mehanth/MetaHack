@@ -15,13 +15,37 @@ import {
   SKINS,
   type Stage,
   STAGES,
-  STAGES_PER_WORLD,
   upgradeLevel,
   UPGRADES,
-  WORLDS,
 } from './progression.js';
+import { chapterFor, type Speaker } from './story.js';
 
-export type Screen = 'main' | 'heroes' | 'stages' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
+export type Screen = 'main' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
+
+/** What the transmission screen shows: one line of dialogue. */
+export interface TransmissionView {
+  speaker: Speaker;
+  name: string;
+  title: string;
+  color: string;
+  text: string;
+  index: number;
+  total: number;
+}
+
+/** Breaks `text` into lines of at most `width` characters. */
+export function wrap(text: string, width: number): string {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    if (line && line.length + word.length + 1 > width) {
+      lines.push(line);
+      line = word;
+    } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(line);
+  return lines.join('\n');
+}
 
 export interface MenuActions {
   play(hero: HeroId, stage: Stage): void;
@@ -38,6 +62,10 @@ export interface MenuActions {
   bought(): void;
   /** Carousel focus moved to hero `index`. */
   focus(index: number): void;
+  /** Map node selected. */
+  mapSelect(index: number): void;
+  txNext(): void;
+  txSkip(): void;
   resetProgress(): void;
 }
 
@@ -48,6 +76,8 @@ export interface ResultInfo {
   score: number;
   kills: number;
   bestCombo: number;
+  saved: number;
+  hostages: number;
 }
 
 const BACK: Widget = { id: 'back', x: 1236, y: 150, w: 300, h: 70, label: 'BACK', size: 32 };
@@ -66,7 +96,9 @@ export class GameMenus {
   hero: HeroId = 'arc';
   /** Hero under the carousel spotlight. */
   heroFocus = 0;
-  private worldTab = 0;
+  /** Selected level on the campaign map (0-based). */
+  mapLevel = 0;
+  transmission: TransmissionView | null = null;
   private garageHero: HeroId = 'arc';
   private confirmReset = false;
   private settingsReturn: Screen = 'main';
@@ -85,7 +117,12 @@ export class GameMenus {
   open(screen: Screen): void {
     this.screen = screen;
     this.confirmReset = false;
-    if (screen === 'stages') this.actions.preview(WORLDS[this.worldTab].id);
+    if (screen === 'map') {
+      const stages = this.chapterStages();
+      const next = stages.findIndex((st) => isStageUnlocked(this.profile, st) && !this.profile.stars[st.id]);
+      this.mapLevel = next >= 0 ? next : stages.filter((st) => isStageUnlocked(this.profile, st)).length - 1;
+      this.actions.preview(chapterFor(this.hero).worldId);
+    }
     if (screen === 'heroes') this.heroFocus = Math.max(0, HEROES.findIndex((h) => h.id === this.hero));
     if (screen === 'main' || screen === 'heroes' || screen === 'garage') this.actions.preview('neon-grid');
   }
@@ -95,10 +132,21 @@ export class GameMenus {
     this.open('results');
   }
 
-  /** The first unlocked stage without stars, else the last unlocked one. */
+  /** The selected hero's three campaign stages. */
+  chapterStages(hero: HeroId = this.hero): Stage[] {
+    const worldId = chapterFor(hero).worldId;
+    return STAGES.filter((st) => st.world.id === worldId);
+  }
+
+  /** The hero's first unlocked level without stars, else their last unlocked one. */
   nextStage(): Stage {
-    const open = STAGES.filter((s) => isStageUnlocked(this.profile, s));
-    return open.find((s) => !this.profile.stars[s.id]) ?? open[open.length - 1];
+    const stages = this.chapterStages();
+    const open = stages.filter((st) => isStageUnlocked(this.profile, st));
+    return open.find((st) => !this.profile.stars[st.id]) ?? open[open.length - 1];
+  }
+
+  get mapStage(): Stage {
+    return this.chapterStages()[this.mapLevel];
   }
 
   content(): PanelContent {
@@ -109,8 +157,10 @@ export class GameMenus {
         return this.mainScreen(accent);
       case 'heroes':
         return this.heroesScreen(accent);
-      case 'stages':
-        return this.stagesScreen();
+      case 'map':
+        return this.mapScreen();
+      case 'transmission':
+        return this.transmissionScreen();
       case 'garage':
         return this.garageScreen();
       case 'settings':
@@ -154,7 +204,7 @@ export class GameMenus {
           w: 896,
           h: 200,
           label: 'PLAY',
-          sub: `Next: ${next.world.name} ${next.number} - ${next.name}`,
+          sub: `${chapterFor(this.hero).region}: ${chapterFor(this.hero).levels[next.number - 1].location}`,
           selected: true,
           color: accent,
           size: 80,
@@ -236,57 +286,82 @@ export class GameMenus {
     };
   }
 
-  private stagesScreen(): PanelContent {
-    const world = WORLDS[this.worldTab];
+  private mapScreen(): PanelContent {
+    const chapter = chapterFor(this.hero);
+    const stages = this.chapterStages();
+    const accent = equippedColor(this.profile, this.hero);
+    const stage = stages[this.mapLevel];
+    const story = chapter.levels[this.mapLevel];
+    const boss = this.mapLevel === stages.length - 1;
     const widgets: Widget[] = [BACK];
-    WORLDS.forEach((w, i) => {
+    stages.forEach((st, i) => {
+      const unlocked = isStageUnlocked(this.profile, st);
+      const stars = this.profile.stars[st.id] ?? 0;
       widgets.push({
-        id: `world:${i}`,
-        x: 64 + i * 296,
+        id: `map-level:${i}`,
+        x: 64 + i * 500,
         y: 240,
-        w: 280,
-        h: 90,
-        label: w.name,
-        size: 26,
-        color: w.color,
-        selected: i === this.worldTab,
+        w: 470,
+        h: 100,
+        label: `${i + 1}. ${chapter.levels[i].location}`,
+        sub: unlocked ? '\u2605'.repeat(stars) + '\u2606'.repeat(3 - stars) : 'LOCKED',
+        size: 30,
+        color: i === stages.length - 1 ? chapter.villain.color : accent,
+        selected: i === this.mapLevel,
+        disabled: !unlocked,
       });
     });
-    for (let n = 0; n < STAGES_PER_WORLD; n += 1) {
-      const stage = STAGES[this.worldTab * STAGES_PER_WORLD + n];
-      const unlocked = isStageUnlocked(this.profile, stage);
-      widgets.push({
-        id: `stage:${stage.id}`,
-        kind: 'tile',
-        x: 64 + n * 490,
-        y: 360,
-        w: 470,
-        h: 470,
-        label: `STAGE ${stage.number}`,
-        sub: stage.name,
-        detail: `${stage.objective}\nEnemies: ${world.enemies.join(', ')}`,
-        color: world.color,
-        stars: unlocked ? (this.profile.stars[stage.id] ?? 0) : undefined,
-        badge: unlocked ? 'PLAY' : 'LOCKED',
-        disabled: !unlocked,
-        size: 48,
-      });
-    }
-    const difficulty = this.profile.settings.difficulty.toUpperCase();
+    const unlocked = this.profile.unlocks.includes(story.reward.id);
     widgets.push(
-      { id: 'difficulty', x: 64, y: 860, w: 520, h: 90, label: `DIFFICULTY: ${difficulty}`, size: 32, color: world.color },
       {
-        id: 'stage-hero',
+        id: 'brief',
         kind: 'text',
-        x: 640,
-        y: 880,
-        w: 900,
-        h: 60,
-        label: `Hero: ${HEROES.find((h) => h.id === this.hero)!.name}  |  clear a stage to unlock the next`,
-        size: 30,
+        x: 80,
+        y: 380,
+        w: 1440,
+        h: 300,
+        label: `${boss ? 'BOSS: ' : ''}${story.location}\n${wrap(story.blurb, 70)}`,
+        size: 38,
+        color: '#FFFFFF',
       },
+      {
+        id: 'brief-info',
+        kind: 'text',
+        x: 80,
+        y: 600,
+        w: 1440,
+        h: 150,
+        label: `Hostages: ${story.hostages}   |   ${stage.objective}\nReward: ${story.reward.name}${unlocked ? ' (earned)' : ''} - ${story.reward.description}`,
+        size: 32,
+        color: accent,
+      },
+      { id: 'start', x: 64, y: 790, w: 960, h: 150, label: boss ? 'FACE THE BOSS' : 'START MISSION', selected: true, color: accent, size: 56 },
+      { id: 'difficulty', x: 1056, y: 790, w: 480, h: 150, label: 'DIFFICULTY', sub: this.profile.settings.difficulty.toUpperCase(), color: accent },
     );
-    return { title: 'STAGES', subtitle: world.name, coins: this.profile.coins, accent: world.color, widgets };
+    return {
+      title: chapter.region,
+      subtitle: `${HEROES.find((h) => h.id === this.hero)!.name} vs ${chapter.villain.name}, ${chapter.villain.title}`,
+      coins: this.profile.coins,
+      accent,
+      widgets,
+    };
+  }
+
+  private transmissionScreen(): PanelContent {
+    const tx = this.transmission;
+    if (tx == null) return { title: 'TRANSMISSION', accent: '#FFFFFF', widgets: [] };
+    return {
+      title: 'INCOMING TRANSMISSION',
+      subtitle: `${tx.name}${tx.title ? ` - ${tx.title}` : ''}`,
+      accent: tx.color,
+      widgets: [
+        { id: 'portrait', kind: 'portrait', x: 64, y: 220, w: 420, h: 560, label: tx.speaker, color: tx.color },
+        { id: 'tx-text', kind: 'text', x: 530, y: 260, w: 1000, h: 480, label: `"${wrap(tx.text, 34)}"`, size: 54, color: '#FFFFFF' },
+        { id: 'tx-count', kind: 'text', x: 530, y: 720, w: 1000, h: 40, label: `${tx.index + 1} / ${tx.total}`, size: 30, color: tx.color },
+        { id: 'tx-next', x: 530, y: 800, w: 480, h: 130, label: tx.index + 1 < tx.total ? 'NEXT' : 'CONTINUE', selected: true, color: tx.color },
+        { id: 'tx-skip', x: 1050, y: 800, w: 480, h: 130, label: 'SKIP' },
+      ],
+    };
   }
 
   private garageScreen(): PanelContent {
@@ -431,11 +506,13 @@ export class GameMenus {
   private resultsScreen(accent: string): PanelContent {
     const r = this.result!;
     const next = STAGES[r.stage.index + 1];
-    const canNext = r.won && next != null && isStageUnlocked(this.profile, next);
+    const canNext = r.won && next != null && next.world.id === r.stage.world.id && isStageUnlocked(this.profile, next);
+    const story = chapterFor(this.hero).levels[r.stage.number - 1];
+    const unlockedLine = r.reward.unlocked && story ? `\nNEW POWER UNLOCKED: ${story.reward.name} - ${story.reward.description}` : '';
     const stars = '★'.repeat(r.reward.stars) + '☆'.repeat(3 - r.reward.stars);
     return {
       title: r.won ? 'VICTORY' : 'DEFEATED',
-      subtitle: `${r.stage.world.name} ${r.stage.number} - ${r.stage.name}`,
+      subtitle: story ? `${chapterFor(this.hero).region} - ${story.location}` : r.stage.name,
       coins: this.profile.coins,
       accent: r.won ? accent : '#FF3B5C',
       widgets: [
@@ -446,14 +523,14 @@ export class GameMenus {
           x: 80,
           y: 420,
           w: 1440,
-          h: 200,
+          h: 300,
           align: 'center',
-          size: 40,
-          label: `Score ${r.score.toLocaleString('en-US')}   |   Kills ${r.kills}   |   Best combo x${r.bestCombo}\n+${r.reward.coins} coins${r.reward.newBest ? '   |   NEW BEST!' : ''}`,
+          size: 38,
+          label: `Score ${r.score.toLocaleString('en-US')}   |   Kills ${r.kills}   |   Best combo x${r.bestCombo}\n${r.hostages > 0 ? `Hostages saved ${r.saved}/${r.hostages}   |   ` : ''}+${r.reward.coins} coins${r.reward.newBest ? '   |   NEW BEST!' : ''}${unlockedLine}`,
         },
-        { id: 'next', x: 64, y: 780, w: 470, h: 140, label: 'NEXT STAGE', disabled: !canNext, selected: canNext, color: accent },
+        { id: 'next', x: 64, y: 780, w: 470, h: 140, label: 'NEXT MISSION', disabled: !canNext, selected: canNext, color: accent },
         { id: 'retry', x: 565, y: 780, w: 470, h: 140, label: 'RETRY' },
-        { id: 'menu', x: 1066, y: 780, w: 470, h: 140, label: 'MENU' },
+        { id: 'menu', x: 1066, y: 780, w: 470, h: 140, label: 'WAR MAP' },
       ],
     };
   }
@@ -466,14 +543,13 @@ export class GameMenus {
     if (event.id !== 'reset') this.confirmReset = false;
     switch (kind) {
       case 'back':
-        this.open(this.screen === 'settings' ? this.settingsReturn : 'main');
+        this.open(this.screen === 'settings' ? this.settingsReturn : this.screen === 'map' ? 'heroes' : 'main');
         return;
       case 'main-hero':
         this.open('heroes');
         return;
       case 'play':
-        this.worldTab = WORLDS.indexOf(this.nextStage().world);
-        this.open('stages');
+        this.open('heroes');
         return;
       case 'garage':
         this.garageHero = this.hero;
@@ -495,7 +571,7 @@ export class GameMenus {
         const id = HEROES[this.heroFocus].id;
         if (!PLAYABLE.includes(id)) return;
         if (id === this.hero && p.heroes.includes(id)) {
-          this.handle({ ...event, id: 'play' });
+          this.open('map');
           return;
         }
         if (!p.heroes.includes(id)) {
@@ -509,15 +585,24 @@ export class GameMenus {
         this.actions.changed();
         return;
       }
-      case 'world':
-        this.worldTab = Number(arg);
-        this.actions.preview(WORLDS[this.worldTab].id);
-        return;
-      case 'stage': {
-        const stage = STAGES.find((s) => s.id === arg);
-        if (stage && isStageUnlocked(p, stage)) this.actions.play(this.hero, stage);
+      case 'map-level': {
+        const index = Number(arg);
+        const stage = this.chapterStages()[index];
+        if (stage && isStageUnlocked(p, stage)) {
+          this.mapLevel = index;
+          this.actions.mapSelect(index);
+        }
         return;
       }
+      case 'start':
+        this.actions.play(this.hero, this.mapStage);
+        return;
+      case 'tx-next':
+        this.actions.txNext();
+        return;
+      case 'tx-skip':
+        this.actions.txSkip();
+        return;
       case 'difficulty': {
         const i = DIFFICULTIES.indexOf(p.settings.difficulty);
         p.settings.difficulty = DIFFICULTIES[(i + 1) % DIFFICULTIES.length];
@@ -578,7 +663,7 @@ export class GameMenus {
       case 'next': {
         const r = this.result;
         const next = r ? STAGES[r.stage.index + 1] : undefined;
-        if (next && isStageUnlocked(p, next)) this.actions.play(this.hero, next);
+        if (r && next && next.world.id === r.stage.world.id && isStageUnlocked(p, next)) this.actions.play(this.hero, next);
         return;
       }
     }
