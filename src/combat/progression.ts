@@ -62,6 +62,7 @@ function buildWaves(world: World, worldIndex: number, stage: number): WaveDef[] 
       speed: (swarm ? 1.3 : 0.7) + w * 0.08 + tier * 0.04,
       kinds,
       burst: swarm ? 3 + Math.min(2, Math.floor(w / 2)) : undefined,
+      boss: stage === 2 && last ? true : undefined,
     });
   }
   return waves;
@@ -111,6 +112,9 @@ export const ENEMY_COINS: Readonly<Record<EnemyKind, number>> = {
   armored: 10,
   swarmer: 4,
   titan: 40,
+  boss: 150,
+  orb: 0,
+  pod: 10,
 };
 
 export interface UpgradeDef {

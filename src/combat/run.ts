@@ -45,6 +45,7 @@ export class Run {
   private alive = 0;
   private spawnTimer = 0;
   private burstLeft = 0;
+  private bossSpawned = false;
   private comboTimer = 0;
 
   constructor(private readonly random: () => number = Math.random) {}
@@ -105,10 +106,17 @@ export class Run {
       this.spawned = 0;
       this.spawnTimer = 0;
       this.burstLeft = 0;
+      this.bossSpawned = false;
       this.enter('fighting');
     } else if (this.phase === 'cleared' && this.phaseTime >= CLEARED_SECONDS) {
       this.wave += 1;
       this.enter('intro');
+    } else if (this.phase === 'fighting' && this.waveDef.boss && !this.bossSpawned) {
+      // The boss arrives first and counts as alive, but not toward the wave count.
+      this.bossSpawned = true;
+      this.alive += 1;
+      this.spawnTimer = 3;
+      return { kind: 'boss', speed: 0 };
     } else if (this.phase === 'fighting' && this.spawned < this.waveDef.count) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
@@ -136,6 +144,21 @@ export class Run {
     this.score += ENEMIES[kind].score * Math.min(this.combo, 8);
     this.coins += ENEMY_COINS[kind];
     return this.checkWaveEnd();
+  }
+
+  /** Damage from something outside the wave count (boss orbs, minions). */
+  damage(amount: number): void {
+    if (this.phase !== 'fighting') return;
+    this.health -= amount;
+    this.combo = 0;
+    if (this.health <= 0) {
+      this.health = 0;
+      this.enter('defeat');
+    }
+  }
+
+  heal(amount: number): void {
+    this.health = Math.min(this.maxHealth, this.health + amount);
   }
 
   /** An enemy reached the player and detonated. */

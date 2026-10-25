@@ -16,6 +16,12 @@ export class Hud {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: CanvasTexture;
   private lastKey = '';
+  /** Extra readouts set by the combat system each frame. */
+  readonly extras: { boss: { name: string; fraction: number } | null; overdrive: number | null; buffs: string } = {
+    boss: null,
+    overdrive: null,
+    buffs: '',
+  };
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -41,16 +47,77 @@ export class Hud {
   }
 
   update(run: Run, message: string, hint: string): void {
-    const key = `${run.phase}|${run.wave}|${run.health}|${run.maxHealth}|${run.score}|${run.coins}|${run.combo}|${message}|${hint}`;
+    const x = this.extras;
+    const boss = x.boss ? `${x.boss.name}:${x.boss.fraction.toFixed(2)}` : '';
+    const od = x.overdrive == null ? '' : x.overdrive >= 1 ? `R${Math.floor(performance.now() / 300) % 2}` : x.overdrive.toFixed(2);
+    const key = `${run.phase}|${run.wave}|${run.health}|${run.maxHealth}|${run.score}|${run.coins}|${run.combo}|${message}|${hint}|${boss}|${od}|${x.buffs}`;
     if (key === this.lastKey) return;
     this.lastKey = key;
     const c = this.ctx;
     c.clearRect(0, 0, WIDTH, HEIGHT);
 
-    if (run.phase !== 'title') this.drawStatus(run);
+    if (run.phase !== 'title') {
+      this.drawStatus(run);
+      this.drawExtras();
+    }
     if (message) this.drawMessage(message);
     if (hint) this.drawHint(hint);
     this.texture.needsUpdate = true;
+  }
+
+  private drawExtras(): void {
+    const c = this.ctx;
+    const { boss, overdrive, buffs } = this.extras;
+    c.save();
+    c.textBaseline = 'middle';
+    if (overdrive != null) {
+      const ready = overdrive >= 1;
+      const flash = ready && Math.floor(performance.now() / 300) % 2 === 0;
+      c.fillStyle = 'rgba(8,4,22,0.72)';
+      c.beginPath();
+      c.roundRect(40, 140, 300, 34, 17);
+      c.fill();
+      c.fillStyle = ready ? (flash ? '#FFFFFF' : '#FFD23F') : '#7FF6FF';
+      c.shadowColor = '#FFD23F';
+      c.shadowBlur = ready ? 24 : 6;
+      c.beginPath();
+      c.roundRect(44, 144, 292 * Math.min(1, overdrive), 26, 13);
+      c.fill();
+      c.shadowBlur = 0;
+      c.fillStyle = ready ? '#06020F' : '#FFFFFF';
+      c.font = `900 20px ${FONT}`;
+      c.textAlign = 'center';
+      c.fillText(ready ? 'OVERDRIVE - CLAP!' : 'OVERDRIVE', 190, 158);
+    }
+    if (buffs) {
+      c.textAlign = 'left';
+      c.fillStyle = '#39FF88';
+      c.shadowColor = '#39FF88';
+      c.shadowBlur = 12;
+      c.font = `900 26px ${FONT}`;
+      c.fillText(buffs, 40, 200);
+      c.shadowBlur = 0;
+    }
+    if (boss) {
+      const x = 212;
+      const w = 600;
+      c.fillStyle = 'rgba(8,4,22,0.8)';
+      c.beginPath();
+      c.roundRect(x, 214, w, 44, 22);
+      c.fill();
+      c.fillStyle = '#FF3B5C';
+      c.shadowColor = '#FF3B5C';
+      c.shadowBlur = 18;
+      c.beginPath();
+      c.roundRect(x + 4, 218, (w - 8) * Math.max(0, boss.fraction), 36, 18);
+      c.fill();
+      c.shadowBlur = 0;
+      c.fillStyle = '#FFFFFF';
+      c.textAlign = 'center';
+      c.font = `900 26px ${FONT}`;
+      c.fillText(boss.name, x + w / 2, 237);
+    }
+    c.restore();
   }
 
   private glass(x: number, y: number, w: number, h: number, r: number, accent: string): void {

@@ -33,7 +33,9 @@ import { Music } from './combat/music.js';
 import { Panel } from './combat/panel-ui.js';
 import {
   DIFFICULTY,
+  ENEMY_COINS,
   equippedColor,
+  hasUnlock,
   isStageUnlocked,
   maxHealth,
   type Profile,
@@ -101,14 +103,24 @@ const ENEMY_ASSET: Readonly<Record<EnemyKind, string>> = {
   armored: 'drone-armored',
   swarmer: 'swarmer',
   titan: 'titan',
+  boss: '',
+  orb: 'orb',
+  pod: 'pod',
 };
-const ENEMY_POOL: Readonly<Record<EnemyKind, number>> = { drone: 14, armored: 8, swarmer: 22, titan: 6 };
+/** Bosses are loaded separately, one per region. */
+const ENEMY_POOL: Readonly<Record<EnemyKind, number>> = { drone: 14, armored: 8, swarmer: 22, titan: 6, boss: 0, orb: 20, pod: 5 };
 const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   drone: MAGENTA,
   armored: ORANGE,
   swarmer: EMBER,
   titan: VIOLET,
+  boss: new Color('#FF3B5C'),
+  orb: ORANGE,
+  pod: GOLD,
 };
+const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift'];
+type PickupKind = 'heal' | 'rapid' | 'power';
+const BUFF_SECONDS = 8;
 
 interface HandState {
   handedness: Handedness;
@@ -138,7 +150,7 @@ interface HandState {
   slashCooldown: number;
 }
 
-type DroneState = 'off' | 'emerging' | 'approach' | 'charge';
+type DroneState = 'off' | 'emerging' | 'approach' | 'charge' | 'boss' | 'fly' | 'hold';
 
 interface Drone {
   object: Object3D;
@@ -160,6 +172,20 @@ interface Drone {
   /** Seconds left webbed in place. */
   snare: number;
   cocoon: Mesh;
+  /** Whether the Run tracks it (wave enemies) or not (orbs, minions, pods). */
+  counted: boolean;
+  /** Boss region id. */
+  world: string;
+  maxHp: number;
+  attackTimer: number;
+  bossPhase: number;
+}
+
+interface Pickup {
+  object: Object3D;
+  kind: PickupKind;
+  active: boolean;
+  life: number;
 }
 
 interface Bolt {
@@ -243,6 +269,15 @@ export class CombatSystem extends createSystem({
   private lastCount = -1;
   private accent = new Color('#3DF5FF');
   private lightningFx!: Lightning;
+  private pickups: Pickup[] = [];
+  private buffRapid = 0;
+  private buffPower = 0;
+  private overdrive = 0;
+  private clapArmed = false;
+  private shockwave: Mesh | null = null;
+  private shockwaveTime = -1;
+  private hostagesSaved = 0;
+  private hostagesTotal = 0;
   private carousel = new HeroCarousel();
   private holomap = new HoloMap();
   private markers = new Map<string, Object3D>();
@@ -548,9 +583,73 @@ export class CombatSystem extends createSystem({
           hammerHitAt: -10,
           snare: 0,
           cocoon,
+          counted: true,
+          world: '',
+          maxHp: 1,
+          attackTimer: 0,
+          bossPhase: 1,
         });
       }
     }
+    // One boss per region, plus pickup pools.
+    for (const region of REGIONS) {
+      const object = await this.world.assets.instantiate(`boss-${region}`);
+      object.name = `Boss-${region}`;
+      addOutline(object, 0.06, (m) => m.name === 'Body' || m.name === 'Head');
+      object.visible = false;
+      this.root.add(object);
+      const portalMaterial = new MeshBasicMaterial({
+        color: '#FF3B5C',
+        transparent: true,
+        opacity: 0,
+        blending: AdditiveBlending,
+        side: DoubleSide,
+        depthWrite: false,
+      });
+      const portal = new Mesh(portalGeometry, portalMaterial);
+      portal.visible = false;
+      this.root.add(portal);
+      const cocoon = createCocoon();
+      this.root.add(cocoon);
+      this.drones.push({
+        object,
+        ring: object.getObjectByName('Ring')!,
+        eye: object.getObjectByName('Eye')!,
+        kind: 'boss',
+        hp: 0,
+        state: 'off',
+        t: 0,
+        speed: 0,
+        phase: 0,
+        spawn: new Vector3(),
+        normal: new Vector3(),
+        offset: new Vector3(),
+        portal,
+        portalMaterial,
+        hammerHitAt: -10,
+        snare: 0,
+        cocoon,
+        counted: true,
+        world: region,
+        maxHp: 1,
+        attackTimer: 0,
+        bossPhase: 1,
+      });
+    }
+    for (const kind of ['heal', 'rapid', 'power'] as const) {
+      for (let n = 0; n < 5; n += 1) {
+        const object = await this.world.assets.instantiate(`pickup-${kind}`);
+        object.visible = false;
+        this.root.add(object);
+        this.pickups.push({ object, kind, active: false, life: 0 });
+      }
+    }
+    this.shockwave = new Mesh(
+      new TorusGeometry(1, 0.03, 8, 96),
+      new MeshBasicMaterial({ color: '#FFD23F', transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false, toneMapped: false }),
+    );
+    this.shockwave.visible = false;
+    this.root.add(this.shockwave);
     this.hammer = await this.world.assets.instantiate('hammer');
     this.hammer.name = 'StormHammer';
     this.hammer.visible = false;
@@ -611,6 +710,7 @@ export class CombatSystem extends createSystem({
     this.updateHammer(realDt, time);
     this.updateBow();
     this.updateWebs(realDt, time);
+    this.updatePowerups(realDt, dt, time);
 
     if (!this.paused) {
       const order = this.run.update(dt);
@@ -734,7 +834,7 @@ export class CombatSystem extends createSystem({
       hand.glow.material.opacity = 0.35 + 0.5 * ready;
       hand.glow.scale.setScalar(0.06 + 0.05 * ready + Math.max(0, hand.cooldown) * 0.3);
       if (hand.armTime >= ARM_TIME && hand.cooldown <= 0) {
-        hand.cooldown = FIRE_COOLDOWN * (1 - 0.1 * this.level('arc-rate'));
+        hand.cooldown = FIRE_COOLDOWN * (1 - 0.1 * this.level('arc-rate')) * (this.buffRapid > 0 ? 0.5 : 1);
         this.fire(hand.palm, hand.normal);
         // Split beam: extra bolts fanned a few degrees either side.
         const extra = Math.ceil(this.level('arc-split') / 2);
@@ -813,6 +913,11 @@ export class CombatSystem extends createSystem({
     this.lastPhase = 'intro';
     this.sfx.wave();
     if (hero === 'tempest') this.summonHammer();
+    this.buffRapid = 0;
+    this.buffPower = 0;
+    this.overdrive = 0;
+    for (const pickup of this.pickups) this.retirePickup(pickup);
+    this.spawnPods(this.story?.hostages ?? 0);
   }
 
   private applySkin(): void {
@@ -1085,9 +1190,11 @@ export class CombatSystem extends createSystem({
       health: run.health,
       maxHealth: run.maxHealth,
       killCoins: run.coins,
+      hostagesSaved: this.hostagesSaved,
+      hostagesTotal: this.hostagesTotal,
     });
     saveProfile(this.profile);
-    const info = { won, stage: run.stage, reward, score: run.score, kills: run.kills, bestCombo: run.bestCombo, saved: 0, hostages: 0 };
+    const info = { won, stage: run.stage, reward, score: run.score, kills: run.kills, bestCombo: run.bestCombo, saved: this.hostagesSaved, hostages: this.hostagesTotal };
     if (won && this.story) {
       this.beginTransmission(this.story.outro, () => this.presentResults(info));
       return;
@@ -1361,7 +1468,7 @@ export class CombatSystem extends createSystem({
     hand.webVelocity.copy(this.v4).multiplyScalar(WEB_SPEED * (1 + 0.15 * this.level('weaver-range')));
     hand.webState = 'flying';
     hand.webTime = 0;
-    hand.webCooldown = WEB_COOLDOWN;
+    hand.webCooldown = WEB_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
     this.sfx.thwip();
   }
 
@@ -1649,7 +1756,7 @@ export class CombatSystem extends createSystem({
       }
 
       if (speed > CRESCENT_MIN_SWING && hand.slashCooldown <= 0) {
-        hand.slashCooldown = CRESCENT_COOLDOWN * (1 - 0.12 * this.level('talon-tempo'));
+        hand.slashCooldown = CRESCENT_COOLDOWN * (1 - 0.12 * this.level('talon-tempo')) * (this.buffRapid > 0 ? 0.5 : 1);
         this.v4.subVectors(claws.tip, hand.prevTip).normalize();
         this.fireCrescent(claws.tip, this.v4, claws.direction);
       }
@@ -1795,13 +1902,15 @@ export class CombatSystem extends createSystem({
 
   // ---------------------------------------------------------------- drones
 
-  private spawnDrone(kind: EnemyKind, speed: number): void {
+  private spawnDrone(kind: EnemyKind, speed: number, counted = true): Drone | null {
+    if (kind === 'boss') return this.spawnBoss();
     const drone = this.drones.find((d) => d.state === 'off' && d.kind === kind);
     if (drone == null) {
       // Pool exhausted: count it as killed so the wave can still finish.
-      this.run.kill(kind);
-      return;
+      if (counted) this.run.kill(kind);
+      return null;
     }
+    drone.counted = counted;
     this.pickSpawn(drone.spawn, drone.normal);
     drone.hp = ENEMIES[kind].hp;
     drone.state = 'emerging';
@@ -1820,6 +1929,270 @@ export class CombatSystem extends createSystem({
     drone.portalMaterial.opacity = 1;
     this.particles.burst(drone.spawn, ENEMY_COLOR[kind], kind === 'titan' ? 60 : 24, 1.2, 0.5, this.v2);
     this.sfx.portal();
+    return drone;
+  }
+
+  // ---------------------------------------------------------------- bosses
+
+  /** The region's lieutenant tears through a giant portal ahead. */
+  private spawnBoss(): Drone | null {
+    const region = this.run.stage.world.id;
+    const boss = this.drones.find((d) => d.kind === 'boss' && d.world === region);
+    if (boss == null) {
+      this.run.kill('boss');
+      return null;
+    }
+    const scale = 1 + REGIONS.indexOf(region) * 0.2;
+    boss.counted = true;
+    boss.maxHp = ENEMIES.boss.hp * scale;
+    boss.hp = boss.maxHp;
+    boss.bossPhase = 1;
+    boss.attackTimer = 4;
+    boss.state = 'emerging';
+    boss.t = 0;
+    this.v1.set(this.forward.x, 0, this.forward.z);
+    if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
+    this.v1.normalize();
+    boss.spawn.copy(this.head).addScaledVector(this.v1, 4.6);
+    boss.spawn.y = this.head.y + 0.35;
+    boss.normal.copy(this.v1).negate();
+    boss.object.position.copy(boss.spawn);
+    boss.object.scale.setScalar(0.01);
+    boss.object.visible = true;
+    boss.portal.position.copy(boss.spawn);
+    this.v2.copy(boss.spawn).add(boss.normal);
+    boss.portal.lookAt(this.v2);
+    boss.portal.visible = true;
+    boss.portalMaterial.opacity = 1;
+    this.particles.burst(boss.spawn, ENEMY_COLOR.boss, 160, 3, 0.9, this.v2);
+    this.flashes.spawn(boss.spawn, ENEMY_COLOR.boss, 0.5, 3, 0.8);
+    this.sfx.thunder();
+    this.music.play('void-rift');
+    const villain = chapterForWorld(region)?.villain.name ?? 'BOSS';
+    this.comic.pop('BOSS!', this.v2.copy(boss.spawn).setY(boss.spawn.y + 0.9), ENEMY_COLOR.boss, 0.9);
+    const line = this.story?.intro.find((l) => l.speaker !== 'hero')?.text;
+    if (line) this.voice.speak(line, region === 'void-rift' ? 'vex' : 'villain');
+    this.taunt = `${villain} has arrived!`;
+    return boss;
+  }
+
+  /** Boss AI: strafe, fire orb volleys, summon minions at each phase. */
+  private updateBoss(boss: Drone, dt: number, time: number): void {
+    const object = boss.object;
+    this.v3.set(-boss.normal.z, 0, boss.normal.x).normalize();
+    object.position.copy(boss.spawn).addScaledVector(boss.normal, 0.6);
+    object.position.addScaledVector(this.v3, Math.sin(time * 0.6) * 1.4);
+    object.position.y += Math.sin(time * 1.3) * 0.25;
+    object.lookAt(this.head);
+    boss.eye.scale.setScalar(1 + Math.sin(time * 6) * 0.15);
+    const fraction = boss.hp / boss.maxHp;
+    const phase = fraction > 0.66 ? 1 : fraction > 0.33 ? 2 : 3;
+    if (phase !== boss.bossPhase) {
+      boss.bossPhase = phase;
+      const taunts = this.story?.taunts ?? [];
+      const taunt = taunts[(phase - 1) % Math.max(1, taunts.length)] ?? 'ENOUGH!';
+      this.voice.speak(taunt, boss.world === 'void-rift' ? 'vex' : 'villain');
+      this.taunt = taunt;
+      this.comic.pop('RAAAGH!', this.v2.copy(object.position).setY(object.position.y + 0.9), ENEMY_COLOR.boss, 0.8);
+      this.flashes.spawn(object.position, ENEMY_COLOR.boss, 0.5, 2.5, 0.6);
+      const minion = REGIONS.indexOf(boss.world) === 1 ? 'swarmer' : 'drone';
+      for (let i = 0; i < phase + 1; i += 1) this.spawnDrone(minion, 0.9 + phase * 0.2, false);
+    }
+    boss.attackTimer -= dt;
+    if (boss.attackTimer <= 0) {
+      boss.attackTimer = 3.4 - phase * 0.7;
+      for (let i = 0; i < phase + 1; i += 1) {
+        this.v1.copy(object.position);
+        this.v1.x += (Math.random() - 0.5) * 0.9;
+        this.v1.y += (Math.random() - 0.5) * 0.5;
+        this.spawnOrb(this.v1, 1.8 + phase * 0.45);
+      }
+      this.sfx.blast();
+    }
+  }
+
+  private spawnOrb(from: Vector3, speed: number): void {
+    const orb = this.drones.find((d) => d.state === 'off' && d.kind === 'orb');
+    if (orb == null) return;
+    orb.counted = false;
+    orb.hp = 1;
+    orb.state = 'fly';
+    orb.t = 0;
+    orb.speed = speed;
+    orb.object.position.copy(from);
+    orb.object.scale.setScalar(1);
+    orb.object.visible = true;
+    orb.portal.visible = false;
+  }
+
+  // ---------------------------------------------------------------- hostages
+
+  /** Hostage pods hover in an arc around the player. */
+  private spawnPods(count: number): void {
+    this.hostagesSaved = 0;
+    this.hostagesTotal = count;
+    this.v1.set(this.forward.x, 0, this.forward.z);
+    if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
+    this.v1.normalize();
+    let placed = 0;
+    for (const pod of this.drones) {
+      if (placed >= count) break;
+      if (pod.kind !== 'pod' || pod.state !== 'off') continue;
+      const angle = count === 1 ? 0 : -1.1 + (2.2 * placed) / (count - 1);
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const x = this.v1.x * cos - this.v1.z * sin;
+      const z = this.v1.x * sin + this.v1.z * cos;
+      pod.counted = false;
+      pod.hp = ENEMIES.pod.hp;
+      pod.state = 'hold';
+      pod.t = Math.random() * 6;
+      pod.spawn.set(this.head.x + x * 2.3, this.head.y - 0.25 + (placed % 2) * 0.3, this.head.z + z * 2.3);
+      pod.object.position.copy(pod.spawn);
+      pod.object.scale.setScalar(1);
+      pod.object.visible = true;
+      pod.object.lookAt(this.head.x, pod.spawn.y, this.head.z);
+      pod.portal.visible = false;
+      placed += 1;
+    }
+  }
+
+  private freePod(pod: Drone): void {
+    this.hostagesSaved += 1;
+    const at = pod.object.position;
+    this.flashes.spawn(at, GOLD, 0.2, 1.2, 0.6);
+    for (let i = 0; i < 30; i += 1) {
+      this.v1.set((Math.random() - 0.5) * 0.3, Math.random() * 0.2, (Math.random() - 0.5) * 0.3).add(at);
+      this.v2.set(0, 1.5 + Math.random() * 2, 0);
+      this.particles.emit(this.v1, this.v2, Math.random() < 0.5 ? GOLD : WHITE, 1.2, 0.2, -0.5);
+    }
+    this.comic.pop('THANK YOU!', this.v1.copy(at).setY(at.y + 0.35), GOLD, 0.5);
+    this.sfx.coin();
+    this.run.coins += ENEMY_COINS.pod;
+    this.run.score += ENEMIES.pod.score;
+    this.retireDrone(pod);
+  }
+
+  // ---------------------------------------------------------------- power-ups & overdrive
+
+  /** Damage multiplier from the hero's power core and the power buff. */
+  private damageScale(): number {
+    return (hasUnlock(this.profile, `core-${this.hero}`) ? 1.25 : 1) * (this.buffPower > 0 ? 2 : 1);
+  }
+
+  private dropPickup(at: Vector3): void {
+    if (Math.random() > 0.15) return;
+    const roll = Math.random();
+    const kind: PickupKind = this.run.health < this.run.maxHealth && roll < 0.4 ? 'heal' : roll < 0.7 ? 'rapid' : 'power';
+    const pickup = this.pickups.find((p) => !p.active && p.kind === kind);
+    if (pickup == null) return;
+    pickup.active = true;
+    pickup.life = 10;
+    pickup.object.position.copy(at);
+    pickup.object.visible = true;
+  }
+
+  private retirePickup(pickup: Pickup): void {
+    pickup.active = false;
+    pickup.object.visible = false;
+  }
+
+  private updatePowerups(realDt: number, dt: number, time: number): void {
+    if (this.paused) return;
+    this.buffRapid = Math.max(0, this.buffRapid - dt);
+    this.buffPower = Math.max(0, this.buffPower - dt);
+    // Pickups drift toward the player; touch one with either hand to take it.
+    for (const pickup of this.pickups) {
+      if (!pickup.active) continue;
+      pickup.life -= dt;
+      if (pickup.life <= 0 || this.run.phase === 'title') {
+        this.retirePickup(pickup);
+        continue;
+      }
+      const object = pickup.object;
+      this.v1.copy(this.head).addScaledVector(this.forward, 0.45);
+      this.v1.y -= 0.25;
+      this.v2.subVectors(this.v1, object.position);
+      if (this.v2.length() > 0.05) object.position.addScaledVector(this.v2.normalize(), 0.35 * dt);
+      object.rotation.y += dt * 2;
+      object.scale.setScalar(1 + Math.sin(time * 5) * 0.1);
+      for (const hand of this.hands) {
+        if (!hand.tracked) continue;
+        if (hand.gauntlet.palmPoint.distanceTo(object.position) > 0.16 && (hand.indexTip?.distanceTo(object.position) ?? 1) > 0.12) continue;
+        this.collect(pickup);
+        break;
+      }
+    }
+    // OVERDRIVE: clap the palms together once the meter is full.
+    if (!hasUnlock(this.profile, `overdrive-${this.hero}`) || !this.powersLive) {
+      this.clapArmed = false;
+    } else if (this.hands[0].tracked && this.hands[1].tracked) {
+      const gap = this.hands[0].gauntlet.palmPoint.distanceTo(this.hands[1].gauntlet.palmPoint);
+      if (gap > 0.22) this.clapArmed = true;
+      if (this.clapArmed && gap < 0.09 && this.overdrive >= 1) {
+        this.clapArmed = false;
+        this.v1.addVectors(this.hands[0].gauntlet.palmPoint, this.hands[1].gauntlet.palmPoint).multiplyScalar(0.5);
+        this.unleashOverdrive(this.v1);
+      }
+    }
+    if (this.shockwave && this.shockwaveTime >= 0) {
+      this.shockwaveTime += realDt;
+      const t = this.shockwaveTime / 0.7;
+      if (t >= 1) {
+        this.shockwave.visible = false;
+        this.shockwaveTime = -1;
+      } else {
+        this.shockwave.scale.setScalar(0.2 + t * 6);
+        (this.shockwave.material as MeshBasicMaterial).opacity = 1 - t;
+      }
+    }
+  }
+
+  private collect(pickup: Pickup): void {
+    const at = pickup.object.position;
+    this.flashes.spawn(at, WHITE, 0.05, 0.4, 0.25);
+    this.sfx.coin();
+    if (pickup.kind === 'heal') {
+      this.run.heal(1);
+      this.comic.pop('HEAL!', at, new Color('#39FF88'), 0.35);
+    } else if (pickup.kind === 'rapid') {
+      this.buffRapid = BUFF_SECONDS;
+      this.comic.pop('RAPID!', at, GOLD, 0.35);
+    } else {
+      this.buffPower = BUFF_SECONDS;
+      this.comic.pop('POWER!', at, MAGENTA, 0.35);
+    }
+    this.retirePickup(pickup);
+  }
+
+  private chargeOverdrive(amount: number): void {
+    if (!hasUnlock(this.profile, `overdrive-${this.hero}`)) return;
+    const before = this.overdrive;
+    this.overdrive = Math.min(1, this.overdrive + amount);
+    if (before < 1 && this.overdrive >= 1) this.sfx.swap();
+  }
+
+  /** Shockwave from the clap: wrecks everything nearby, hurts the boss. */
+  private unleashOverdrive(at: Vector3): void {
+    this.overdrive = 0;
+    this.slowmo = 1.1;
+    this.sfx.explode(true);
+    this.sfx.thunder();
+    this.flashes.spawn(at, this.accent, 0.2, 3, 0.8);
+    this.particles.burst(at, this.accent, 160, 5, 0.9, this.v2);
+    this.comic.pop('SURGE!', this.v2.copy(at).setY(at.y + 0.3), this.accent, 0.8);
+    if (this.shockwave) {
+      this.shockwave.position.copy(at);
+      this.shockwave.rotation.set(Math.PI / 2, 0, 0);
+      (this.shockwave.material as MeshBasicMaterial).color.copy(this.accent);
+      this.shockwave.visible = true;
+      this.shockwaveTime = 0;
+    }
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.kind === 'pod') continue;
+      if (drone.object.position.distanceTo(at) > 5.5) continue;
+      this.damageDrone(drone, drone.kind === 'boss' ? 8 : 6, true);
+    }
   }
 
   /** A point on a detected wall facing the player, else a ring in front. */
@@ -1870,13 +2243,40 @@ export class CombatSystem extends createSystem({
         if (drone.portalMaterial.opacity <= 0) drone.portal.visible = false;
       }
 
+      if (drone.state === 'boss') {
+        this.updateBoss(drone, dt, time);
+        continue;
+      }
+      if (drone.state === 'hold') {
+        // Hostage pod: hover, spin the bars, wave for help.
+        drone.object.position.copy(drone.spawn);
+        drone.object.position.y += Math.sin(time * 1.5 + drone.t) * 0.04;
+        drone.ring.rotation.z += 0;
+        const bars = drone.object.getObjectByName('Bars');
+        if (bars) bars.rotation.y += dt * 0.8;
+        const civilian = drone.object.getObjectByName('Civilian');
+        if (civilian) civilian.rotation.z = Math.sin(time * 6 + drone.t) * 0.15;
+        continue;
+      }
+      if (drone.state === 'fly') {
+        // Boss orb: home in on the player's head.
+        this.v1.subVectors(this.head, drone.object.position);
+        const distance = this.v1.length();
+        drone.object.position.addScaledVector(this.v1.normalize(), drone.speed * dt);
+        drone.ring.rotation.x += dt * 6;
+        if (distance < 0.3 || drone.t > 8) {
+          this.retireDrone(drone);
+          if (distance < 0.3) this.hurtPlayer(ENEMIES.orb.damage, false);
+        }
+        continue;
+      }
       if (drone.state === 'emerging') {
         const p = Math.min(1, drone.t / EMERGE_TIME);
         object.scale.setScalar(p);
         object.position.copy(drone.spawn).addScaledVector(drone.normal, 0.35 * p);
         object.lookAt(this.head);
         if (p >= 1) {
-          drone.state = 'approach';
+          drone.state = drone.kind === 'boss' ? 'boss' : 'approach';
           drone.t = 0;
         }
         continue;
@@ -1920,24 +2320,46 @@ export class CombatSystem extends createSystem({
       object.position.y += (Math.random() - 0.5) * 0.01;
       if (drone.t >= def.chargeTime) {
         this.explodeDrone(drone, false);
-        this.run.hit(def.damage);
-        this.damageMaterial.opacity = 0.55;
-        this.damage.visible = true;
-        this.sfx.hurt();
-        this.v1.copy(this.head).addScaledVector(this.forward, 0.6);
-        this.comic.random('hurt', this.v1, MAGENTA, 0.3);
+        this.hurtPlayer(def.damage, drone.counted);
       }
     }
   }
 
-  private damageDrone(drone: Drone, amount = 1): void {
-    drone.hp -= amount;
+  private hurtPlayer(damage: number, counted: boolean): void {
+    if (counted) this.run.hit(damage);
+    else this.run.damage(damage);
+    this.damageMaterial.opacity = 0.55;
+    this.damage.visible = true;
+    this.sfx.hurt();
+    this.v1.copy(this.head).addScaledVector(this.forward, 0.6);
+    this.comic.random('hurt', this.v1, MAGENTA, 0.3);
+  }
+
+  /** `raw` skips the hero damage multiplier (already applied, or environmental). */
+  private damageDrone(drone: Drone, amount = 1, raw = false): void {
+    if (drone.state === 'off') return;
+    drone.hp -= raw ? amount : amount * this.damageScale();
+    if (drone.kind === 'boss') this.chargeOverdrive(0.02);
     if (drone.hp > 0) {
-      this.flashes.spawn(drone.object.position, WHITE, 0.1, 0.4, 0.12);
+      this.flashes.spawn(drone.object.position, WHITE, 0.1, drone.kind === 'boss' ? 0.8 : 0.4, 0.12);
       this.particles.burst(drone.object.position, GOLD, 14, 2, 0.3, this.v2);
       this.sfx.ping();
       return;
     }
+    if (drone.kind === 'pod') {
+      this.freePod(drone);
+      return;
+    }
+    if (drone.kind === 'boss') {
+      this.defeatBoss(drone);
+      return;
+    }
+    if (!drone.counted) {
+      this.explodeDrone(drone, false);
+      return;
+    }
+    this.chargeOverdrive(0.1);
+    this.dropPickup(drone.object.position);
     const last = this.run.kill(drone.kind);
     const big = last || drone.kind === 'titan';
     // Comic word for the kill, rate-limited so swarms don't flood the view.
@@ -1947,6 +2369,23 @@ export class CombatSystem extends createSystem({
     }
     this.explodeDrone(drone, big);
     if (last) this.slowmo = SLOWMO_SECONDS;
+  }
+
+  private defeatBoss(boss: Drone): void {
+    const at = this.v4.copy(boss.object.position);
+    this.comic.pop('KA-BOOM!', this.v1.copy(at).setY(at.y + 0.6), GOLD, 1.0);
+    for (let k = 0; k < 4; k += 1) this.flashes.spawn(at, k % 2 ? WHITE : ENEMY_COLOR.boss, 0.3, 3 + k, 0.9 + k * 0.2);
+    this.particles.burst(at, ENEMY_COLOR.boss, 250, 6, 1.2, this.v2);
+    this.particles.burst(at, GOLD, 120, 8, 0.8, this.v2);
+    // Everything the boss summoned goes with it.
+    for (const drone of this.drones) {
+      if (drone !== boss && drone.state !== 'off' && !drone.counted && drone.kind !== 'pod') this.explodeDrone(drone, false);
+    }
+    this.slowmo = 2;
+    this.sfx.explode(true);
+    this.sfx.thunder();
+    this.explodeDrone(boss, true);
+    this.run.kill('boss');
   }
 
   private explodeDrone(drone: Drone, big: boolean): void {
@@ -1984,7 +2423,9 @@ export class CombatSystem extends createSystem({
     if (phase === 'victory' || phase === 'defeat') {
       this.resultTimer = 0;
       for (const drone of this.drones) {
-        if (drone.state !== 'off') this.explodeDrone(drone, false);
+        if (drone.state === 'off') continue;
+        if (drone.kind === 'pod') this.retireDrone(drone);
+        else this.explodeDrone(drone, false);
       }
       if (phase === 'victory') {
         this.sfx.victory();
@@ -2032,6 +2473,15 @@ export class CombatSystem extends createSystem({
     }
     if (this.paused) message = 'PAUSED';
     this.hud.mesh.visible = run.phase !== 'title' && !(this.panel.visible && !this.paused);
+    const boss = this.drones.find((d) => d.kind === 'boss' && (d.state === 'boss' || d.state === 'emerging'));
+    this.hud.extras.boss = boss ? { name: chapterForWorld(boss.world)?.villain.name ?? 'BOSS', fraction: boss.hp / boss.maxHp } : null;
+    this.hud.extras.overdrive = hasUnlock(this.profile, `overdrive-${this.hero}`) ? this.overdrive : null;
+    this.hud.extras.buffs = [
+      this.buffRapid > 0 ? `RAPID ${Math.ceil(this.buffRapid)}s` : '',
+      this.buffPower > 0 ? `POWER ${Math.ceil(this.buffPower)}s` : '',
+    ]
+      .filter(Boolean)
+      .join('  ');
     this.hud.update(run, message, hint);
 
     // Float above and ahead of the player's gaze, catching up lazily.

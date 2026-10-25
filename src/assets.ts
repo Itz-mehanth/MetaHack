@@ -1,6 +1,16 @@
 import { AssetType, defineAssets } from '@iwsdk/core';
 import { createArena } from './scene-assets/arena.scene-asset.js';
-import { createCore, createDrone, createHammer, createSwarmer, createTitan } from './scene-assets/combat.scene-asset.js';
+import {
+  createBoss,
+  createCore,
+  createDrone,
+  createHammer,
+  createOrb,
+  createPickup,
+  createPod,
+  createSwarmer,
+  createTitan,
+} from './scene-assets/combat.scene-asset.js';
 import { createHeroFigure, createPedestal } from './scene-assets/heroes.scene-asset.js';
 import {
   createForgePlate,
@@ -29,6 +39,16 @@ export default defineAssets({
   swarmer: createSwarmer(),
   titan: createTitan(),
   hammer: createHammer(),
+  'boss-neon-grid': createBoss('#FF2E8C'),
+  'boss-ember-foundry': createBoss('#FF6A00'),
+  'boss-storm-peak': createBoss('#B6A6FF'),
+  'boss-frost-spire': createBoss('#9FE8FF'),
+  'boss-void-rift': createBoss('#C04DFF'),
+  orb: createOrb(),
+  pod: createPod(),
+  'pickup-heal': createPickup('heal'),
+  'pickup-rapid': createPickup('rapid'),
+  'pickup-power': createPickup('power'),
   'hero-arc': createHeroFigure('arc'),
   'hero-talon': createHeroFigure('talon'),
   'hero-tempest': createHeroFigure('tempest'),

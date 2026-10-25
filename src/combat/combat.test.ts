@@ -181,6 +181,38 @@ describe('Run', () => {
     expect(times[3] - times[2]).toBeGreaterThan(1.5);
   });
 
+  it('spawns the boss first in a boss wave and only clears when it falls', () => {
+    const bossStage = STAGES.find((st) => st.number === 3)!;
+    const run = new Run(() => 0.5);
+    run.start(bossStage, OPTS);
+    // Play to the final wave.
+    for (let w = 0; w < bossStage.waves.length - 1; w += 1) {
+      const n = playWave(run);
+      for (let i = 0; i < n; i += 1) run.kill('drone');
+      for (let i = 0; i < 40 && run.phase === 'cleared'; i += 1) run.update(0.1);
+    }
+    for (let i = 0; i < 100 && run.phase !== 'fighting'; i += 1) run.update(0.1);
+    expect(run.update(0.1)).toEqual({ kind: 'boss', speed: 0 });
+    let spawned = 0;
+    for (let i = 0; i < 2000 && spawned < run.waveDef.count; i += 1) if (run.update(0.1)) spawned += 1;
+    for (let i = 0; i < spawned; i += 1) run.kill('drone');
+    expect(run.phase).toBe('fighting');
+    expect(run.kill('boss')).toBe(true);
+    expect(run.phase).toBe('victory');
+  });
+
+  it('applies uncounted damage and healing', () => {
+    const run = new Run();
+    run.start(STAGE, OPTS);
+    for (let i = 0; i < 100 && run.phase !== 'fighting'; i += 1) run.update(0.1);
+    run.damage(2);
+    expect(run.health).toBe(3);
+    run.heal(5);
+    expect(run.health).toBe(5);
+    run.damage(9);
+    expect(run.phase).toBe('defeat');
+  });
+
   it('ignores kills and hits outside the fighting phase', () => {
     const run = new Run();
     expect(run.kill()).toBe(false);
