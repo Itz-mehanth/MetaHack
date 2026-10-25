@@ -180,6 +180,12 @@ export class Sfx {
     this.tone('square', 990, 1320, 0.1, 0.08, 0.08);
   }
 
+  /** Alien rifle shot: lower and buzzier than the player's blasts. */
+  enemyShot(): void {
+    this.tone('sawtooth', 520, 140, 0.18, 0.08);
+    this.tone('square', 260, 90, 0.12, 0.05);
+  }
+
   /** Soft typewriter key click. */
   tick(): void {
     this.tone('square', 1800 + Math.random() * 400, 1500, 0.025, 0.035);

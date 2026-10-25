@@ -1,30 +1,79 @@
 /** Pure enemy and wave data. No Three.js; numbers are metres/seconds. */
 
+/**
+ * Enemy kinds. The walking Hollow Legion aliens keep their original ids:
+ * drone = Grunt (rifle), armored = Brute (heavy), swarmer = Stalker
+ * (melee sprinter), titan = Colossus (giant cannon). boss, orb (enemy
+ * shot) and pod (hostage cage) are special.
+ */
 export type EnemyKind = 'drone' | 'armored' | 'swarmer' | 'titan' | 'boss' | 'orb' | 'pod';
 
 export interface EnemyDef {
+  readonly name: string;
   readonly hp: number;
-  /** Hit radius in metres. */
+  /** Hit radius in metres, around the torso. */
   readonly radius: number;
-  /** Distance from the head at which it starts its self-destruct charge. */
+  /** Melee: distance from the head at which it starts its lunge (0 = never). */
   readonly chargeDistance: number;
   readonly chargeTime: number;
-  /** Side-to-side weave amplitude (m/s) while approaching. */
+  /** Side-to-side sway (m/s) while approaching. */
   readonly weave: number;
-  /** Damage dealt to the player when the charge completes. */
+  /** Damage dealt to the player by a lunge or a shot. */
   readonly damage: number;
   readonly score: number;
+  /** Walks on the floor; `chest` is its torso height above the floor. */
+  readonly ground?: { readonly chest: number; readonly stopDistance: number; readonly fireInterval: number; readonly shotSpeed: number; readonly shots: number };
 }
 
 export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
-  drone: { hp: 1, radius: 0.16, chargeDistance: 0.75, chargeTime: 0.9, weave: 0.25, damage: 1, score: 100 },
-  armored: { hp: 2, radius: 0.21, chargeDistance: 0.75, chargeTime: 0.9, weave: 0.2, damage: 1, score: 200 },
-  swarmer: { hp: 1, radius: 0.12, chargeDistance: 0.6, chargeTime: 0.5, weave: 0.9, damage: 1, score: 80 },
-  titan: { hp: 6, radius: 0.38, chargeDistance: 1.1, chargeTime: 1.6, weave: 0.1, damage: 2, score: 600 },
-  boss: { hp: 40, radius: 0.6, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 3, score: 5000 },
-  orb: { hp: 1, radius: 0.1, chargeDistance: 0.35, chargeTime: 0.05, weave: 0, damage: 1, score: 25 },
+  drone: {
+    name: 'GRUNT',
+    hp: 1,
+    radius: 0.32,
+    chargeDistance: 0,
+    chargeTime: 99,
+    weave: 0.15,
+    damage: 1,
+    score: 100,
+    ground: { chest: 1.15, stopDistance: 2.6, fireInterval: 3.2, shotSpeed: 2.6, shots: 1 },
+  },
+  armored: {
+    name: 'BRUTE',
+    hp: 3,
+    radius: 0.4,
+    chargeDistance: 0,
+    chargeTime: 99,
+    weave: 0.1,
+    damage: 1,
+    score: 250,
+    ground: { chest: 1.32, stopDistance: 2.2, fireInterval: 2.6, shotSpeed: 3, shots: 2 },
+  },
+  swarmer: {
+    name: 'STALKER',
+    hp: 1,
+    radius: 0.3,
+    chargeDistance: 0.85,
+    chargeTime: 0.45,
+    weave: 0.5,
+    damage: 1,
+    score: 80,
+    ground: { chest: 1.0, stopDistance: 0, fireInterval: 0, shotSpeed: 0, shots: 0 },
+  },
+  titan: {
+    name: 'COLOSSUS',
+    hp: 8,
+    radius: 0.6,
+    chargeDistance: 0,
+    chargeTime: 99,
+    weave: 0.05,
+    damage: 2,
+    score: 700,
+    ground: { chest: 1.72, stopDistance: 3.2, fireInterval: 3.6, shotSpeed: 2.2, shots: 3 },
+  },
+  boss: { name: 'BOSS', hp: 40, radius: 0.6, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 3, score: 5000 },
+  orb: { name: 'SHOT', hp: 1, radius: 0.1, chargeDistance: 0.35, chargeTime: 0.05, weave: 0, damage: 1, score: 25 },
   /** Hostage pod: never moves or attacks; destroying it frees the civilian. */
-  pod: { hp: 3, radius: 0.24, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 0, score: 300 },
+  pod: { name: 'CAGE', hp: 3, radius: 0.24, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 0, score: 300 },
 };
 
 export interface WaveDef {

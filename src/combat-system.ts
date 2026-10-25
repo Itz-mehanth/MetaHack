@@ -99,16 +99,18 @@ const EMBER = new Color('#FF6A1A');
 const VIOLET = new Color('#9D8CFF');
 
 const ENEMY_ASSET: Readonly<Record<EnemyKind, string>> = {
-  drone: 'drone',
-  armored: 'drone-armored',
-  swarmer: 'swarmer',
-  titan: 'titan',
+  drone: 'alien-grunt',
+  armored: 'alien-brute',
+  swarmer: 'alien-stalker',
+  titan: 'alien-colossus',
   boss: '',
   orb: 'orb',
   pod: 'pod',
 };
 /** Bosses are loaded separately, one per region. */
-const ENEMY_POOL: Readonly<Record<EnemyKind, number>> = { drone: 14, armored: 8, swarmer: 22, titan: 6, boss: 0, orb: 20, pod: 5 };
+const ENEMY_POOL: Readonly<Record<EnemyKind, number>> = { drone: 12, armored: 8, swarmer: 16, titan: 5, boss: 0, orb: 32, pod: 5 };
+/** Walking pace relative to the wave speed: heavies lumber. */
+const PACE: Partial<Record<EnemyKind, number>> = { armored: 0.8, titan: 0.55 };
 const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   drone: MAGENTA,
   armored: ORANGE,
@@ -150,7 +152,20 @@ interface HandState {
   slashCooldown: number;
 }
 
-type DroneState = 'off' | 'emerging' | 'approach' | 'charge' | 'boss' | 'fly' | 'hold';
+type DroneState = 'off' | 'emerging' | 'approach' | 'charge' | 'boss' | 'fly' | 'hold' | 'aim' | 'shot';
+
+/** Animated joints of a walking alien. */
+interface Rig {
+  legL: Object3D;
+  legR: Object3D;
+  kneeL: Object3D;
+  kneeR: Object3D;
+  armL: Object3D;
+  armR: Object3D;
+  armLRest: number;
+  armRRest: number;
+  muzzle: Object3D | null;
+}
 
 interface Drone {
   object: Object3D;
@@ -179,6 +194,8 @@ interface Drone {
   maxHp: number;
   attackTimer: number;
   bossPhase: number;
+  rig: Rig | null;
+  stride: number;
 }
 
 interface Pickup {
@@ -599,6 +616,8 @@ export class CombatSystem extends createSystem({
           maxHp: 1,
           attackTimer: 0,
           bossPhase: 1,
+          rig: this.findRig(object),
+          stride: 0,
         });
       }
     }
@@ -645,6 +664,8 @@ export class CombatSystem extends createSystem({
         maxHp: 1,
         attackTimer: 0,
         bossPhase: 1,
+        rig: null,
+        stride: 0,
       });
     }
     for (const kind of ['heal', 'rapid', 'power'] as const) {
@@ -680,6 +701,18 @@ export class CombatSystem extends createSystem({
     this.installDebugHooks();
   }
 
+  private findRig(object: Object3D): Rig | null {
+    const get = (name: string) => object.getObjectByName(name);
+    const legL = get('LegL');
+    const legR = get('LegR');
+    const kneeL = get('KneeL');
+    const kneeR = get('KneeR');
+    const armL = get('ArmL');
+    const armR = get('ArmR');
+    if (!legL || !legR || !kneeL || !kneeR || !armL || !armR) return null;
+    return { legL, legR, kneeL, kneeR, armL, armR, armLRest: armL.rotation.x, armRRest: armR.rotation.x, muzzle: get('Muzzle') ?? null };
+  }
+
   /**
    * `?autostart=<stage id>&hero=<hero id>` jumps straight into a mission
    * (for testing and recording); `window.__surge()` reports the game state.
@@ -699,7 +732,10 @@ export class CombatSystem extends createSystem({
     const stage = STAGES.find((s) => s.id === params.get('autostart'));
     if (stage == null) return;
     const hero = (HEROES.find((h) => h.id === params.get('hero'))?.id ?? 'arc') as HeroId;
-    this.startStage(hero, stage);
+    if (params.has('skipstory')) {
+      this.story = levelStory(stage.world.id, stage.number) ?? null;
+      this.launchStage(hero, stage);
+    } else this.startStage(hero, stage);
   }
 
   update(delta: number, time: number): void {
@@ -2048,6 +2084,15 @@ export class CombatSystem extends createSystem({
     }
     drone.counted = counted;
     this.pickSpawn(drone.spawn, drone.normal);
+    const ground = ENEMIES[kind].ground;
+    if (ground) {
+      // Walkers step out of the portal at floor level.
+      drone.normal.y = 0;
+      if (drone.normal.lengthSq() < 1e-4) drone.normal.set(0, 0, 1);
+      drone.normal.normalize();
+      drone.spawn.y = ground.chest;
+      drone.stride = 0;
+    }
     drone.hp = ENEMIES[kind].hp;
     drone.state = 'emerging';
     drone.t = 0;
@@ -2358,7 +2403,8 @@ export class CombatSystem extends createSystem({
     const sin = Math.sin(angle);
     const x = this.v1.x * cos - this.v1.z * sin;
     const z = this.v1.x * sin + this.v1.z * cos;
-    position.set(this.head.x + x * 3.5, this.head.y + (Math.random() - 0.35) * 1.0, this.head.z + z * 3.5);
+    const ringRadius = 3.5 + Math.random() * 2;
+    position.set(this.head.x + x * ringRadius, this.head.y + (Math.random() - 0.35) * 1.0, this.head.z + z * ringRadius);
     normal.set(-x, 0, -z);
   }
 
@@ -2390,6 +2436,21 @@ export class CombatSystem extends createSystem({
         if (civilian) civilian.rotation.z = Math.sin(time * 6 + drone.t) * 0.15;
         continue;
       }
+      if (drone.state === 'shot') {
+        // Enemy plasma shot: straight line, so it can be dodged or shot down.
+        drone.object.position.addScaledVector(drone.offset, dt);
+        drone.ring.rotation.x += dt * 8;
+        const distance = drone.object.position.distanceTo(this.head);
+        if (distance < 0.28 || drone.t > 6) {
+          this.retireDrone(drone);
+          if (distance < 0.28) this.hurtPlayer(ENEMIES.orb.damage, false);
+        }
+        continue;
+      }
+      if ((drone.state === 'approach' || drone.state === 'aim') && ENEMIES[drone.kind].ground) {
+        this.updateWalker(drone, dt, time);
+        continue;
+      }
       if (drone.state === 'fly') {
         // Boss orb: home in on the player's head.
         this.v1.subVectors(this.head, drone.object.position);
@@ -2406,7 +2467,8 @@ export class CombatSystem extends createSystem({
         const p = Math.min(1, drone.t / EMERGE_TIME);
         object.scale.setScalar(p);
         object.position.copy(drone.spawn).addScaledVector(drone.normal, 0.35 * p);
-        object.lookAt(this.head);
+        if (ENEMIES[drone.kind].ground) this.faceHead(object);
+        else object.lookAt(this.head);
         if (p >= 1) {
           drone.state = drone.kind === 'boss' ? 'boss' : 'approach';
           drone.t = 0;
@@ -2468,6 +2530,95 @@ export class CombatSystem extends createSystem({
   }
 
   /** `raw` skips the hero damage multiplier (already applied, or environmental). */
+  /** Turns an upright walker to face the player (yaw only). */
+  private faceHead(object: Object3D): void {
+    object.rotation.set(0, Math.atan2(this.head.x - object.position.x, this.head.z - object.position.z), 0);
+  }
+
+  /**
+   * Walking alien: advance on the player across the floor, then either hold
+   * at range and fire plasma shots (Grunt, Brute, Colossus) or close in and
+   * lunge (Stalker). Legs and arms are animated from distance walked.
+   */
+  private updateWalker(drone: Drone, dt: number, time: number): void {
+    const def = ENEMIES[drone.kind];
+    const ground = def.ground!;
+    const object = drone.object;
+    object.position.y = ground.chest;
+    this.v1.set(this.head.x - object.position.x, 0, this.head.z - object.position.z);
+    const distance = this.v1.length();
+    this.v1.normalize();
+    this.v3.set(-this.v1.z, 0, this.v1.x);
+    this.faceHead(object);
+    let moving = false;
+    if (drone.state === 'approach') {
+      if (ground.stopDistance > 0 && distance <= ground.stopDistance) {
+        drone.state = 'aim';
+        drone.attackTimer = 0.8 + Math.random() * ground.fireInterval;
+      } else if (ground.stopDistance === 0 && distance < def.chargeDistance) {
+        drone.state = 'charge';
+        drone.t = 0;
+      } else {
+        const step = drone.speed * (PACE[drone.kind] ?? 1) * dt;
+        object.position.addScaledVector(this.v1, step);
+        object.position.addScaledVector(this.v3, Math.sin(time * 2 + drone.phase) * def.weave * dt);
+        drone.stride += step;
+        moving = true;
+      }
+    } else {
+      // Holding at range: shuffle sideways and fire.
+      if (distance > ground.stopDistance + 1.2) drone.state = 'approach';
+      const shuffle = Math.sin(time * 0.8 + drone.phase) * 0.25 * dt;
+      object.position.addScaledVector(this.v3, shuffle);
+      drone.stride += Math.abs(shuffle);
+      drone.attackTimer -= dt;
+      if (drone.attackTimer <= 0) {
+        drone.attackTimer = ground.fireInterval * (0.8 + Math.random() * 0.4);
+        this.enemyFire(drone, ground.shots, ground.shotSpeed);
+      }
+    }
+    const rig = drone.rig;
+    if (rig) {
+      const pace = drone.kind === 'swarmer' ? 9 : 6;
+      const swing = moving ? Math.sin(drone.stride * pace) * 0.6 : Math.sin(drone.stride * pace) * 0.15;
+      rig.legL.rotation.x = swing;
+      rig.legR.rotation.x = -swing;
+      rig.kneeL.rotation.x = Math.max(0, -swing) * 1.2;
+      rig.kneeR.rotation.x = Math.max(0, swing) * 1.2;
+      const armSwing = drone.kind === 'swarmer' ? swing * 0.8 : swing * 0.15;
+      rig.armL.rotation.x = rig.armLRest - armSwing;
+      rig.armR.rotation.x = rig.armRRest + armSwing;
+      // Bob with each step.
+      object.position.y = ground.chest + Math.abs(Math.sin(drone.stride * pace)) * (moving ? 0.035 : 0.005);
+    }
+  }
+
+  /** Fires `shots` plasma bolts from a walker's muzzle at the player's head. */
+  private enemyFire(drone: Drone, shots: number, speed: number): void {
+    if (drone.rig?.muzzle) drone.rig.muzzle.getWorldPosition(this.v4);
+    else this.v4.copy(drone.object.position);
+    this.flashes.spawn(this.v4, ENEMY_COLOR[drone.kind], 0.05, 0.3, 0.15);
+    this.sfx.enemyShot();
+    for (let i = 0; i < shots; i += 1) {
+      const shot = this.drones.find((d) => d.state === 'off' && d.kind === 'orb');
+      if (shot == null) return;
+      this.v2.copy(this.head);
+      if (i > 0) {
+        this.v2.x += (Math.random() - 0.5) * 0.6;
+        this.v2.y += (Math.random() - 0.5) * 0.3;
+      }
+      shot.counted = false;
+      shot.hp = 1;
+      shot.state = 'shot';
+      shot.t = 0;
+      shot.object.position.copy(this.v4);
+      shot.offset.subVectors(this.v2, this.v4).normalize().multiplyScalar(speed);
+      shot.object.scale.setScalar(0.8);
+      shot.object.visible = true;
+      shot.portal.visible = false;
+    }
+  }
+
   private damageDrone(drone: Drone, amount = 1, raw = false): void {
     if (drone.state === 'off') return;
     drone.hp -= raw ? amount : amount * this.damageScale();

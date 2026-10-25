@@ -168,6 +168,8 @@ export function setupLanding(world: World): void {
     menu.style.display = 'none';
   });
   xr.addEventListener('sessionend', () => show(true));
+  // Debug/recording deep links go straight into the game.
+  if (new URLSearchParams(window.location.search).has('autostart')) show(false);
 
   const nav = navigator.xr;
   if (nav == null) {

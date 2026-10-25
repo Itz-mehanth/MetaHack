@@ -1,4 +1,5 @@
 import { AssetType, defineAssets } from '@iwsdk/core';
+import { createAlien } from './scene-assets/aliens.scene-asset.js';
 import { createArena } from './scene-assets/arena.scene-asset.js';
 import {
   createBoss,
@@ -39,6 +40,10 @@ export default defineAssets({
   swarmer: createSwarmer(),
   titan: createTitan(),
   hammer: createHammer(),
+  'alien-grunt': createAlien('grunt'),
+  'alien-brute': createAlien('brute'),
+  'alien-stalker': createAlien('stalker'),
+  'alien-colossus': createAlien('colossus'),
   'boss-neon-grid': createBoss('#FF2E8C'),
   'boss-ember-foundry': createBoss('#FF6A00'),
   'boss-storm-peak': createBoss('#B6A6FF'),
