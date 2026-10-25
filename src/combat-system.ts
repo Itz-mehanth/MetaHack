@@ -11,13 +11,17 @@ import {
   PlaneGeometry,
   Quaternion,
   RingGeometry,
+  TorusGeometry,
   type Sprite,
   Vector3,
   VisibilityState,
   XRPlane,
 } from '@iwsdk/core';
+import { Claws } from './combat/claws.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
-import { type HandJoints, isBlastPose } from './combat/gestures.js';
+import { type HandJoints, isBlastPose, isFist } from './combat/gestures.js';
+import { type HeroId, HEROES } from './combat/heroes.js';
+import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
 import { type Phase, Run } from './combat/run.js';
 import { Sfx } from './combat/sfx.js';
@@ -32,6 +36,9 @@ const ARM_TIME = 0.08;
 const BOLT_SPEED = 14;
 const BOLT_LIFE = 1.6;
 const AIM_ASSIST_COS = 0.985;
+const CRESCENT_SPEED = 9;
+const CRESCENT_MIN_SWING = 2.4;
+const CRESCENT_COOLDOWN = 0.35;
 const HOMING_RATE = 3;
 const AIM_SMOOTHING = 0.45;
 const CHARGE_DISTANCE = 0.75;
@@ -45,6 +52,7 @@ const WHITE = new Color('#FFFFFF');
 const ORANGE = new Color('#FF8A1F');
 const MAGENTA = new Color('#FF2D6F');
 const GOLD = new Color('#FFD23F');
+const PINK = new Color('#FF2D9A');
 
 interface HandState {
   handedness: Handedness;
@@ -60,6 +68,10 @@ interface HandState {
   pose: HandPose;
   gauntlet: Gauntlet;
   visualHidden: boolean;
+  claws: Claws;
+  prevTip: Vector3;
+  hasPrevTip: boolean;
+  slashCooldown: number;
 }
 
 type DroneState = 'off' | 'emerging' | 'approach' | 'charge';
@@ -83,6 +95,12 @@ interface Drone {
 
 interface Bolt {
   object: Group;
+  bolt: Object3D;
+  crescent: Object3D;
+  kind: 'bolt' | 'crescent';
+  radius: number;
+  damage: number;
+  speed: number;
   active: boolean;
   life: number;
   position: Vector3;
@@ -135,6 +153,8 @@ export class CombatSystem extends createSystem({
   private particles!: Particles;
   private flashes!: Flashes;
   private hud!: Hud;
+  private wrist!: WristButton;
+  hero: HeroId = 'arc';
   private sfx = new Sfx();
   private hands: HandState[] = [];
   private handSlots: Array<Array<[Triple, number]>> = [];
@@ -149,6 +169,7 @@ export class CombatSystem extends createSystem({
   private damageMaterial!: MeshBasicMaterial;
   private lastPhase: Phase = 'title';
   private slowmo = 0;
+  private elapsed = 0;
   private hudPlaced = false;
   private ready = false;
 
@@ -170,6 +191,9 @@ export class CombatSystem extends createSystem({
     this.flashes = new Flashes(this.root);
     this.hud = new Hud();
     this.root.add(this.hud.mesh);
+    this.wrist = new WristButton();
+    this.root.add(this.wrist.group);
+    this.wrist.setHero('ARC', CYAN);
 
     // Unit-length beam along +Z, starting at its origin.
     const beamGeometry = new CylinderGeometry(0.0025, 0.0012, 1, 6, 1, true);
@@ -182,6 +206,8 @@ export class CombatSystem extends createSystem({
       const joints = emptyHand();
       const gauntlet = new Gauntlet(handedness, CYAN);
       this.root.add(gauntlet.group);
+      const claws = new Claws(handedness, PINK);
+      this.root.add(claws.group);
       const beamMaterial = new MeshBasicMaterial({
         color: CYAN,
         transparent: true,
@@ -208,6 +234,10 @@ export class CombatSystem extends createSystem({
         pose: new HandPose(),
         gauntlet,
         visualHidden: false,
+        claws,
+        prevTip: new Vector3(),
+        hasPrevTip: false,
+        slashCooldown: 0,
       });
       this.handSlots.push(jointSlots(joints));
     }
@@ -215,16 +245,42 @@ export class CombatSystem extends createSystem({
     const boltCore = new CylinderGeometry(0.011, 0.011, 0.24, 6);
     boltCore.rotateX(Math.PI / 2);
     const boltMaterial = new MeshBasicMaterial({ color: '#E8FFFF' });
+    // Crescent shockwave: an arc centred on local +Y, facing local +Z.
+    const crescentGeometry = new TorusGeometry(0.22, 0.014, 6, 28, Math.PI * 0.7);
+    crescentGeometry.rotateZ(Math.PI / 2 - Math.PI * 0.35);
+    const crescentCore = new MeshBasicMaterial({ color: '#FFFFFF', toneMapped: false });
+    const crescentSheath = new MeshBasicMaterial({
+      color: PINK,
+      transparent: true,
+      opacity: 0.8,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false,
+    });
     for (let i = 0; i < 28; i += 1) {
       const object = new Group();
       object.name = `Bolt-${i}`;
+      const boltVisual = new Group();
       const glow = createGlowSprite(CYAN, 0.9);
       glow.scale.setScalar(0.2);
-      object.add(new Mesh(boltCore, boltMaterial), glow);
+      boltVisual.add(new Mesh(boltCore, boltMaterial), glow);
+      const crescent = new Group();
+      const inner = new Mesh(crescentGeometry, crescentCore);
+      inner.scale.set(0.97, 0.97, 0.4);
+      const outer = new Mesh(crescentGeometry, crescentSheath);
+      outer.scale.set(1, 1, 2.5);
+      crescent.add(inner, outer);
+      object.add(boltVisual, crescent);
       object.visible = false;
       this.root.add(object);
       this.bolts.push({
         object,
+        bolt: boltVisual,
+        crescent,
+        kind: 'bolt',
+        radius: 0.06,
+        damage: 1,
+        speed: BOLT_SPEED,
         active: false,
         life: 0,
         position: new Vector3(),
@@ -318,6 +374,7 @@ export class CombatSystem extends createSystem({
     if (this.arena) this.arena.visible = !this.isPassthrough();
     if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) return;
     const realDt = Math.min(delta, 0.05);
+    this.elapsed = time;
     if (this.slowmo > 0) this.slowmo -= realDt;
     const dt = this.slowmo > 0 ? realDt * SLOWMO_SCALE : realDt;
 
@@ -329,7 +386,9 @@ export class CombatSystem extends createSystem({
 
     this.readHands();
     for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
+    if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.cycleHero();
     this.updateHands(realDt);
+    this.updateClaws(realDt);
 
     const order = this.run.update(dt);
     if (order) this.spawnDrone(order.armored, order.speed);
@@ -410,7 +469,7 @@ export class CombatSystem extends createSystem({
   private updateHands(dt: number): void {
     for (const hand of this.hands) {
       hand.cooldown -= dt;
-      const posed = hand.tracked && isBlastPose(hand.joints, hand.handedness, this.headTriple);
+      const posed = this.hero === 'arc' && hand.tracked && isBlastPose(hand.joints, hand.handedness, this.headTriple);
       if (!posed) {
         hand.armTime = 0;
         hand.glow.material.opacity = Math.max(0, hand.glow.material.opacity - dt * 6);
@@ -458,6 +517,95 @@ export class CombatSystem extends createSystem({
   }
 
 
+  // ---------------------------------------------------------------- heroes
+
+  private cycleHero(): void {
+    const index = HEROES.findIndex((h) => h.id === this.hero);
+    const next = HEROES[(index + 1) % HEROES.length];
+    this.hero = next.id;
+    const color = new Color(next.color);
+    for (const hand of this.hands) hand.gauntlet.setAccent(color);
+    this.wrist.setHero(next.name, color);
+    this.flashes.spawn(this.wrist.center, color, 0.05, 0.4, 0.3);
+    this.particles.burst(this.wrist.center, color, 30, 1.2, 0.4, this.v2);
+    this.sfx.swap();
+  }
+
+  /** TALON: fist extends blades; contact cuts, fast swings throw crescents. */
+  private updateClaws(dt: number): void {
+    for (const hand of this.hands) {
+      const claws = hand.claws;
+      const out = this.hero === 'talon' && hand.tracked && isFist(hand.joints);
+      const wasOut = claws.extension > 0.5;
+      claws.update(hand.pose, out, dt, this.elapsed);
+      hand.slashCooldown -= dt;
+      if (out && !wasOut && claws.extension > 0.5) this.sfx.shing();
+      if (claws.extension < 0.8 || dt <= 0) {
+        hand.hasPrevTip = false;
+        continue;
+      }
+      if (!hand.hasPrevTip) {
+        hand.prevTip.copy(claws.tip);
+        hand.hasPrevTip = true;
+        continue;
+      }
+      const speed = this.v3.subVectors(claws.tip, hand.prevTip).length() / dt;
+
+      if (this.coreVisible && this.core) {
+        if (
+          this.segmentHits(claws.base, claws.tip, this.core.position, 0.2) ||
+          this.segmentHits(hand.prevTip, claws.tip, this.core.position, 0.2)
+        ) {
+          this.hitCore();
+        }
+      }
+      for (const drone of this.drones) {
+        if (drone.state === 'off' || drone.state === 'emerging') continue;
+        const radius = DRONE_RADIUS * (drone.armored ? 1.3 : 1) + 0.03;
+        const at = drone.object.position;
+        if (this.segmentHits(claws.base, claws.tip, at, radius) || this.segmentHits(hand.prevTip, claws.tip, at, radius)) {
+          this.sfx.slash();
+          this.damageDrone(drone, 2);
+        }
+      }
+
+      if (speed > CRESCENT_MIN_SWING && hand.slashCooldown <= 0) {
+        hand.slashCooldown = CRESCENT_COOLDOWN;
+        this.v4.subVectors(claws.tip, hand.prevTip).normalize();
+        this.fireCrescent(claws.tip, this.v4, claws.direction);
+      }
+      hand.prevTip.copy(claws.tip);
+    }
+  }
+
+  private fireCrescent(origin: Vector3, direction: Vector3, bladeDirection: Vector3): void {
+    const bolt = this.bolts.find((b) => !b.active);
+    if (bolt == null) return;
+    bolt.kind = 'crescent';
+    bolt.radius = 0.24;
+    bolt.damage = 2;
+    bolt.speed = CRESCENT_SPEED;
+    bolt.target = null;
+    bolt.bolt.visible = false;
+    bolt.crescent.visible = true;
+    bolt.crescent.scale.setScalar(1);
+    bolt.active = true;
+    bolt.life = BOLT_LIFE;
+    bolt.position.copy(origin);
+    bolt.previous.copy(origin);
+    bolt.velocity.copy(direction).multiplyScalar(CRESCENT_SPEED);
+    // Lay the arc along the blade: local up is perpendicular to swing and blade.
+    bolt.object.up.crossVectors(direction, bladeDirection);
+    if (bolt.object.up.lengthSq() < 1e-6) bolt.object.up.set(0, 1, 0);
+    bolt.object.up.normalize();
+    bolt.object.position.copy(origin);
+    this.v1.copy(origin).add(direction);
+    bolt.object.lookAt(this.v1);
+    bolt.object.visible = true;
+    this.flashes.spawn(origin, PINK, 0.05, 0.35, 0.18);
+    this.sfx.crescent();
+  }
+
   // ---------------------------------------------------------------- bolts
 
   private fire(origin: Vector3, direction: Vector3): void {
@@ -477,11 +625,18 @@ export class CombatSystem extends createSystem({
       const cos = this.v2.subVectors(this.core.position, origin).normalize().dot(direction);
       if (cos > best) bolt.target = 'core';
     }
+    bolt.kind = 'bolt';
+    bolt.radius = 0.06;
+    bolt.damage = 1;
+    bolt.speed = BOLT_SPEED;
+    bolt.bolt.visible = true;
+    bolt.crescent.visible = false;
     bolt.active = true;
     bolt.life = BOLT_LIFE;
     bolt.position.copy(origin);
     bolt.previous.copy(origin);
     bolt.velocity.copy(direction).multiplyScalar(BOLT_SPEED);
+    bolt.object.up.set(0, 1, 0);
     bolt.object.visible = true;
     bolt.object.position.copy(origin);
     this.flashes.spawn(origin, CYAN, 0.05, 0.25, 0.15);
@@ -497,8 +652,8 @@ export class CombatSystem extends createSystem({
       bolt.target = null;
       return;
     }
-    this.v2.subVectors(point, bolt.position).normalize().multiplyScalar(BOLT_SPEED);
-    bolt.velocity.lerp(this.v2, amount).setLength(BOLT_SPEED);
+    this.v2.subVectors(point, bolt.position).normalize().multiplyScalar(bolt.speed);
+    bolt.velocity.lerp(this.v2, amount).setLength(bolt.speed);
   }
 
   private updateBolts(dt: number): void {
@@ -516,20 +671,25 @@ export class CombatSystem extends createSystem({
       this.v1.copy(bolt.position).add(bolt.velocity);
       bolt.object.lookAt(this.v1);
       this.v2.set(0, 0, 0);
-      this.particles.emit(bolt.previous, this.v2, CYAN, 0.18, 0);
+      const crescent = bolt.kind === 'crescent';
+      this.particles.emit(bolt.previous, this.v2, crescent ? PINK : CYAN, crescent ? 0.3 : 0.18, 0);
+      if (crescent) bolt.crescent.scale.setScalar(1 + (BOLT_LIFE - bolt.life) * 1.2);
 
-      if (this.coreVisible && this.core && this.segmentHits(bolt.previous, bolt.position, this.core.position, 0.22)) {
+      if (this.coreVisible && this.core && this.segmentHits(bolt.previous, bolt.position, this.core.position, 0.16 + bolt.radius)) {
         this.retireBolt(bolt);
         this.hitCore();
         continue;
       }
       for (const drone of this.drones) {
         if (drone.state === 'off') continue;
-        const radius = DRONE_RADIUS * (drone.armored ? 1.3 : 1) + 0.06;
+        const radius = DRONE_RADIUS * (drone.armored ? 1.3 : 1) + bolt.radius;
         if (this.segmentHits(bolt.previous, bolt.position, drone.object.position, radius)) {
-          this.retireBolt(bolt);
-          this.damageDrone(drone);
-          break;
+          this.damageDrone(drone, bolt.damage);
+          // Crescents cut through everything in their path.
+          if (!crescent) {
+            this.retireBolt(bolt);
+            break;
+          }
         }
       }
     }
@@ -674,8 +834,8 @@ export class CombatSystem extends createSystem({
     }
   }
 
-  private damageDrone(drone: Drone): void {
-    drone.hp -= 1;
+  private damageDrone(drone: Drone, amount = 1): void {
+    drone.hp -= amount;
     if (drone.hp > 0) {
       this.flashes.spawn(drone.object.position, WHITE, 0.1, 0.4, 0.12);
       this.particles.burst(drone.object.position, GOLD, 14, 2, 0.3, this.v2);
@@ -766,11 +926,11 @@ export class CombatSystem extends createSystem({
     switch (run.phase) {
       case 'title':
         message = 'HANDFORGE';
-        hint = 'Open your palm at the core to begin';
+        hint = this.hero === 'arc' ? 'Open your palm at the core to begin' : 'Slash the core to begin';
         break;
       case 'intro':
         message = `WAVE ${run.wave + 1}`;
-        hint = run.wave === 0 ? 'Palm out to blast  -  stop the drones' : '';
+        hint = run.wave === 0 ? 'Tap your left wrist to switch hero' : '';
         break;
       case 'cleared':
         message = 'CLEARED';

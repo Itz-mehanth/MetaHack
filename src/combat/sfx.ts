@@ -83,6 +83,47 @@ export class Sfx {
     this.tone('square', 330, 660, 0.25, 0.1, 0.15);
   }
 
+  private hissHigh(duration: number, gain: number): void {
+    if (this.ctx == null || this.master == null || this.noise == null) return;
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(2500, t);
+    filter.frequency.exponentialRampToValueAtTime(7000, t + duration);
+    const amp = this.ctx.createGain();
+    amp.gain.setValueAtTime(gain, t);
+    amp.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    src.connect(filter).connect(amp).connect(this.master);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + duration + 0.02);
+  }
+
+  /** Blades sliding out. */
+  shing(): void {
+    this.hissHigh(0.25, 0.35);
+    this.tone('triangle', 2400, 3600, 0.2, 0.08);
+  }
+
+  /** Blade contact. */
+  slash(): void {
+    this.hissHigh(0.12, 0.5);
+    this.tone('sawtooth', 600, 120, 0.12, 0.15);
+  }
+
+  /** Thrown shockwave. */
+  crescent(): void {
+    this.tone('sawtooth', 300, 1200, 0.18, 0.12);
+    this.hissHigh(0.2, 0.25);
+  }
+
+  /** Hero switch. */
+  swap(): void {
+    this.tone('square', 660, 990, 0.1, 0.1);
+    this.tone('square', 990, 1320, 0.1, 0.08, 0.08);
+  }
+
   victory(): void {
     [523, 659, 784, 1047].forEach((f, i) => this.tone('triangle', f, f, 0.35, 0.18, i * 0.12));
   }
