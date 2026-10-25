@@ -519,6 +519,17 @@ export class Panel {
     // Scanlines for the hologram look.
     c.fillStyle = 'rgba(0, 0, 0, 0.25)';
     for (let y = w.y + 8; y < w.y + w.h - 8; y += 8) c.fillRect(w.x + 8, y, w.w - 16, 3);
+    // Signal glitch as a new line comes in: torn, colour-split bars.
+    const glitch = w.value ?? 0;
+    if (glitch > 0) {
+      for (let i = 0; i < Math.ceil(glitch * 7); i += 1) {
+        const y = w.y + 20 + Math.random() * (w.h - 40);
+        const h = 4 + Math.random() * 14;
+        const shift = (Math.random() - 0.5) * 60 * glitch;
+        c.fillStyle = i % 2 ? `rgba(255, 45, 154, ${0.5 * glitch})` : `rgba(61, 245, 255, ${0.5 * glitch})`;
+        c.fillRect(w.x + 10 + shift, y, w.w - 20, h);
+      }
+    }
   }
 
   private drawText(w: Widget): void {

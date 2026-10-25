@@ -180,6 +180,11 @@ export class Sfx {
     this.tone('square', 990, 1320, 0.1, 0.08, 0.08);
   }
 
+  /** Soft typewriter key click. */
+  tick(): void {
+    this.tone('square', 1800 + Math.random() * 400, 1500, 0.025, 0.035);
+  }
+
   /** Radio blip at the start of a transmission line. */
   radio(): void {
     this.hiss(0.08, 4000, 0.15);

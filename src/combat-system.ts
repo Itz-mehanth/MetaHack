@@ -27,7 +27,7 @@ import { type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose } from './c
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { HoloMap } from './combat/holomap.js';
-import { GameMenus } from './combat/menus.js';
+import { GameMenus, wrap } from './combat/menus.js';
 import { ENEMIES, type EnemyKind } from './combat/missions.js';
 import { Music } from './combat/music.js';
 import { Panel } from './combat/panel-ui.js';
@@ -41,12 +41,12 @@ import {
   type Profile,
   recordResult,
   type Stage,
+  STAGES,
   upgradeLevel,
 } from './combat/progression.js';
 import { loadProfile, resetProfile, saveProfile } from './combat/save.js';
 import { applyTheme, setFlash, type Theme, THEMES } from './combat/themes.js';
 import { chapterFor, chapterForWorld, type Line, type LevelStory, levelStory } from './combat/story.js';
-import { Voice } from './combat/voice.js';
 import { createCocoon, WebStrand } from './combat/web.js';
 import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
@@ -282,11 +282,22 @@ export class CombatSystem extends createSystem({
   private holomap = new HoloMap();
   private markers = new Map<string, Object3D>();
   private mapPokeCooldown = 0;
-  private voice = new Voice();
   private story: LevelStory | null = null;
   private taunt = '';
   private tauntWave = -1;
-  private tx: { lines: readonly Line[]; index: number; timer: number; done: () => void } | null = null;
+  private tx: {
+    lines: readonly Line[];
+    index: number;
+    /** Reading time left once the line has finished typing. */
+    timer: number;
+    done: () => void;
+    /** Current line, pre-wrapped for the panel. */
+    full: string;
+    typed: number;
+    shown: number;
+    glitch: number;
+    blink: number;
+  } | null = null;
   private pendingReward: Parameters<GameMenus['showResults']>[0] | null = null;
   private comic!: Onomatopoeia;
   private comicCooldown = 0;
@@ -358,8 +369,6 @@ export class CombatSystem extends createSystem({
     this.root.add(this.panel.group);
     this.music = new Music(this.sfx);
     this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
-    this.voice.setVolume(this.profile.settings.sfx);
-    this.voice.enabled = this.profile.settings.voices;
     this.menus = new GameMenus(this.profile, {
       play: (hero, stage) => this.startStage(hero, stage),
       resume: () => this.resumeStage(),
@@ -374,7 +383,7 @@ export class CombatSystem extends createSystem({
         this.holomap.selected = index;
         this.sfx.swap();
       },
-      txNext: () => this.advanceTransmission(),
+      txNext: () => this.nextTransmissionLine(),
       txSkip: () => this.endTransmission(),
       resetProgress: () => {
         this.profile = resetProfile();
@@ -569,8 +578,8 @@ export class CombatSystem extends createSystem({
         this.root.add(portal);
         this.drones.push({
           object,
-          ring: object.getObjectByName('Ring')!,
-          eye: object.getObjectByName('Eye')!,
+          ring: object.getObjectByName('Ring') ?? new Group(),
+          eye: object.getObjectByName('Eye') ?? new Group(),
           kind,
           hp: 0,
           state: 'off',
@@ -615,8 +624,8 @@ export class CombatSystem extends createSystem({
       this.root.add(cocoon);
       this.drones.push({
         object,
-        ring: object.getObjectByName('Ring')!,
-        eye: object.getObjectByName('Eye')!,
+        ring: object.getObjectByName('Ring') ?? new Group(),
+        eye: object.getObjectByName('Eye') ?? new Group(),
         kind: 'boss',
         hp: 0,
         state: 'off',
@@ -668,9 +677,46 @@ export class CombatSystem extends createSystem({
     }
     this.showMenu('main');
     this.ready = true;
+    this.installDebugHooks();
+  }
+
+  /**
+   * `?autostart=<stage id>&hero=<hero id>` jumps straight into a mission
+   * (for testing and recording); `window.__surge()` reports the game state.
+   */
+  private installDebugHooks(): void {
+    (window as unknown as { __surge: () => object }).__surge = () => ({
+      phase: this.run.phase,
+      wave: this.run.wave,
+      health: this.run.health,
+      transmission: this.tx != null,
+      screen: this.menus.screen,
+      panel: this.panel.visible,
+      live: this.powersLive,
+      enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}:${d.state}`),
+    });
+    const params = new URLSearchParams(window.location.search);
+    const stage = STAGES.find((s) => s.id === params.get('autostart'));
+    if (stage == null) return;
+    const hero = (HEROES.find((h) => h.id === params.get('hero'))?.id ?? 'arc') as HeroId;
+    this.startStage(hero, stage);
   }
 
   update(delta: number, time: number): void {
+    // One bad frame must never freeze the game: log (throttled) and carry on.
+    try {
+      this.frame(delta, time);
+    } catch (error) {
+      if (time - this.lastErrorAt > 2) {
+        this.lastErrorAt = time;
+        console.error('[Combat] frame error', error);
+      }
+    }
+  }
+
+  private lastErrorAt = -10;
+
+  private frame(delta: number, time: number): void {
     if (!this.ready) return;
     if (this.arena) this.arena.visible = !this.isPassthrough();
     if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) return;
@@ -972,7 +1018,6 @@ export class CombatSystem extends createSystem({
     for (const drone of this.drones) {
       if (drone.state !== 'off') this.retireDrone(drone);
     }
-    this.voice.stop();
     this.tx = null;
     this.showMenu('map');
   }
@@ -1035,7 +1080,7 @@ export class CombatSystem extends createSystem({
       done();
       return;
     }
-    this.tx = { lines, index: -1, timer: 0, done };
+    this.tx = { lines, index: -1, timer: 0, done, full: '', typed: 0, shown: -1, glitch: 0, blink: 0 };
     this.panel.hide();
     this.advanceTransmission();
   }
@@ -1057,13 +1102,13 @@ export class CombatSystem extends createSystem({
       line.speaker === 'vex' ? 'Lord of the Hollow Legion' : line.speaker === 'villain' ? chapter.villain.title : line.speaker === 'hero' ? hero.power : 'Rescued';
     const color =
       line.speaker === 'vex' ? '#C04DFF' : line.speaker === 'villain' ? chapter.villain.color : line.speaker === 'hero' ? equippedColor(this.profile, this.hero) : '#FFE58A';
-    this.menus.transmission = { speaker: line.speaker, name, title, color, text: line.text, index: tx.index, total: tx.lines.length };
-    // Auto-advance after the line is spoken, or after a reading-time fallback.
-    tx.timer = Math.max(3, line.text.length * 0.075 + 1.5);
-    const index = tx.index;
-    this.voice.speak(line.text, line.speaker, () => {
-      if (this.tx === tx && tx.index === index) tx.timer = Math.min(tx.timer, 0.9);
-    });
+    // The line types itself out; reading time starts once it is complete.
+    tx.full = wrap(line.text, 34);
+    tx.typed = 0;
+    tx.shown = -1;
+    tx.glitch = 1;
+    tx.timer = 1.4 + tx.full.length * 0.035;
+    this.menus.transmission = { speaker: line.speaker, name, title, color, text: '', index: tx.index, total: tx.lines.length, glitch: 1 };
     this.sfx.radio();
     if (this.menus.screen === 'transmission' && this.panel.visible) this.panel.setContent(this.menus.content());
     else this.showMenu('transmission');
@@ -1088,7 +1133,32 @@ export class CombatSystem extends createSystem({
       console.error('[Combat] transmission follow-up failed', error);
       this.recoverMenus();
     }
-    this.voice.stop();
+  }
+
+  /** NEXT: finish typing the current line, or move to the next one. */
+  private nextTransmissionLine(): void {
+    const tx = this.tx;
+    if (tx == null) return;
+    if (tx.typed < tx.full.length) {
+      tx.typed = tx.full.length;
+      this.renderTransmission(true);
+    } else this.advanceTransmission();
+  }
+
+  /** Pushes the typed portion of the line (with cursor and glitch) to the panel. */
+  private renderTransmission(force = false): void {
+    const tx = this.tx;
+    const view = this.menus.transmission;
+    if (tx == null || view == null) return;
+    const count = Math.min(tx.full.length, Math.floor(tx.typed));
+    const typing = count < tx.full.length;
+    const cursor = typing || Math.floor(tx.blink * 2) % 2 === 0 ? '\u258C' : ' ';
+    const text = `${tx.full.slice(0, count)}${cursor}`;
+    const glitch = Math.round(tx.glitch * 10) / 10;
+    if (!force && text === view.text && glitch === view.glitch) return;
+    view.text = text;
+    view.glitch = glitch;
+    if (this.panel.visible && this.menus.screen === 'transmission') this.panel.setContent(this.menus.content());
   }
 
   /** Last-resort recovery after an unexpected error: back to the war map. */
@@ -1096,7 +1166,6 @@ export class CombatSystem extends createSystem({
     this.tx = null;
     this.paused = false;
     this.resultTimer = -1;
-    this.voice.stop();
     try {
       if (this.run.phase !== 'title') this.run.toTitle();
       this.showMenu('map');
@@ -1113,8 +1182,24 @@ export class CombatSystem extends createSystem({
       return;
     }
     if (this.paused) return;
-    this.tx.timer -= dt;
-    if (this.tx.timer > 0) return;
+    const tx = this.tx;
+    tx.glitch = Math.max(0, tx.glitch - dt * 2.5);
+    if (tx.typed < tx.full.length) {
+      // Typewriter: about 32 characters a second, with soft key clicks.
+      const before = Math.floor(tx.typed);
+      tx.typed = Math.min(tx.full.length, tx.typed + dt * 32);
+      const after = Math.floor(tx.typed);
+      if (after - tx.shown >= 2 || after >= tx.full.length) {
+        tx.shown = after;
+        if (after > before && tx.full[after - 1] !== ' ') this.sfx.tick();
+        this.renderTransmission();
+      }
+      return;
+    }
+    tx.blink += dt;
+    this.renderTransmission();
+    tx.timer -= dt;
+    if (tx.timer > 0) return;
     try {
       this.advanceTransmission();
     } catch (error) {
@@ -1130,7 +1215,6 @@ export class CombatSystem extends createSystem({
     this.tauntWave = run.wave;
     const taunts = this.story.taunts;
     this.taunt = taunts[(run.wave - 1) % taunts.length];
-    this.voice.speak(this.taunt, 'villain');
   }
 
   /** Shows the hero carousel only on the hero screen, in sync with its focus. */
@@ -1212,9 +1296,6 @@ export class CombatSystem extends createSystem({
   private profileChanged(): void {
     saveProfile(this.profile);
     this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
-    this.voice.setVolume(this.profile.settings.sfx);
-    this.voice.enabled = this.profile.settings.voices;
-    if (!this.voice.enabled) this.voice.stop();
     this.applySkin();
   }
 
@@ -2025,8 +2106,6 @@ export class CombatSystem extends createSystem({
     this.music.play('void-rift');
     const villain = chapterForWorld(region)?.villain.name ?? 'BOSS';
     this.comic.pop('BOSS!', this.v2.copy(boss.spawn).setY(boss.spawn.y + 0.9), ENEMY_COLOR.boss, 0.9);
-    const line = this.story?.intro.find((l) => l.speaker !== 'hero')?.text;
-    if (line) this.voice.speak(line, region === 'void-rift' ? 'vex' : 'villain');
     this.taunt = `${villain} has arrived!`;
     return boss;
   }
@@ -2046,7 +2125,6 @@ export class CombatSystem extends createSystem({
       boss.bossPhase = phase;
       const taunts = this.story?.taunts ?? [];
       const taunt = taunts[(phase - 1) % Math.max(1, taunts.length)] ?? 'ENOUGH!';
-      this.voice.speak(taunt, boss.world === 'void-rift' ? 'vex' : 'villain');
       this.taunt = taunt;
       this.comic.pop('RAAAGH!', this.v2.copy(object.position).setY(object.position.y + 0.9), ENEMY_COLOR.boss, 0.8);
       this.flashes.spawn(object.position, ENEMY_COLOR.boss, 0.5, 2.5, 0.6);
@@ -2306,7 +2384,6 @@ export class CombatSystem extends createSystem({
         // Hostage pod: hover, spin the bars, wave for help.
         drone.object.position.copy(drone.spawn);
         drone.object.position.y += Math.sin(time * 1.5 + drone.t) * 0.04;
-        drone.ring.rotation.z += 0;
         const bars = drone.object.getObjectByName('Bars');
         if (bars) bars.rotation.y += dt * 0.8;
         const civilian = drone.object.getObjectByName('Civilian');

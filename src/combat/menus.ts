@@ -31,6 +31,8 @@ export interface TransmissionView {
   text: string;
   index: number;
   total: number;
+  /** 0..1 hologram glitch on the portrait, high when a line starts. */
+  glitch: number;
 }
 
 /** Breaks `text` into lines of at most `width` characters. */
@@ -359,8 +361,8 @@ export class GameMenus {
       subtitle: `${tx.name}${tx.title ? ` - ${tx.title}` : ''}`,
       accent: tx.color,
       widgets: [
-        { id: 'portrait', kind: 'portrait', x: 64, y: 220, w: 420, h: 560, label: tx.speaker, color: tx.color },
-        { id: 'tx-text', kind: 'text', x: 530, y: 260, w: 1000, h: 480, label: `"${wrap(tx.text, 34)}"`, size: 54, color: '#FFFFFF' },
+        { id: 'portrait', kind: 'portrait', x: 64, y: 220, w: 420, h: 560, label: tx.speaker, color: tx.color, value: tx.glitch },
+        { id: 'tx-text', kind: 'text', x: 530, y: 260, w: 1000, h: 480, label: tx.text, size: 54, color: '#FFFFFF' },
         { id: 'tx-count', kind: 'text', x: 530, y: 720, w: 1000, h: 40, label: `${tx.index + 1} / ${tx.total}`, size: 30, color: tx.color },
         { id: 'tx-next', x: 530, y: 800, w: 480, h: 130, label: tx.index + 1 < tx.total ? 'NEXT' : 'CONTINUE', selected: true, color: tx.color },
         { id: 'tx-skip', x: 1050, y: 800, w: 480, h: 130, label: 'SKIP' },
@@ -445,10 +447,9 @@ export class GameMenus {
         { id: 'aim', x: 64, y: 530, w: 460, h: 110, label: 'AIM ASSIST', sub: s.aimAssist ? 'ON' : 'OFF', selected: s.aimAssist },
         { id: 'difficulty', x: 544, y: 530, w: 460, h: 110, label: 'DIFFICULTY', sub: s.difficulty.toUpperCase() },
         { id: 'lefty', x: 1024, y: 530, w: 512, h: 110, label: 'BOW HAND', sub: s.leftHanded ? 'RIGHT HAND' : 'LEFT HAND' },
-        { id: 'voices', x: 64, y: 690, w: 460, h: 110, label: 'VOICES', sub: s.voices ? 'ON' : 'OFF', selected: s.voices },
         {
           id: 'reset',
-          x: 544,
+          x: 64,
           y: 690,
           w: 620,
           h: 110,
@@ -644,10 +645,6 @@ export class GameMenus {
         return;
       case 'aim':
         p.settings.aimAssist = !p.settings.aimAssist;
-        this.actions.changed();
-        return;
-      case 'voices':
-        p.settings.voices = !p.settings.voices;
         this.actions.changed();
         return;
       case 'lefty':
