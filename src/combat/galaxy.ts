@@ -178,7 +178,7 @@ export class Galaxy {
     c.fillStyle = '#FF4FD8';
     c.fillText('OBLIVAX', 256, 62);
     c.font = `44px ${FONT}`;
-    const sub = finale ? 'CONVERGENCE READY!' : `ANCHORS ${anchors}/8 - NEED 3`;
+    const sub = finale ? 'CONVERGENCE READY!' : `ANCHORS ${anchors}/9 - NEED 3`;
     c.lineWidth = 9;
     c.strokeText(sub, 256, 128);
     c.fillStyle = finale ? '#FFD23F' : '#E9FCFF';

@@ -95,6 +95,7 @@ const STYLES: Readonly<Record<string, { armor: string; metal: number; rough: num
   havoc: { armor: '#3A3024', metal: 0.2, rough: 0.75, trim: '#5A5040', emitter: false, fingerless: true },
   ronin: { armor: '#121218', metal: 0.6, rough: 0.18, trim: '#C9973A', emitter: false },
   psion: { armor: '#1E1430', metal: 0.7, rough: 0.3, trim: '#B9A6FF', emitter: false },
+  vanguard: { armor: '#1C2A4A', metal: 0.85, rough: 0.3, trim: '#C8D0DC', emitter: false },
 };
 
 
@@ -230,6 +231,12 @@ export class Gauntlet {
       add('ronin', this.back, at(new Mesh(new BoxGeometry(0.07 - k * 0.006, 0.002, 0.003), this.trim), 0, 0.018 + k * 0.003, z - 0.015));
     }
     add('ronin', this.cuff, at(new Mesh(new TorusGeometry(0.046, 0.005, 6, 32), new MeshStandardMaterial({ color: '#8A1020', roughness: 0.8 })), 0, 0, 0.0));
+    // VANGUARD: armoured knuckle bar and a bracer with a star-free hex stud.
+    add('vanguard', this.back, at(new Mesh(new BoxGeometry(0.075, 0.012, 0.018), this.trim), 0, 0.014, -0.035));
+    const vbracer = new CylinderGeometry(0.047, 0.05, 0.1, 20, 1, true);
+    vbracer.rotateX(Math.PI / 2);
+    add('vanguard', this.cuff, at(new Mesh(vbracer, this.armor), 0, 0, 0.08));
+    add('vanguard', this.cuff, at(new Mesh(new CylinderGeometry(0.012, 0.012, 0.006, 6), this.accent), 0, 0.05, 0.08, 0, 0, 0));
     // PSION: two rings orbiting the wrist (animated) and glowing fingertips.
     for (let i = 0; i < 2; i += 1) {
       const ring = new Mesh(new TorusGeometry(0.058 + i * 0.012, 0.0025, 4, 40), this.accent);

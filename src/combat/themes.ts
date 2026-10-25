@@ -89,6 +89,18 @@ export const THEMES: Readonly<Record<string, Theme>> = {
     bandB: '#3DE0C8',
     ambient: 'dust',
   },
+  'iron-bastion': {
+    top: '#05080F',
+    mid: '#1A2438',
+    horizon: '#FF8A3D',
+    accent: '#3D6BFF',
+    gridMinor: '#2A3A6A',
+    gridMajor: '#3D6BFF',
+    ring: '#3D6BFF',
+    bandA: '#3D6BFF',
+    bandB: '#FF8A3D',
+    ambient: 'embers',
+  },
   oblivion: {
     top: '#000000',
     mid: '#12001A',

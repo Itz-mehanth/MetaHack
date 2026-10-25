@@ -56,6 +56,11 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
     { gesture: 'cross', title: 'CROSS BOTH BLADES', sub: 'Unleashes an X-STRIKE.' },
     { gesture: 'swing', title: 'BLOCK THEIR SWING', sub: 'Meet an enemy blade with yours to PARRY.' },
   ],
+  vanguard: [
+    { gesture: 'fist', title: 'RAISE YOUR SHIELD ARM', sub: 'Blocks shots and blades and bounces shots back.' },
+    { gesture: 'throw', title: 'SWING AND LET GO', sub: 'The shield ricochets between enemies and comes back.' },
+    { gesture: 'swing', title: 'PUNCH', sub: 'Your other fist hits like a truck.' },
+  ],
   psion: [
     { gesture: 'palm', title: 'PALM AT A CRATE', sub: 'Or at an alien. A ring locks on.' },
     { gesture: 'grab', title: 'CLOSE YOUR HAND', sub: 'Lift it with your mind.' },

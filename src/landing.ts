@@ -94,11 +94,11 @@ const HTML = () => `
   <div class="kicker">
     <span class="badge">HAND TRACKING ONLY</span>
     <span class="badge alt">MIXED REALITY</span>
-    <span class="badge alt2">8 HEROES &middot; 24 MISSIONS &middot; 8 BOSSES</span>
+    <span class="badge alt2">9 HEROES &middot; 27 MISSIONS &middot; 9 BOSSES</span>
   </div>
   <div class="burst"><h1>SURGE</h1></div>
   <div class="sub">HANDS OF HEROES</div>
-  <p class="tag">OBLIVAX, the Unmaker, is erasing reality, starting with the room you are standing in. Channel eight heroes through your bare hands, win back the Anchors, and stop the end.</p>
+  <p class="tag">OBLIVAX, the Unmaker, is erasing reality, starting with the room you are standing in. Channel nine heroes through your bare hands, win back the Anchors, and stop the end.</p>
   <div class="buttons">
     <button class="mr" id="enter-mr">ENTER MR</button>
     <button class="vr" id="enter-vr">ENTER VR</button>

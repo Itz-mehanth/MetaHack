@@ -13,7 +13,7 @@ import {
   DoubleSide,
 } from '@iwsdk/core';
 import { createBlaster, createHammer } from './combat.scene-asset.js';
-import { createKatana } from './weapons.scene-asset.js';
+import { createKatana, createShield } from './weapons.scene-asset.js';
 
 /**
  * Stylized hero statues for the hero-select carousel: about 1 m tall,
@@ -22,7 +22,7 @@ import { createKatana } from './weapons.scene-asset.js';
  * All designs are original.
  */
 
-type HeroId = 'arc' | 'talon' | 'tempest' | 'orion' | 'weaver' | 'havoc' | 'ronin' | 'psion';
+type HeroId = 'arc' | 'talon' | 'tempest' | 'orion' | 'weaver' | 'havoc' | 'ronin' | 'psion' | 'vanguard';
 
 const DEFAULT_ACCENT: Record<HeroId, string> = {
   arc: '#3DF5FF',
@@ -33,6 +33,7 @@ const DEFAULT_ACCENT: Record<HeroId, string> = {
   havoc: '#FFB01F',
   ronin: '#4DA6FF',
   psion: '#E05CFF',
+  vanguard: '#3D6BFF',
 };
 
 const SUIT: Record<HeroId, string> = {
@@ -44,6 +45,7 @@ const SUIT: Record<HeroId, string> = {
   havoc: '#2A2018',
   ronin: '#17171F',
   psion: '#1E1428',
+  vanguard: '#1C2A4A',
 };
 
 function accentMaterial(color: string): MeshStandardMaterial {
@@ -214,6 +216,24 @@ export function createHeroFigure(hero: HeroId): Group {
     const tail = part(new PlaneGeometry(0.06, 0.22), new MeshStandardMaterial({ color: '#5A1420', side: DoubleSide, roughness: 0.8 }), 0.07, 0.4, -0.06);
     tail.rotation.z = 0.1;
     root.add(tail);
+  } else if (hero === 'vanguard') {
+    // Winged helm, chest emblem, the shield on the left arm.
+    for (const side of [-1, 1]) {
+      const fin = part(new ConeGeometry(0.014, 0.08, 4), accent, side * 0.075, 0.97, -0.01);
+      fin.rotation.z = side * -1.2;
+      root.add(fin);
+    }
+    root.add(part(new CylinderGeometry(0.03, 0.03, 0.01, 6), accent, 0, 0.76, 0.09).rotateX(Math.PI / 2));
+    for (let k = 0; k < 3; k += 1) root.add(part(new BoxGeometry(0.2 - k * 0.03, 0.012, 0.02), trim, 0, 0.62 - k * 0.04, 0.085));
+    const shield = createShield(DEFAULT_ACCENT.vanguard);
+    shield.traverse((o) => {
+      const mesh = o as Mesh;
+      if (mesh.isMesh && (mesh.material as MeshStandardMaterial).emissiveIntensity >= 2) mesh.material = accent;
+    });
+    shield.scale.setScalar(0.6);
+    shield.position.set(-0.25, 0.6, 0.08);
+    shield.rotation.y = -0.5;
+    root.add(shield);
   } else if (hero === 'psion') {
     // Hooded mystic: a halo of floating shards and a rock held aloft by the mind.
     const hood = part(new SphereGeometry(0.09, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), suit, 0, 0.95, -0.01);

@@ -227,7 +227,7 @@ export class GameMenus {
       : { id: 'story', x: 640, y: 220, w: 896, h: 200, label: 'START STORY', icon: 'play', sub: 'PROLOGUE: learn your powers in 4 minutes', selected: true, color: '#FF4FD8', size: 72 };
     return {
       title: 'SURGE',
-      subtitle: begun ? `OBLIVAX is unmaking reality. Win back the Anchors. ${anchors}/8` : 'Hands of Heroes',
+      subtitle: begun ? `OBLIVAX is unmaking reality. Win back the Anchors. ${anchors}/9` : 'Hands of Heroes',
       coins: this.profile.coins,
       accent,
       widgets: [
@@ -267,7 +267,7 @@ export class GameMenus {
               y: 800,
               w: 896,
               h: 120,
-              label: finale ? 'CONVERGENCE: FACE OBLIVAX' : `ANCHORS ${anchors} / 8`,
+              label: finale ? 'CONVERGENCE: FACE OBLIVAX' : `ANCHORS ${anchors} / 9`,
               sub: finale ? 'The final battle. Every hero, one fight.' : `Beat ${ANCHORS_TO_FINALE - anchors} more region bosses to face OBLIVAX`,
               icon: finale ? 'skull' : 'lock',
               color: '#FF4FD8',
@@ -301,7 +301,7 @@ export class GameMenus {
     const color = equippedColor(p, hero.id);
     return {
       title: 'THE ANCHOR WAR',
-      subtitle: `Anchors ${anchors}/8. Poke a planet below to choose a front.`,
+      subtitle: `Anchors ${anchors}/9. Poke a planet below to choose a front.`,
       coins: p.coins,
       accent: color,
       widgets: [

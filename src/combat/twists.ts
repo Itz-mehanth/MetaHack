@@ -40,6 +40,9 @@ export const TWISTS: Readonly<Record<string, TwistId>> = {
   'sky-ruins-1': 'lowgrav',
   'sky-ruins-2': 'meteors',
   'sky-ruins-3': 'lowgrav',
+  'iron-bastion-1': 'none',
+  'iron-bastion-2': 'meteors',
+  'iron-bastion-3': 'ceiling',
 };
 
 export function twistFor(stageId: string): TwistId {

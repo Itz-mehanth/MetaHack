@@ -26,6 +26,7 @@ export const WORLDS: readonly World[] = [
   { id: 'scrap-wastes', name: 'SCRAP WASTES', color: '#FFB01F', enemies: ['drone', 'armored', 'swarmer'] },
   { id: 'moon-temple', name: 'MOON TEMPLE', color: '#4DA6FF', enemies: ['blade', 'swarmer', 'armored'] },
   { id: 'sky-ruins', name: 'SKY RUINS', color: '#E05CFF', enemies: ['drone', 'armored', 'titan'] },
+  { id: 'iron-bastion', name: 'IRON BASTION', color: '#3D6BFF', enemies: ['drone', 'blade', 'armored'] },
 ];
 
 export const STAGES_PER_WORLD = 3;
@@ -111,6 +112,7 @@ export const HERO_PRICE: Readonly<Record<HeroId, number>> = {
   havoc: 1500,
   ronin: 1800,
   psion: 2100,
+  vanguard: 2400,
 };
 
 export const ENEMY_COINS: Readonly<Record<EnemyKind, number>> = {
@@ -161,6 +163,9 @@ export const UPGRADES: readonly UpgradeDef[] = [
   { id: 'psion-mass', hero: 'psion', name: 'HEAVY MIND', description: 'Thrown objects hit harder' },
   { id: 'psion-quake', hero: 'psion', name: 'SHOCKWAVE', description: 'Bigger impact blasts' },
   { id: 'psion-grip', hero: 'psion', name: 'IRON WILL', description: 'Lift from further; level 3 lifts a Colossus' },
+  { id: 'vanguard-ricochet', hero: 'vanguard', name: 'RICOCHET', description: 'Thrown shield bounces to more enemies' },
+  { id: 'vanguard-force', hero: 'vanguard', name: 'BATTERING RAM', description: 'Shield hits and punches hit harder' },
+  { id: 'vanguard-guard', hero: 'vanguard', name: 'REFLECTOR', description: 'Deflected shots hit back harder' },
 ];
 
 export interface Skin {
@@ -196,6 +201,9 @@ const SKIN_SETS: ReadonlyArray<readonly [HeroId, string, string]> = [
   ['psion', 'CLASSIC', '#E05CFF'],
   ['psion', 'AURORA', '#3DFFC8'],
   ['psion', 'SOLARIS', '#FFC83D'],
+  ['vanguard', 'CLASSIC', '#3D6BFF'],
+  ['vanguard', 'SENTINEL', '#E8F0FF'],
+  ['vanguard', 'CRIMSON', '#FF3B3B'],
 ];
 
 export const SKINS: readonly Skin[] = SKIN_SETS.map(([hero, name, color], i) => ({

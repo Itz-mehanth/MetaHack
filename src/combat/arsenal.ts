@@ -53,6 +53,9 @@ export const ARSENAL: readonly WeaponDef[] = [
   W('ronin-katana', 'ronin', 'KATANA', 'Twin energy katanas', 0, 0),
   W('ronin-flame', 'ronin', 'FLAME FANGS', 'Burning blades, burning wounds', 700, 1, '#FF6A1A'),
   W('ronin-void', 'ronin', 'VOID EDGE', 'Longer blades that tear space', 1300, 2, '#B04DFF'),
+  W('vanguard-aegis', 'vanguard', 'AEGIS', 'Blocks, deflects, ricochets', 0, 0),
+  W('vanguard-solar', 'vanguard', 'SOLAR AEGIS', 'A burning shield that sets them alight', 700, 1, '#FFB01F'),
+  W('vanguard-storm', 'vanguard', 'STORM AEGIS', 'More bounces, each hit arcs lightning', 1300, 2, '#3DC8FF'),
   W('psion-mind', 'psion', 'MIND', 'Lift and throw anything', 0, 0),
   W('psion-inferno', 'psion', 'INFERNO MIND', 'Thrown things explode in fire', 900, 1, '#FF6A1A'),
 ];

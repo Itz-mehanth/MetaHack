@@ -72,6 +72,10 @@ export const WORLD_LOOKS: Readonly<Record<string, WorldLook>> = {
   'sky-ruins-1': L('#2A1450', '#FFB0F0', '#140A28', '#FFFFFF', '#3DFFC8', '#3DFFC8', [0.5, 0.35, -0.8], 0.09, true, 0.2, 0.22),
   'sky-ruins-2': L('#3A1030', '#FFB070', '#1A0818', '#FF8AC0', '#FFD070', '#FFD070', [-0.2, 0.15, -1], 0.12, false, 0.1, 0.3),
   'sky-ruins-3': L('#0A0418', '#E05CFF', '#05020C', '#5A2A8A', '#E05CFF', '#000000', [0, 0.3, -1], 0.2, true, 0.9, 0.42),
+  // VANGUARD: a city under siege.
+  'iron-bastion-1': L('#0A1428', '#FF9A3D', '#060A14', '#5A3A2A', '#3D6BFF', '#FFD08A', [0.3, 0.12, -1], 0.13, false, 0.2, 0.22),
+  'iron-bastion-2': L('#05060C', '#FF3B1F', '#030306', '#3A1A10', '#FF8A3D', '#FF3B1F', [-0.4, 0.4, -0.8], 0.06, false, 0.6, 0.32),
+  'iron-bastion-3': L('#101820', '#3D6BFF', '#080C10', '#2A3A5A', '#FF8A3D', '#9CC8FF', [0, 0.3, -1], 0.22, true, 0.5, 0.42),
   // The saga: OBLIVAX unmaking everything.
   oblivion: L('#000000', '#FF4FD8', '#000000', '#3A0A3A', '#FF4FD8', '#FFFFFF', [0, 0.5, -0.9], 0.03, false, 1, 0.55),
 };

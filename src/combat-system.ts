@@ -186,7 +186,7 @@ const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   pod: GOLD,
 };
 const OBLIVAX_COLOR = new Color(OBLIVAX.color);
-const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins', 'oblivion'];
+const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins', 'iron-bastion', 'oblivion'];
 type PickupKind = 'heal' | 'rapid' | 'power';
 const BUFF_SECONDS = 8;
 
@@ -512,6 +512,20 @@ export class CombatSystem extends createSystem({
   private gunSpin = 0;
   private gunShots = 0;
   private hammerPainted = false;
+  /** VANGUARD's shield: worn on the off-hand forearm, thrown, or flying home. */
+  private shield: Object3D | null = null;
+  private shieldState: 'worn' | 'flying' | 'returning' = 'worn';
+  private shieldNormal = new Vector3(0, 0, 1);
+  private shieldVel = new Vector3();
+  private shieldPrev = new Vector3();
+  private shieldTarget: Drone | null = null;
+  private shieldLast: Drone | null = null;
+  private shieldBounces = 0;
+  private shieldTime = 0;
+  private shieldBasis = new Matrix4();
+  private sx = new Vector3();
+  private sy = new Vector3();
+  private sz = new Vector3();
   /** How the next damageDrone call landed: drives flinch, fall and cuts. */
   private hitStyle: 'blast' | 'slice' | 'impale' | 'dot' = 'blast';
   private hitPoint = new Vector3();
@@ -1105,6 +1119,11 @@ export class CombatSystem extends createSystem({
       this.holograms.push(figure);
     }
     this.root.add(this.coach.group, this.erasure.mesh);
+    this.shield = await this.world.assets.instantiate('shield');
+    this.shield.name = 'VanguardShield';
+    this.shield.visible = false;
+    addOutline(this.shield, 0.05, (m) => m.name === 'Body');
+    this.root.add(this.shield);
     // Real models of every arsenal weapon for the armory projector.
     for (const weapon of ARSENAL) this.weaponModels.set(weapon.id, await this.buildWeaponModel(weapon));
     // PSION's props, plus slots that carry lifted aliens.
@@ -1284,6 +1303,7 @@ export class CombatSystem extends createSystem({
     this.updateHands(realDt);
     this.updateClaws(realDt);
     this.updateSwords(realDt, time);
+    this.updateShield(realDt);
     this.updatePsion(realDt, dt, time);
     this.updateScript(realDt, time);
     if (!this.paused) this.updateTwist(dt, time);
@@ -3115,6 +3135,10 @@ export class CombatSystem extends createSystem({
       this.paintHammer(this.hammer, id);
       this.hammerPainted = true;
     }
+    if (this.hero === 'vanguard' && this.shield) {
+      this.tint(this.shield, this.weaponDef.color ?? this.accentHex);
+      this.shieldState = 'worn';
+    }
   }
 
   /** ARC's PROTON BEAM: a continuous laser that burns the first thing it touches. */
@@ -3670,6 +3694,205 @@ export class CombatSystem extends createSystem({
     };
     if (won && this.story) this.beginTransmission(this.story.outro, done);
     else done();
+  }
+
+  // ---------------------------------------------------------------- VANGUARD
+
+  /** The worn shield faces the attacker: the strike is blocked. */
+  private shieldBlocks(from: Vector3): boolean {
+    if (this.hero !== 'vanguard' || this.shieldState !== 'worn' || this.shield == null || !this.shield.visible) return false;
+    this.shield.getWorldPosition(this.sa);
+    if (this.sa.distanceTo(this.head) > 0.75) return false;
+    this.sb.subVectors(from, this.sa).normalize();
+    return this.sb.dot(this.shieldNormal) > 0.2;
+  }
+
+  /**
+   * VANGUARD: the shield rides the off-hand forearm, facing out of the back
+   * of the hand. It blocks blades, deflects shots back at enemies, bashes
+   * when swung, and is thrown with a fast swing and an open hand: it
+   * ricochets between enemies, then flies home. The other fist punches.
+   */
+  private updateShield(dt: number): void {
+    const shield = this.shield;
+    if (shield == null) return;
+    const active = this.powersLive && this.hero === 'vanguard';
+    if (!active) {
+      shield.visible = false;
+      this.shieldState = 'worn';
+      return;
+    }
+    const holder = this.profile.settings.leftHanded ? 1 : 0;
+    const hand = this.hands[holder];
+    const force = this.level('vanguard-force');
+    this.updatePunch(this.hands[1 - holder], dt, force);
+    this.shieldTime += dt;
+    if (this.shieldState === 'worn') {
+      if (!hand.tracked) {
+        shield.visible = false;
+        return;
+      }
+      shield.visible = true;
+      const pose = hand.pose;
+      pose.position(J.wrist, this.v1);
+      pose.position(J.middleProx, this.v2);
+      this.sy.subVectors(this.v2, this.v1).normalize();
+      this.sz.copy(hand.gauntlet.palmNormal).negate();
+      this.sy.addScaledVector(this.sz, -this.sy.dot(this.sz)).normalize();
+      this.sx.crossVectors(this.sy, this.sz);
+      this.shieldBasis.makeBasis(this.sx, this.sy, this.sz);
+      shield.quaternion.setFromRotationMatrix(this.shieldBasis);
+      this.shieldPrev.copy(shield.position);
+      shield.position.copy(this.v1).addScaledVector(this.sz, 0.07).addScaledVector(this.sy, -0.03);
+      this.shieldNormal.copy(this.sz);
+      if (dt > 0) this.shieldVel.lerp(this.v3.subVectors(shield.position, this.shieldPrev).divideScalar(dt), 0.5);
+      const speed = this.shieldVel.length();
+      // Deflect shots that touch the shield back at the enemy.
+      for (const shot of this.drones) {
+        if ((shot.state !== 'shot' && shot.state !== 'fly') || shot.object.position.distanceTo(shield.position) > 0.32) continue;
+        this.retireDrone(shot);
+        this.deflect(shield.position);
+      }
+      this.checkParry(this.v4.copy(shield.position).addScaledVector(this.sx, -0.24), this.v3.copy(shield.position).addScaledVector(this.sx, 0.24));
+      // Bash enemies with a fast swing.
+      if (speed > 2) {
+        for (const drone of this.drones) {
+          if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < 0.4) continue;
+          if (drone.object.position.distanceTo(shield.position) > ENEMIES[drone.kind].radius + 0.25) continue;
+          drone.bladeHitAt = this.elapsed;
+          this.markHit('blast', drone.object.position, this.shieldVel);
+          this.damageDrone(drone, 2 + Math.floor(force / 2));
+          this.sfx.clang();
+        }
+      }
+      // Throw: swing and open the hand.
+      const e = fingerExtension(hand.joints);
+      const open = (e[0] + e[1] + e[2] + e[3]) / 4 > 1.6;
+      if (open && speed > 2.2 && this.shieldTime > 0.4) this.throwShield(speed);
+      return;
+    }
+    shield.visible = true;
+    this.shieldPrev.copy(shield.position);
+    if (this.shieldState === 'flying') {
+      const target = this.shieldTarget;
+      if (target && target.state !== 'off') {
+        // Ricochet homing.
+        this.v1.subVectors(target.object.position, shield.position).normalize().multiplyScalar(this.shieldVel.length());
+        this.shieldVel.lerp(this.v1, Math.min(1, dt * 6));
+      }
+      shield.position.addScaledVector(this.shieldVel, dt);
+      shield.rotateZ(dt * 25);
+      this.v2.set(0, 0, 0);
+      this.particles.emit(this.shieldPrev, this.v2, this.weaponColor, 0.3, 0);
+      for (const drone of this.drones) {
+        if (drone.state === 'off' || drone.state === 'emerging' || drone === this.shieldLast || drone.kind === 'orb') continue;
+        if (!this.segmentHits(this.shieldPrev, shield.position, drone.object.position, ENEMIES[drone.kind].radius + 0.22)) continue;
+        this.shieldLast = drone;
+        this.v4.copy(drone.object.position);
+        this.markHit('blast', drone.object.position, this.shieldVel);
+        if (this.weaponDef.id === 'vanguard-solar') drone.burn = Math.max(drone.burn, 3);
+        this.damageDrone(drone, 3 + Math.floor(force / 2));
+        if (this.weaponDef.id === 'vanguard-storm') this.chainLightning(this.v4, drone);
+        this.sfx.clang();
+        this.flashes.spawn(this.v4, WHITE, 0.1, 0.8, 0.2);
+        this.particles.burst(this.v4, this.weaponColor, 30, 2.5, 0.3, this.v2);
+        if (this.comicCooldown <= 0) {
+          this.comicCooldown = 0.3;
+          this.comic.random('vanguard', this.v1.copy(this.v4).setY(this.v4.y + 0.4), this.weaponColor, 0.4);
+        }
+        // Bounce to the next nearest enemy, or come home.
+        this.shieldBounces -= 1;
+        this.shieldTarget = this.shieldBounces > 0 ? this.nearestEnemy(this.v4, drone, 7) : null;
+        if (this.shieldTarget == null) this.shieldState = 'returning';
+        break;
+      }
+      if (this.shieldTime > 3 || shield.position.distanceTo(this.head) > 16) this.shieldState = 'returning';
+      return;
+    }
+    // Returning to the shield arm.
+    if (!hand.tracked) return;
+    hand.pose.position(J.wrist, this.v1);
+    this.v2.subVectors(this.v1, shield.position);
+    const distance = this.v2.length();
+    if (distance < 0.18) {
+      this.shieldState = 'worn';
+      this.shieldTime = 0;
+      this.sfx.catchHammer();
+      this.flashes.spawn(this.v1, this.weaponColor, 0.05, 0.4, 0.2);
+      return;
+    }
+    shield.position.addScaledVector(this.v2.normalize(), Math.min(distance, 15 * dt));
+    shield.rotateZ(dt * 25);
+  }
+
+  private throwShield(speed: number): void {
+    const shield = this.shield!;
+    this.shieldState = 'flying';
+    this.shieldTime = 0;
+    this.shieldLast = null;
+    this.shieldBounces = 2 + this.level('vanguard-ricochet') + (this.weaponDef.id === 'vanguard-storm' ? 2 : 0);
+    this.v1.copy(this.shieldVel).normalize();
+    // The first target: the enemy nearest the throw line.
+    let best = this.profile.settings.aimAssist ? 0.7 : 0.9;
+    this.shieldTarget = null;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'orb' || drone.kind === 'pod') continue;
+      const cos = this.v2.subVectors(drone.object.position, shield.position).normalize().dot(this.v1);
+      if (cos > best) {
+        best = cos;
+        this.shieldTarget = drone;
+      }
+    }
+    this.shieldVel.copy(this.v1).multiplyScalar(Math.min(18, Math.max(11, speed * 4)));
+    this.sfx.crescent();
+  }
+
+  private nearestEnemy(from: Vector3, skip: Drone | null, range: number): Drone | null {
+    let best: Drone | null = null;
+    let distance = range;
+    for (const drone of this.drones) {
+      if (drone === skip || drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'orb' || drone.kind === 'pod') continue;
+      const d = drone.object.position.distanceTo(from);
+      if (d < distance) {
+        distance = d;
+        best = drone;
+      }
+    }
+    return best;
+  }
+
+  /** A shot hits the shield and flies back at the nearest enemy. */
+  private deflect(at: Vector3): void {
+    this.sfx.clang();
+    this.particles.burst(at, GOLD, 20, 2, 0.25, this.v2);
+    const target = this.nearestEnemy(at, null, 20);
+    if (target == null) return;
+    this.v1.subVectors(target.object.position, at).normalize();
+    const bolt = this.fire(this.v2.copy(at).addScaledVector(this.v1, 0.3), this.v1, true);
+    if (bolt) {
+      bolt.damage = 2 + Math.floor(this.level('vanguard-guard') / 2);
+      bolt.target = target;
+    }
+  }
+
+  /** A fast fist that lands on a body hits hard. */
+  private updatePunch(hand: HandState, dt: number, force: number): void {
+    if (!hand.tracked || dt <= 0) return;
+    hand.pose.position(J.middleProx, this.v1);
+    const speed = this.v2.subVectors(this.v1, hand.prevTip).length() / dt;
+    hand.prevTip.copy(this.v1);
+    if (speed < 1.6 || !isFist(hand.joints)) return;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'orb' || this.elapsed - drone.bladeHitAt < 0.3) continue;
+      if (drone.object.position.distanceTo(this.v1) > ENEMIES[drone.kind].radius + 0.12) continue;
+      drone.bladeHitAt = this.elapsed;
+      this.markHit('blast', drone.object.position, this.v2);
+      this.damageDrone(drone, 1 + Math.floor(force / 2));
+      this.sfx.catchHammer();
+      this.flashes.spawn(this.v1, WHITE, 0.05, 0.5, 0.15);
+      this.comic.pop('POW!', this.v4.copy(this.v1).setY(this.v1.y + 0.2), this.weaponColor, 0.35);
+      break;
+    }
   }
 
   // ---------------------------------------------------------------- RONIN
@@ -4980,8 +5203,18 @@ export class CombatSystem extends createSystem({
       // The swing lands unless the player stepped out of reach.
       this.sa.set(this.head.x - drone.object.position.x, 0, this.head.z - drone.object.position.z);
       if (this.sa.length() <= MELEE_RANGE + 0.45) {
-        this.hurtPlayer(def.damage, false, drone.object.position);
-        this.sfx.slash();
+        if (this.shieldBlocks(drone.object.position)) {
+          // Blocked: the attacker reels.
+          drone.meleeStage = 3;
+          drone.stun = 1;
+          this.sfx.clang();
+          this.shield!.getWorldPosition(this.sc);
+          this.particles.burst(this.sc, GOLD, 30, 2.5, 0.3, this.v2);
+          this.comic.pop('BLOCKED!', this.v4.copy(this.sc).setY(this.sc.y + 0.25), this.weaponColor, 0.4);
+        } else {
+          this.hurtPlayer(def.damage, false, drone.object.position);
+          this.sfx.slash();
+        }
       } else this.sfx.crescent();
     } else if (drone.meleeStage === 2 && drone.melee >= 0.16) {
       drone.meleeStage = 3;

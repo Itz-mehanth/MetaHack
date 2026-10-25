@@ -13,6 +13,7 @@ export const ICON_NAMES = [
   'havoc',
   'ronin',
   'psion',
+  'vanguard',
   'coins',
   'shield',
   'skull',

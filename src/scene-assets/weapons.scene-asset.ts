@@ -259,3 +259,52 @@ export function createGun(type: GunType): Group {
   root.add(muzzle);
   return root;
 }
+
+/**
+ * VANGUARD's energy shield: a round, dished war-shield about 0.5 m across,
+ * facing +Z (the strap side is -Z), origin at its centre. Concentric steel
+ * rings, a glowing edge and a hexagonal core emblem. Original design.
+ */
+export function createShield(color: string): Group {
+  const root = new Group();
+  root.name = 'Shield';
+  const steel = new MeshStandardMaterial({ color: '#C8D0DC', roughness: 0.25, metalness: 0.95 });
+  const paint = new MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.6 });
+  const dark = new MeshStandardMaterial({ color: '#1A1E28', roughness: 0.5, metalness: 0.7 });
+  const energy = glow(color);
+  // Layered dish segments sharing one sphere centre, each a hair proud of the last.
+  const R = 0.6;
+  const C = -R * Math.cos(0.42);
+  const face = (r: number, depth: number, material: MeshStandardMaterial) => {
+    const m = new Mesh(new SphereGeometry(r, 40, 6, 0, Math.PI * 2, 0, depth), material);
+    m.rotation.x = Math.PI / 2;
+    m.position.z = C;
+    root.add(m);
+    return m;
+  };
+  const surface = (rho: number) => Math.sqrt(R * R - rho * rho) + C;
+  face(R, 0.42, steel).name = 'Body';
+  face(R + 0.003, 0.3, paint);
+  face(R + 0.006, 0.2, steel);
+  face(R + 0.009, 0.11, paint);
+  for (const [r, w] of [[0.248, 0.012], [0.176, 0.006], [0.118, 0.005]] as const) {
+    const ring = new Mesh(new TorusGeometry(r, w, 6, 64), r > 0.2 ? energy : steel);
+    ring.position.z = surface(r) + 0.004;
+    root.add(ring);
+  }
+  // Hexagonal core emblem.
+  const hex = new Mesh(new CylinderGeometry(0.055, 0.055, 0.012, 6), energy);
+  hex.rotation.x = Math.PI / 2;
+  hex.position.z = surface(0) + 0.008;
+  const inner = new Mesh(new CylinderGeometry(0.03, 0.03, 0.016, 6), steel);
+  inner.rotation.x = Math.PI / 2;
+  inner.position.z = surface(0) + 0.011;
+  root.add(hex, inner);
+  // Straps and grip on the back.
+  for (const y of [-0.05, 0.06]) {
+    const strap = new Mesh(new BoxGeometry(0.2, 0.03, 0.012), dark);
+    strap.position.set(0, y, -0.07);
+    root.add(strap);
+  }
+  return root;
+}
