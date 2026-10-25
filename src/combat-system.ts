@@ -9,12 +9,14 @@ import {
   MeshBasicMaterial,
   type Object3D,
   PlaneGeometry,
+  Quaternion,
   RingGeometry,
   type Sprite,
   Vector3,
   VisibilityState,
   XRPlane,
 } from '@iwsdk/core';
+import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
 import { type HandJoints, isBlastPose, palmCenter, palmNormal } from './combat/gestures.js';
 import { Hud } from './combat/hud.js';
 import { type Phase, Run } from './combat/run.js';
@@ -24,21 +26,6 @@ import { DRONE_RADIUS } from './scene-assets/combat.scene-asset.js';
 
 type Handedness = 'left' | 'right';
 type Triple = [number, number, number];
-
-const JOINT_NAMES = [
-  'wrist',
-  'thumb-tip',
-  'index-finger-metacarpal',
-  'pinky-finger-metacarpal',
-  'index-finger-phalanx-proximal',
-  'middle-finger-phalanx-proximal',
-  'ring-finger-phalanx-proximal',
-  'pinky-finger-phalanx-proximal',
-  'index-finger-tip',
-  'middle-finger-tip',
-  'ring-finger-tip',
-  'pinky-finger-tip',
-] as const;
 
 const FIRE_COOLDOWN = 0.26;
 const ARM_TIME = 0.08;
@@ -66,6 +53,9 @@ interface HandState {
   palm: Vector3;
   normal: Vector3;
   glow: Sprite;
+  pose: HandPose;
+  gauntlet: Gauntlet;
+  visualHidden: boolean;
 }
 
 type DroneState = 'off' | 'emerging' | 'approach' | 'charge';
@@ -112,16 +102,19 @@ function emptyHand(): HandJoints {
   };
 }
 
-/** Ordered like JOINT_NAMES so a joint index maps straight to a slot. */
-function jointSlots(hand: HandJoints): Triple[] {
-  return [
-    hand.wrist,
-    hand.thumbTip,
-    hand.indexMeta,
-    hand.pinkyMeta,
-    ...hand.knuckles,
-    ...hand.tips,
-  ] as Triple[];
+/** Gesture slots paired with the HAND_JOINTS index each one copies. */
+function jointSlots(hand: HandJoints): Array<[Triple, number]> {
+  const slots: Array<[Triple, number]> = [
+    [hand.wrist as Triple, J.wrist],
+    [hand.thumbTip as Triple, J.thumbTip],
+    [hand.indexMeta as Triple, J.indexMeta],
+    [hand.pinkyMeta as Triple, J.pinkyMeta],
+  ];
+  for (let i = 0; i < 4; i += 1) {
+    slots.push([hand.knuckles[i] as Triple, J.knuckles[i]]);
+    slots.push([hand.tips[i] as Triple, J.tips[i]]);
+  }
+  return slots;
 }
 
 /**
@@ -140,7 +133,9 @@ export class CombatSystem extends createSystem({
   private hud!: Hud;
   private sfx = new Sfx();
   private hands: HandState[] = [];
-  private handSlots: Triple[][] = [];
+  private handSlots: Array<Array<[Triple, number]>> = [];
+  private playerQuat = new Quaternion();
+  private jointQuat = new Quaternion();
   private drones: Drone[] = [];
   private bolts: Bolt[] = [];
   private core: Object3D | null = null;
@@ -177,6 +172,8 @@ export class CombatSystem extends createSystem({
       glow.name = `PalmGlow-${handedness}`;
       this.root.add(glow);
       const joints = emptyHand();
+      const gauntlet = new Gauntlet(handedness, CYAN);
+      this.root.add(gauntlet.group);
       this.hands.push({
         handedness,
         tracked: false,
@@ -186,6 +183,9 @@ export class CombatSystem extends createSystem({
         palm: new Vector3(),
         normal: new Vector3(),
         glow,
+        pose: new HandPose(),
+        gauntlet,
+        visualHidden: false,
       });
       this.handSlots.push(jointSlots(joints));
     }
@@ -307,6 +307,7 @@ export class CombatSystem extends createSystem({
 
     this.readHands();
     this.updateHands(realDt);
+    for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
 
     const order = this.run.update(dt);
     if (order) this.spawnDrone(order.armored, order.speed);
@@ -334,33 +335,54 @@ export class CombatSystem extends createSystem({
 
   private readHands(): void {
     const xr = this.world.renderer.xr;
-    for (const hand of this.hands) hand.tracked = false;
+    for (const hand of this.hands) {
+      hand.tracked = false;
+      hand.pose.tracked = false;
+    }
     const frame = xr.getFrame();
     const space = xr.getReferenceSpace();
     const session = xr.getSession();
     if (frame == null || space == null || session == null || frame.getJointPose == null) return;
     const origin = this.world.player.matrixWorld;
+    this.world.player.getWorldQuaternion(this.playerQuat);
     for (const source of session.inputSources) {
       if (source.hand == null) continue;
       const index = source.handedness === 'left' ? 0 : source.handedness === 'right' ? 1 : -1;
       if (index < 0) continue;
-      const slots = this.handSlots[index];
+      const hand = this.hands[index];
+      const pose = hand.pose;
       let ok = true;
-      for (let j = 0; j < JOINT_NAMES.length; j += 1) {
-        const jointSpace = source.hand.get(JOINT_NAMES[j]);
-        const pose = jointSpace ? frame.getJointPose(jointSpace, space) : undefined;
-        if (pose == null) {
+      for (let j = 0; j < HAND_JOINTS.length; j += 1) {
+        const jointSpace = source.hand.get(HAND_JOINTS[j]);
+        const jointPose = jointSpace ? frame.getJointPose(jointSpace, space) : undefined;
+        if (jointPose == null) {
           ok = false;
           break;
         }
-        const p = pose.transform.position;
+        const p = jointPose.transform.position;
+        const o = jointPose.transform.orientation;
         this.v1.set(p.x, p.y, p.z).applyMatrix4(origin);
-        slots[j][0] = this.v1.x;
-        slots[j][1] = this.v1.y;
-        slots[j][2] = this.v1.z;
+        this.v1.toArray(pose.positions, j * 3);
+        this.jointQuat.set(o.x, o.y, o.z, o.w).premultiply(this.playerQuat);
+        this.jointQuat.toArray(pose.quaternions, j * 4);
+        pose.radii[j] = jointPose.radius ?? 0.01;
       }
-      this.hands[index].tracked = ok;
+      if (!ok) continue;
+      for (const [slot, joint] of this.handSlots[index]) {
+        slot[0] = pose.positions[joint * 3];
+        slot[1] = pose.positions[joint * 3 + 1];
+        slot[2] = pose.positions[joint * 3 + 2];
+      }
+      hand.tracked = true;
+      pose.tracked = true;
+      if (!hand.visualHidden) {
+        // The gauntlet replaces IWSDK's default hand model.
+        this.world.input.xr.visualAdapters.hand[hand.handedness].toggleVisual(false);
+        hand.visualHidden = true;
+      }
     }
+    // Re-hide after any loss: a reconnecting hand may restore the default model.
+    for (const hand of this.hands) if (!hand.tracked) hand.visualHidden = false;
   }
 
   private updateHands(dt: number): void {
