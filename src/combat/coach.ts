@@ -29,6 +29,7 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   talon: [
     { gesture: 'fist', title: 'MAKE A FIST', sub: 'Claws come out. Punch through enemies.' },
     { gesture: 'swing', title: 'SWING FAST', sub: 'A fast swing throws a slash wave.' },
+    { gesture: 'throw', title: 'STAB AND THROW', sub: 'Thrust into them to skewer, whip to throw the body.' },
   ],
   tempest: [
     { gesture: 'fist', title: 'GRAB THE HAMMER', sub: 'Close your hand around the handle.' },
@@ -40,8 +41,9 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
     { gesture: 'throw', title: 'PULL BACK, LET GO', sub: 'A longer draw shoots harder.' },
   ],
   weaver: [
-    { gesture: 'web', title: 'INDEX + PINKY OUT', sub: 'Curl the middle fingers to shoot a web.' },
-    { gesture: 'fist', title: 'FIST AND PULL BACK', sub: 'Yank a webbed enemy apart.' },
+    { gesture: 'web', title: 'SHOOT A WEB', sub: 'Index + pinky out, or thrust an open palm at them.' },
+    { gesture: 'throw', title: 'WHIP YOUR HAND', sub: 'A webbed enemy goes flying where you whip.' },
+    { gesture: 'fist', title: 'OR FIST AND PULL', sub: 'Rips a webbed enemy apart.' },
   ],
   havoc: [
     { gesture: 'fist', title: 'GRIP THE PISTOL', sub: 'It sits in your hand like a real one.' },
@@ -49,7 +51,8 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   ],
   ronin: [
     { gesture: 'fist', title: 'MAKE A FIST', sub: 'Each fist ignites a katana.' },
-    { gesture: 'swing', title: 'SWING HARD', sub: 'A hard swing sends a slash wave.' },
+    { gesture: 'swing', title: 'SWING HARD', sub: 'Cuts limbs off. A hard swing sends a slash wave.' },
+    { gesture: 'throw', title: 'STAB AND THROW', sub: 'Thrust to skewer them, whip to fling the body.' },
     { gesture: 'cross', title: 'CROSS BOTH BLADES', sub: 'Unleashes an X-STRIKE.' },
     { gesture: 'swing', title: 'BLOCK THEIR SWING', sub: 'Meet an enemy blade with yours to PARRY.' },
   ],

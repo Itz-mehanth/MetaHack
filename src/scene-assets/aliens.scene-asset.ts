@@ -3,6 +3,8 @@ import {
   BufferAttribute,
   BufferGeometry,
   CapsuleGeometry,
+  CircleGeometry,
+  DoubleSide,
   ConeGeometry,
   CylinderGeometry,
   Group,
@@ -172,6 +174,23 @@ function leg(m: Mats, side: number, bulk: number): Group {
   return pivot;
 }
 
+const flesh = new MeshStandardMaterial({ color: '#7A0A0C', emissive: '#2A0002', roughness: 0.35, metalness: 0, side: DoubleSide });
+const bone = new MeshStandardMaterial({ color: '#E8DCC8', roughness: 0.6, side: DoubleSide });
+
+/** Hidden flesh cut face (with a bone) named `name`, facing local +Z rotated by (rx, ry). */
+function cutFace(name: string, radius: number, x: number, y: number, z: number, rx: number, ry: number): Group {
+  const face = new Group();
+  face.name = name;
+  face.position.set(x, y, z);
+  face.rotation.set(rx, ry, 0);
+  face.add(new Mesh(new CircleGeometry(radius, 16), flesh));
+  const marrow = new Mesh(new CircleGeometry(radius * 0.3, 10), bone);
+  marrow.position.z = 0.001;
+  face.add(marrow);
+  face.visible = false;
+  return face;
+}
+
 export function createAlien(variant: AlienVariant): Group {
   const style = STYLE[variant];
   const skin = new MeshStandardMaterial({ color: style.skin, roughness: 0.7, metalness: 0.1 });
@@ -325,6 +344,16 @@ export function createAlien(variant: AlienVariant): Group {
     upper.add(gun);
     // Rifle butt strike edge, on the right forearm.
     strike(elbowR, -0.27, 0.3);
+  }
+  // Flesh cut faces for severed parts: on the piece, and on the body.
+  upper.add(cutFace('CapUpper', 0.12 * bulk, 0, -0.17, 0, Math.PI / 2, 0));
+  figure.add(cutFace('StumpUpper', 0.12 * bulk, 0, -0.17, 0, -Math.PI / 2, 0));
+  head.add(cutFace('CapHead', 0.05, 0, -0.11, 0.01, Math.PI / 2, 0));
+  upper.add(cutFace('StumpHead', 0.05 * bulk, 0, 0.33, 0.005, -Math.PI / 2, 0));
+  for (const side of [-1, 1]) {
+    const name = side < 0 ? 'ArmL' : 'ArmR';
+    upper.getObjectByName(name)!.add(cutFace(`Cap${name}`, 0.055 * bulk, -side * 0.03, 0, 0, 0, -side * Math.PI / 2));
+    upper.add(cutFace(`Stump${name}`, 0.055 * bulk, side * 0.19 * bulk, 0.22, 0, 0, side * Math.PI / 2));
   }
   return root;
 }

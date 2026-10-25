@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  NormalBlending,
   BufferAttribute,
   BufferGeometry,
   Color,
@@ -70,7 +71,11 @@ export class Particles {
   private readonly gravity: Float32Array;
   private next = 0;
 
-  constructor(private readonly capacity = 900, size = 0.035) {
+  constructor(
+    private readonly capacity = 900,
+    size = 0.035,
+    additive = true,
+  ) {
     this.positions = new Float32Array(capacity * 3).fill(-1000);
     this.colors = new Float32Array(capacity * 3);
     this.base = new Float32Array(capacity * 3);
@@ -89,7 +94,7 @@ export class Particles {
         map: getGlowTexture(),
         vertexColors: true,
         transparent: true,
-        blending: AdditiveBlending,
+        blending: additive ? AdditiveBlending : NormalBlending,
         depthWrite: false,
         sizeAttenuation: true,
       }),

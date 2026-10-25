@@ -27,7 +27,9 @@ import { Claws } from './combat/claws.js';
 import { segmentDistance, Sword } from './combat/sword.js';
 import { PsiLink } from './combat/telekinesis.js';
 import { CLAP_TIP, Coach, HERO_TIPS, type Tip } from './combat/coach.js';
-import { BloodScreen, captureParts, Gibs, type Part, type PartName, restorePart } from './combat/bodies.js';
+import { BloodPools, BloodScreen, captureParts, Gibs, type Part, type PartName, restorePart } from './combat/bodies.js';
+import { Galaxy } from './combat/galaxy.js';
+import { lookFor, WORLD_LOOKS } from './combat/worlds.js';
 import { Erasure } from './combat/erasure.js';
 import {
   anchorLine,
@@ -47,6 +49,7 @@ import {
   PROLOGUE_HEROES,
   SAGA_STORY,
   anchorsRecovered,
+  finaleUnlocked,
 } from './combat/saga.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
@@ -107,7 +110,7 @@ type WebState = 'idle' | 'flying' | 'tethered' | 'retracting';
 const ARROW_GRAVITY = 1.2;
 const NOCK_REACH = 0.3;
 const PINCH_RELEASE = 0.065;
-const WEB_SPEED = 16;
+const WEB_SPEED = 30;
 const WEB_FLIGHT = 0.7;
 const WEB_COOLDOWN = 0.45;
 const YANK_SPEED = 1.3;
@@ -127,8 +130,8 @@ const MELEE_RANGE = 1.05;
 const DEATH_FALL = 0.6;
 const DEATH_LIE = 1.8;
 const DEATH_SINK = 1;
-const ICHOR = new Color('#7CFF3D');
-const ICHOR_DARK = new Color('#1E9A12');
+const ICHOR = new Color('#B0000C');
+const ICHOR_DARK = new Color('#4A0004');
 const DUST = new Color('#9A8F80');
 /** Mean finger extension: open to aim, curled to grab, opened again to throw. */
 const PSI_OPEN = 1.6;
@@ -207,6 +210,10 @@ interface HandState {
   hasPrevTip: boolean;
   slashCooldown: number;
   sword: Sword;
+  /** Enemy skewered on this hand's blade, if any. */
+  skewer: Drone | null;
+  /** Blade tip velocity this frame (swords and claws). */
+  tipVel: Vector3;
   /** Seconds the sword stays lit after the fist last read as closed. */
   swordHold: number;
   psi: PsiLink;
@@ -308,6 +315,12 @@ interface Drone {
   /** Stalker dash: seconds left; cooldown. */
   dash: number;
   dashCool: number;
+  /** Dead body skewered on hand `heldBy`'s blade (-1: none). */
+  heldBy: number;
+  /** Dead body flung through the air. */
+  flying: boolean;
+  fly: Vector3;
+  bowlAt: number;
 }
 
 interface Pickup {
@@ -444,8 +457,14 @@ export class CombatSystem extends createSystem({
   private coach = new Coach();
   private gibs!: Gibs;
   private blood = new BloodScreen();
+  private gore = new Particles(600, 0.028, false);
+  private pools!: BloodPools;
+  private galaxy = new Galaxy(HEROES.length);
+  private galaxyPokeCooldown = 0;
+  /** How far the level's world tears into the room in MR (VR shows it all). */
+  private riftLevel = 0;
   /** How the next damageDrone call landed: drives flinch, fall and cuts. */
-  private hitStyle: 'blast' | 'slice' = 'blast';
+  private hitStyle: 'blast' | 'slice' | 'impale' = 'blast';
   private hitPoint = new Vector3();
   private hitDir = new Vector3();
   private cutNormal = new Vector3();
@@ -675,6 +694,8 @@ export class CombatSystem extends createSystem({
         hasPrevTip: false,
         slashCooldown: 0,
         sword,
+        skewer: null,
+        tipVel: new Vector3(),
         swordHold: 0,
         psi,
         held: null,
@@ -769,6 +790,8 @@ export class CombatSystem extends createSystem({
     this.world.camera.add(this.damage);
     this.world.camera.add(this.blood.mesh);
     this.gibs = new Gibs(this.root);
+    this.pools = new BloodPools(this.root);
+    this.root.add(this.gore.points, this.galaxy.group);
 
     const xr = this.world.renderer.xr;
     const onSessionStart = () => {
@@ -860,6 +883,10 @@ export class CombatSystem extends createSystem({
           push: false,
           dash: 0,
           dashCool: 0,
+          heldBy: -1,
+          flying: false,
+          fly: new Vector3(),
+          bowlAt: -10,
         });
         // Yaw first, then pitch about the body's own side axis (falls, flinches).
         object.rotation.order = 'YXZ';
@@ -925,6 +952,10 @@ export class CombatSystem extends createSystem({
         push: false,
         dash: 0,
         dashCool: 0,
+        heldBy: -1,
+        flying: false,
+        fly: new Vector3(),
+        bowlAt: -10,
       });
     }
     for (const kind of ['heal', 'rapid', 'power'] as const) {
@@ -1097,7 +1128,7 @@ export class CombatSystem extends createSystem({
     };
     const params = new URLSearchParams(window.location.search);
     const screen = params.get('menu');
-    if (screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings') {
+    if (screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings' || screen === 'galaxy') {
       const hero = HEROES.find((h) => h.id === params.get('hero'))?.id;
       if (hero) this.menus.hero = hero;
       if (screen === 'garage') this.menus.handle({ id: 'garage', point: this.v1.set(0, 0, 0) });
@@ -1212,6 +1243,8 @@ export class CombatSystem extends createSystem({
     }
     this.holomap.update(realDt, time, this.head);
     this.updateMapPoke(realDt);
+    this.updateGalaxyPoke(realDt);
+    this.galaxy.update(realDt, time);
     this.updateTransmission(realDt);
     this.updateSwipe(realDt);
     if (this.damageMaterial.opacity > 0) {
@@ -1410,6 +1443,11 @@ export class CombatSystem extends createSystem({
     this.xCooldown = 0;
     this.resetScript();
     this.equipHero(hero);
+    // Each level is its own world, tearing through the room in MR.
+    const look = isSagaStage(stage) ? WORLD_LOOKS.oblivion : lookFor(stage.id, stage.world.id);
+    this.erasure.setLook(look);
+    this.riftLevel = look.rift;
+    this.pools.clear();
     this.spawnPods(this.story?.hostages ?? 0);
   }
 
@@ -1508,6 +1546,7 @@ export class CombatSystem extends createSystem({
     this.syncCarousel();
     this.syncMap();
     this.syncArmory();
+    this.syncGalaxy();
     if (screen !== 'pause' && screen !== 'transmission') this.music.play('menu');
   }
 
@@ -1516,6 +1555,7 @@ export class CombatSystem extends createSystem({
     if (this.menus.screen === 'heroes') this.panel.place(this.head, this.forward, 0.42, 0.58);
     else if (this.menus.screen === 'map') this.panel.place(this.head, this.forward, 0.55, 0.02);
     else if (this.menus.screen === 'garage') this.panel.place(this.head, this.forward, 0.42, 0.58);
+    else if (this.menus.screen === 'galaxy') this.panel.place(this.head, this.forward, 0.8, -0.06);
     else this.panel.place(this.head, this.forward);
   }
 
@@ -1538,6 +1578,45 @@ export class CombatSystem extends createSystem({
   }
 
   /** Poking a node on the war map selects that level. */
+  /** Shows the galaxy only on its screen, reflecting every hero's progress. */
+  private syncGalaxy(): void {
+    const on = this.panel.visible && this.menus.screen === 'galaxy';
+    if (!on) {
+      if (this.galaxy.visible) this.galaxy.hide();
+      return;
+    }
+    const p = this.profile;
+    const nodes = HEROES.map((h) => {
+      const chapter = chapterFor(h.id);
+      const cleared = [1, 2, 3].filter((n) => (p.stars[`${chapter.worldId}-${n}`] ?? 0) > 0).length;
+      const stars = [1, 2, 3].reduce((sum, n) => sum + (p.stars[`${chapter.worldId}-${n}`] ?? 0), 0);
+      return { id: h.id, name: h.name, region: chapter.region, color: equippedColor(p, h.id), cleared, stars, owned: p.heroes.includes(h.id), anchor: cleared >= 3 };
+    });
+    this.galaxy.build(nodes, finaleUnlocked(p), anchorsRecovered(p).length);
+    this.galaxy.selected = this.menus.galaxyIndex;
+    if (!this.galaxy.visible) this.galaxy.show(this.head, this.forward);
+  }
+
+  /** Poking a planet picks that hero's front; the core starts the finale. */
+  private updateGalaxyPoke(dt: number): void {
+    this.galaxyPokeCooldown -= dt;
+    if (!this.galaxy.visible || this.galaxyPokeCooldown > 0) return;
+    const index = this.galaxy.poked(this.tips);
+    if (index === -2 || index === this.menus.galaxyIndex) return;
+    this.galaxyPokeCooldown = 0.4;
+    if (index === -1) {
+      if (finaleUnlocked(this.profile)) this.startStage('arc', FINALE);
+      else this.sfx.denied();
+      return;
+    }
+    this.menus.galaxyIndex = index;
+    this.galaxy.selected = index;
+    this.v1.copy(this.tips[0] ?? this.head);
+    this.flashes.spawn(this.v1, this.accent, 0.02, 0.2, 0.25);
+    this.sfx.swap();
+    this.panel.setContent(this.menus.content());
+  }
+
   private updateMapPoke(dt: number): void {
     this.mapPokeCooldown -= dt;
     if (!this.holomap.visible || this.mapPokeCooldown > 0) return;
@@ -1854,6 +1933,7 @@ export class CombatSystem extends createSystem({
       this.syncCarousel();
       this.syncMap();
       this.syncArmory();
+      this.syncGalaxy();
       return;
     }
     if (this.menus.screen !== before) this.placePanel();
@@ -1861,6 +1941,7 @@ export class CombatSystem extends createSystem({
     this.syncCarousel();
     this.syncMap();
     this.syncArmory();
+    this.syncGalaxy();
   }
 
   private profileChanged(): void {
@@ -2326,7 +2407,11 @@ export class CombatSystem extends createSystem({
       switch (hand.webState) {
         case 'idle':
           hand.web.hide();
-          if (hand.webCooldown <= 0 && isWebPose(hand.joints)) this.shootWeb(index);
+          if (hand.webCooldown <= 0) {
+            // Web-shooter pose, or thrust an open palm at them.
+            if (isWebPose(hand.joints)) this.shootWeb(index, false);
+            else if (isOpenPalm(hand.joints) && this.v2.dot(hand.gauntlet.palmNormal) > 1.3) this.shootWeb(index, true);
+          }
           break;
         case 'flying': {
           this.v1.copy(hand.web.head);
@@ -2340,7 +2425,11 @@ export class CombatSystem extends createSystem({
             }
           }
           if (hit) {
-            hit.snare = 2.5 + 0.8 * this.level('weaver-snare');
+            // Splat: the glob hits like a bullet and wraps them up.
+            this.flashes.spawn(hit.object.position, WHITE, 0.1, 0.7, 0.2);
+            this.particles.burst(hit.object.position, WHITE, 30, 2.2, 0.35, this.v1);
+            this.markHit('blast', hit.object.position, hand.webVelocity);
+            hit.snare = 4 + 0.8 * this.level('weaver-snare');
             hand.webTarget = hit;
             hand.webState = 'tethered';
             hand.webTime = 0;
@@ -2362,9 +2451,24 @@ export class CombatSystem extends createSystem({
           }
           hand.web.head.copy(target.object.position);
           hand.web.draw(this.v3, time, 0.3);
-          // Yank: fist and pull back toward the body.
+          // Yank: fist and pull back toward the body rips them apart.
           this.v1.subVectors(this.head, target.object.position).normalize();
-          if (isFist(hand.joints) && this.v2.dot(this.v1) > YANK_SPEED) this.yank(hand, target);
+          if (isFist(hand.joints) && this.v2.dot(this.v1) > YANK_SPEED) {
+            this.yank(hand, target);
+            break;
+          }
+          // Fling: whip the hand any way and the webbed enemy goes flying.
+          const whip = this.v2.length();
+          if (!isFist(hand.joints) && whip > 1.8 && hand.webTime > 0.15 && ENEMIES[target.kind].ground) {
+            this.v1.copy(this.v2).normalize().multiplyScalar(Math.min(15, Math.max(7, whip * 5)));
+            this.v1.y += 2.5;
+            if (this.flingDrone(target, this.v1)) {
+              this.sfx.yank();
+              this.comic.pop('YOINK!', this.v4.copy(target.object.position).setY(target.object.position.y + 0.4), this.accent, 0.4);
+              hand.webTarget = null;
+              hand.webState = 'retracting';
+            }
+          }
           break;
         }
         case 'retracting': {
@@ -2383,9 +2487,13 @@ export class CombatSystem extends createSystem({
     }
   }
 
-  private shootWeb(index: number): void {
+  private shootWeb(index: number, fromPalm: boolean): void {
     const hand = this.hands[index];
     this.webAim(index, this.v3, this.v4);
+    if (fromPalm) {
+      this.v3.copy(hand.gauntlet.palmPoint);
+      this.v4.copy(hand.gauntlet.palmNormal);
+    }
     // Gentle aim assist toward the most centred enemy.
     if (this.profile.settings.aimAssist) {
       let best = 0.97;
@@ -2724,6 +2832,9 @@ export class CombatSystem extends createSystem({
         continue;
       }
       const speed = this.v3.subVectors(claws.tip, hand.prevTip).length() / dt;
+      hand.tipVel.copy(this.v3).divideScalar(dt);
+      const index = this.hands.indexOf(hand);
+      if (hand.skewer == null) this.tryImpale(index, claws.base, claws.tip, claws.direction);
 
 
       for (const drone of this.drones) {
@@ -2840,6 +2951,8 @@ export class CombatSystem extends createSystem({
     }
     if (this.script === 'prologue') this.updatePrologue(dt);
     else if (this.script === 'finale') this.updateFinale(dt, time);
+    else if (this.run.phase === 'title') this.eraseTarget = 0;
+    else this.eraseTarget = this.isPassthrough() ? this.riftLevel : 1;
   }
 
   private updatePrologue(dt: number): void {
@@ -3077,6 +3190,8 @@ export class CombatSystem extends createSystem({
         hand.hasPrevTip = true;
         continue;
       }
+      hand.tipVel.subVectors(sword.tip, hand.prevTip).divideScalar(dt);
+      if (hand.skewer == null) this.tryImpale(i, sword.base, sword.tip, sword.direction);
       const damage = 2 + Math.floor(this.level('ronin-edge') / 2);
       for (const drone of this.drones) {
         if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < 0.3) continue;
@@ -3527,7 +3642,7 @@ export class CombatSystem extends createSystem({
     if (this.comicCooldown <= 0) {
       this.comicCooldown = 0.35;
       this.v1.copy(p).setY(p.y + 0.4);
-      this.comic.random('psion', this.v1, this.accent, 0.5);
+      this.comic.random(this.hero, this.v1, this.accent, 0.5);
     }
   }
 
@@ -3724,6 +3839,7 @@ export class CombatSystem extends createSystem({
     this.particles.burst(boss.spawn, ENEMY_COLOR.boss, 160, 3, 0.9, this.v2);
     this.flashes.spawn(boss.spawn, ENEMY_COLOR.boss, 0.5, 3, 0.8);
     this.sfx.thunder();
+    this.riftLevel = Math.min(0.6, this.riftLevel + 0.15);
     this.music.play(oblivax ? 'oblivion' : 'void-rift');
     const villain = oblivax ? OBLIVAX.name : chapterForWorld(region)?.villain.name ?? 'BOSS';
     this.comic.pop('BOSS!', this.v2.copy(boss.spawn).setY(boss.spawn.y + 0.9), ENEMY_COLOR.boss, 0.9);
@@ -3993,7 +4109,9 @@ export class CombatSystem extends createSystem({
   }
 
   private updateDrones(dt: number, time: number): void {
-    this.gibs.update(dt, (at, velocity, heavy) => this.particles.emit(at, velocity, heavy ? ICHOR_DARK : ICHOR, 0.6, 0.5, 6));
+    this.gibs.update(dt, (at, velocity, heavy) => this.gore.emit(at, velocity, heavy ? ICHOR_DARK : ICHOR, 0.7, 0.5, 6));
+    this.gore.update(dt);
+    this.pools.update(dt);
     for (const drone of this.drones) {
       if (drone.state === 'off') {
         if (drone.dying >= 0) this.updateDeath(drone, dt);
@@ -4376,7 +4494,7 @@ export class CombatSystem extends createSystem({
   private bleed(at: Vector3, direction: Vector3, count: number): void {
     for (let i = 0; i < count; i += 1) {
       this.v2.set(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).multiplyScalar(1.6).addScaledVector(direction, 1.8 + Math.random() * 1.5);
-      this.particles.emit(at, this.v2, Math.random() < 0.3 ? ICHOR_DARK : ICHOR, 0.5 + Math.random() * 0.5, 0.6, 7);
+      this.gore.emit(at, this.v2, Math.random() < 0.35 ? ICHOR_DARK : ICHOR, 0.6 + Math.random() * 0.5, 0.6, 8);
     }
   }
 
@@ -4404,7 +4522,11 @@ export class CombatSystem extends createSystem({
     drone.knock.normalize().multiplyScalar(this.hitStyle === 'slice' ? 0.3 : big ? 1.4 : 0.9);
     const chest = def.ground!.chest;
     const scale = chest / 1.15;
-    if (this.hitStyle === 'slice') {
+    this.pools.spill(drone.feet.x + drone.knock.x * 0.6, drone.feet.z + drone.knock.z * 0.6, big ? 1.5 : 0.9 * scale);
+    if (this.hitStyle === 'impale') {
+      this.bleed(this.hitPoint, this.hitDir, 30);
+      this.sfx.splat();
+    } else if (this.hitStyle === 'slice') {
       // Sever along the blade's cut plane.
       let name: PartName = 'Upper';
       if (this.hitPoint.y > object.position.y + 0.28 * scale) name = 'Head';
@@ -4429,8 +4551,147 @@ export class CombatSystem extends createSystem({
     }
   }
 
+  /**
+   * A thrust that drives the blade tip into a walker's body impales it: a
+   * killing blow leaves the body skewered on the blade (bleeding) until the
+   * hand flings it off, opens, or it slides off.
+   */
+  private tryImpale(index: number, base: Vector3, tip: Vector3, direction: Vector3): void {
+    const hand = this.hands[index];
+    if (hand.tipVel.dot(direction) < 0.9) return;
+    for (const drone of this.drones) {
+      const def = ENEMIES[drone.kind];
+      if (def.ground == null || drone.state === 'off' || drone.state === 'emerging' || drone.lifted) continue;
+      if (this.elapsed - drone.bladeHitAt < 0.3) continue;
+      const scale = def.ground.chest / 1.15;
+      const at = drone.object.position;
+      this.sa.set(at.x, at.y - 0.6 * scale, at.z);
+      this.sb.set(at.x, at.y + 0.45 * scale, at.z);
+      if (segmentDistance(tip, tip, this.sa, this.sb, this.sc, this.bladeA, this.bladeB, this.v4) > def.radius * 0.8) continue;
+      drone.bladeHitAt = this.elapsed;
+      this.markHit('impale', tip, direction);
+      this.damageDrone(drone, 4);
+      this.sfx.slash();
+      // damageDrone may have killed it.
+      if ((drone.state as DroneState) === 'off' && drone.dying >= 0) {
+        drone.heldBy = index;
+        drone.t = 0;
+        hand.skewer = drone;
+        this.v1.copy(tip).setY(tip.y + 0.3);
+        this.comic.pop('SKEWERED!', this.v1, ICHOR, 0.45);
+      } else this.bleed(tip, direction, 20);
+      return;
+    }
+    void base;
+  }
+
+  /** A body hanging on a blade: dangles, bleeds, flies off when flung. */
+  private updateSkewered(drone: Drone, dt: number): void {
+    const hand = this.hands[drone.heldBy];
+    const blade = this.hero === 'ronin' ? hand.sword : this.hero === 'talon' ? hand.claws : null;
+    if (blade == null || !hand.tracked || blade.extension < 0.6) {
+      this.releaseBody(drone, this.v1.set(0, 0, 0));
+      return;
+    }
+    drone.t += dt;
+    const object = drone.object;
+    this.sb.copy(blade.base).lerp(blade.tip, 0.65);
+    object.position.copy(this.sb);
+    object.position.y -= 0.12;
+    this.faceHead(object);
+    object.rotation.x = -0.35;
+    const rig = drone.rig;
+    if (rig) {
+      const sway = Math.sin(this.elapsed * 5) * 0.2;
+      rig.kneeL.rotation.x = 0.7 + sway;
+      rig.kneeR.rotation.x = 0.5 - sway;
+      rig.legL.rotation.x = 0.3 + sway;
+      rig.legR.rotation.x = -0.1 - sway;
+      rig.armL.rotation.x = 0.3;
+      rig.armR.rotation.x = 0.2;
+      rig.upper.rotation.x = rig.upperRest + 0.5;
+    }
+    if (Math.random() < 0.5) {
+      this.v2.set((Math.random() - 0.5) * 0.3, -0.5, (Math.random() - 0.5) * 0.3);
+      this.gore.emit(object.position, this.v2, Math.random() < 0.4 ? ICHOR_DARK : ICHOR, 0.8, 0.3, 8);
+    }
+    // Fling it off with a hard swing, or it slides off after a while.
+    if (drone.t > 0.25 && hand.tipVel.length() > 3) {
+      this.v1.copy(hand.tipVel).multiplyScalar(1.3);
+      this.v1.y += 1.5;
+      this.releaseBody(drone, this.v1);
+      this.comic.pop('FLING!', this.v4.copy(object.position).setY(object.position.y + 0.4), this.accent, 0.4);
+      this.sfx.crescent();
+    } else if (drone.t > 4) this.releaseBody(drone, this.v1.set(0, 0, 0));
+  }
+
+  private releaseBody(drone: Drone, velocity: Vector3): void {
+    for (const hand of this.hands) if (hand.skewer === drone) hand.skewer = null;
+    drone.heldBy = -1;
+    drone.flying = true;
+    drone.fly.copy(velocity);
+  }
+
+  /** A thrown body tumbles, knocks over the living, and lands lying down. */
+  private updateAirborne(drone: Drone, dt: number): void {
+    const object = drone.object;
+    const chest = ENEMIES[drone.kind].ground!.chest;
+    drone.fly.y -= 9.8 * dt;
+    object.position.addScaledVector(drone.fly, dt);
+    object.rotation.x -= dt * (2 + drone.fly.length() * 0.5);
+    if (Math.random() < 0.6) this.gore.emit(object.position, this.v2.set(0, 0, 0), ICHOR, 0.6, 0.5, 6);
+    // Bowling: a flying body knocks into the living.
+    if (drone.fly.lengthSq() > 9 && this.elapsed - drone.bowlAt > 0.3) {
+      for (const other of this.drones) {
+        if (other === drone || other.state === 'off' || other.state === 'emerging' || !ENEMIES[other.kind].ground) continue;
+        if (other.object.position.distanceTo(object.position) > ENEMIES[other.kind].radius + 0.35) continue;
+        drone.bowlAt = this.elapsed;
+        this.markHit('blast', other.object.position, drone.fly);
+        this.damageDrone(other, 2);
+        this.sfx.catchHammer();
+        break;
+      }
+    }
+    if (object.position.y > chest * 0.22) return;
+    drone.flying = false;
+    drone.feet.set(object.position.x, 0, object.position.z);
+    drone.knock.set(0, 0, 0);
+    drone.dying = drone.kind === 'titan' ? DEATH_FALL * 1.5 : DEATH_FALL;
+    this.pools.spill(drone.feet.x, drone.feet.z, 1);
+    this.particles.burst(drone.feet, DUST, 20, 1.2, 0.5, this.v2);
+    this.bleed(object.position, this.v2.set(0, 1, 0), 16);
+    this.sfx.catchHammer();
+  }
+
+  /** Throws a living walker (webs): it flies and crashes into whatever it hits. */
+  private flingDrone(drone: Drone, velocity: Vector3): boolean {
+    const slot = this.liftSlots.find((s) => s.state === 'off');
+    if (slot == null || drone.lifted) return false;
+    slot.object = drone.object;
+    slot.drone = drone;
+    slot.radius = ENEMIES[drone.kind].radius;
+    drone.lifted = true;
+    drone.snare = 0;
+    drone.cocoon.visible = false;
+    slot.state = 'flying';
+    slot.thrown = true;
+    slot.t = 0;
+    slot.velocity.copy(velocity);
+    slot.previous.copy(drone.object.position);
+    slot.spin.set((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 8);
+    return true;
+  }
+
   /** Falling, lying and sinking; then the pooled body is put back together. */
   private updateDeath(drone: Drone, dt: number): void {
+    if (drone.heldBy >= 0) {
+      this.updateSkewered(drone, dt);
+      return;
+    }
+    if (drone.flying) {
+      this.updateAirborne(drone, dt);
+      return;
+    }
     const def = ENEMIES[drone.kind];
     const object = drone.object;
     const rig = drone.rig;
@@ -4471,6 +4732,9 @@ export class CombatSystem extends createSystem({
 
   /** Death over: hide the body and reassemble it for the next spawn. */
   private endDeath(drone: Drone): void {
+    for (const hand of this.hands) if (hand.skewer === drone) hand.skewer = null;
+    drone.heldBy = -1;
+    drone.flying = false;
     drone.dying = -1;
     drone.object.visible = false;
     drone.object.rotation.x = 0;
@@ -4516,7 +4780,7 @@ export class CombatSystem extends createSystem({
   }
 
   /** Records how the next hit lands (style, point, travel direction, cut plane). */
-  private markHit(style: 'blast' | 'slice', point: Vector3, direction: Vector3, cutNormal?: Vector3): void {
+  private markHit(style: 'blast' | 'slice' | 'impale', point: Vector3, direction: Vector3, cutNormal?: Vector3): void {
     this.hitStyle = style;
     this.hitPoint.copy(point);
     this.hitDir.copy(direction).normalize();
@@ -4645,6 +4909,8 @@ export class CombatSystem extends createSystem({
         else this.explodeDrone(drone, false);
       }
       if (phase === 'victory') {
+        // The world withdraws from the room once it is won.
+        this.riftLevel = 0;
         this.sfx.victory();
         this.slowmo = SLOWMO_SECONDS;
       } else {

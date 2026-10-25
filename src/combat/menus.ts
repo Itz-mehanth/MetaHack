@@ -24,7 +24,7 @@ import {
 import { chapterFor, type Speaker } from './story.js';
 import { ANCHORS_TO_FINALE, anchorsRecovered, finaleUnlocked, PROLOGUE_DONE } from './saga.js';
 
-export type Screen = 'main' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
+export type Screen = 'main' | 'galaxy' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
 
 /** What the transmission screen shows: one line of dialogue. */
 export interface TransmissionView {
@@ -106,6 +106,8 @@ export class GameMenus {
   hero: HeroId = 'arc';
   /** Hero under the carousel spotlight. */
   heroFocus = 0;
+  /** Planet (hero index) selected on the galaxy map. */
+  galaxyIndex = 0;
   /** Selected level on the campaign map (0-based). */
   mapLevel = 0;
   transmission: TransmissionView | null = null;
@@ -170,6 +172,8 @@ export class GameMenus {
     switch (this.screen) {
       case 'main':
         return this.mainScreen(accent);
+      case 'galaxy':
+        return this.galaxyScreen();
       case 'heroes':
         return this.heroesScreen(accent);
       case 'map':
@@ -271,6 +275,63 @@ export class GameMenus {
               size: 30,
               color: 'rgba(233,252,255,0.6)',
             },
+      ],
+    };
+  }
+
+  private galaxyScreen(): PanelContent {
+    const p = this.profile;
+    const hero = HEROES[this.galaxyIndex] ?? HEROES[0];
+    const chapter = chapterFor(hero.id);
+    const owned = p.heroes.includes(hero.id);
+    const cleared = chapter.levels.filter((_, i) => (p.stars[`${chapter.worldId}-${i + 1}`] ?? 0) > 0).length;
+    const anchors = anchorsRecovered(p).length;
+    const finale = finaleUnlocked(p);
+    const color = equippedColor(p, hero.id);
+    return {
+      title: 'THE ANCHOR WAR',
+      subtitle: `Anchors ${anchors}/8. Poke a planet below to choose a front.`,
+      coins: p.coins,
+      accent: color,
+      widgets: [
+        { id: 'back', x: 1236, y: 150, w: 300, h: 70, label: 'BACK', size: 32 },
+        {
+          id: 'galaxy-info',
+          kind: 'text',
+          x: 80,
+          y: 250,
+          w: 1440,
+          h: 160,
+          label: `${hero.name}  |  ${chapter.region}  vs  ${chapter.villain.name}\n${cleared}/3 levels cleared  |  Anchor: ${cleared >= 3 ? 'SECURED' : 'held by ' + chapter.villain.name}`,
+          size: 44,
+          color: '#FFFFFF',
+        },
+        {
+          id: 'galaxy-go',
+          x: 64,
+          y: 440,
+          w: 900,
+          h: 150,
+          label: owned ? `DEPLOY ${hero.name}` : `UNLOCK ${hero.name}`,
+          sub: owned ? `${chapter.region}: ${chapter.levels[Math.min(2, cleared)].location}` : `${HERO_PRICE[hero.id]} coins`,
+          icon: hero.id,
+          selected: true,
+          color,
+          size: 56,
+        },
+        {
+          id: 'galaxy-finale',
+          x: 996,
+          y: 440,
+          w: 540,
+          h: 150,
+          label: 'CONVERGENCE',
+          sub: finale ? 'Face OBLIVAX' : `Needs 3 Anchors (${anchors})`,
+          icon: finale ? 'skull' : 'lock',
+          color: '#FF4FD8',
+          disabled: !finale,
+          size: 44,
+        },
       ],
     };
   }
@@ -597,13 +658,32 @@ export class GameMenus {
     if (event.id !== 'reset') this.confirmReset = false;
     switch (kind) {
       case 'back':
-        this.open(this.screen === 'settings' ? this.settingsReturn : this.screen === 'map' ? 'heroes' : 'main');
+        this.open(this.screen === 'settings' ? this.settingsReturn : this.screen === 'map' ? 'galaxy' : 'main');
         return;
       case 'main-hero':
         this.open('heroes');
         return;
       case 'play':
-        this.open('heroes');
+        this.galaxyIndex = Math.max(0, HEROES.findIndex((h) => h.id === this.hero));
+        this.open('galaxy');
+        return;
+      case 'galaxy-go': {
+        const id = HEROES[this.galaxyIndex].id;
+        if (!p.heroes.includes(id)) {
+          if (!buyHero(p, id)) {
+            this.actions.denied();
+            return;
+          }
+          this.actions.bought();
+        }
+        this.hero = id;
+        this.actions.changed();
+        this.open('map');
+        return;
+      }
+      case 'galaxy-finale':
+        if (finaleUnlocked(p)) this.actions.finale();
+        else this.actions.denied();
         return;
       case 'garage':
         this.garageHero = this.hero;

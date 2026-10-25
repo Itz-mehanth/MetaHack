@@ -1,5 +1,6 @@
 import {
   CanvasTexture,
+  CircleGeometry,
   type Color,
   Mesh,
   MeshBasicMaterial,
@@ -20,6 +21,9 @@ import {
 /** One severable part of an alien, and where it belongs. */
 export interface Part {
   readonly object: Object3D;
+  /** Flesh cut faces shown once severed: on the part, and on the body. */
+  readonly cap: Object3D | null;
+  readonly stump: Object3D | null;
   readonly parent: Object3D;
   readonly position: Vector3;
   readonly quaternion: Quaternion;
@@ -36,6 +40,8 @@ export function captureParts(root: Object3D): Partial<Record<PartName, Part>> {
     if (object?.parent == null) continue;
     parts[name] = {
       object,
+      cap: root.getObjectByName(`Cap${name}`) ?? null,
+      stump: root.getObjectByName(`Stump${name}`) ?? null,
       parent: object.parent,
       position: object.position.clone(),
       quaternion: object.quaternion.clone(),
@@ -51,6 +57,8 @@ export function restorePart(part: Part): void {
   part.object.position.copy(part.position);
   part.object.quaternion.copy(part.quaternion);
   part.object.scale.copy(part.scale);
+  if (part.cap) part.cap.visible = false;
+  if (part.stump) part.stump.visible = false;
 }
 
 interface Gib {
@@ -86,6 +94,8 @@ export class Gibs {
     const gib = this.pool.find((g) => g.part == null);
     if (gib == null) return;
     this.scene.attach(part.object);
+    if (part.cap) part.cap.visible = true;
+    if (part.stump) part.stump.visible = true;
     gib.part = part;
     gib.velocity.copy(velocity);
     gib.spin.set((Math.random() - 0.5) * spin, (Math.random() - 0.5) * spin, (Math.random() - 0.5) * spin);
@@ -219,4 +229,82 @@ export class BloodScreen {
 /** Alien ichor colours, bright enough to read in passthrough. */
 export function ichorColor(out: Color, dark: boolean): Color {
   return dark ? out.set('#1E7A12') : out.set('#7CFF3D');
+}
+
+interface Pool {
+  mesh: Mesh;
+  material: MeshBasicMaterial;
+  age: number;
+  size: number;
+}
+
+/** Dark blood pools spreading on the floor under the dead; they dry and fade. */
+export class BloodPools {
+  private readonly pools: Pool[] = [];
+  private next = 0;
+
+  constructor(parent: Object3D, capacity = 20) {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const c = canvas.getContext('2d')!;
+    let seed = 11;
+    const rand = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (let i = 0; i < 14; i += 1) {
+      const r = 10 + rand() * 26;
+      const x = size / 2 + (rand() - 0.5) * 50;
+      const y = size / 2 + (rand() - 0.5) * 50;
+      const g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, 'rgba(70,0,4,0.95)');
+      g.addColorStop(0.75, 'rgba(90,0,6,0.85)');
+      g.addColorStop(1, 'rgba(90,0,6,0)');
+      c.fillStyle = g;
+      c.beginPath();
+      c.arc(x, y, r, 0, Math.PI * 2);
+      c.fill();
+    }
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    const geometry = new CircleGeometry(0.5, 20);
+    geometry.rotateX(-Math.PI / 2);
+    for (let i = 0; i < capacity; i += 1) {
+      const material = new MeshBasicMaterial({ map: texture, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+      const mesh = new Mesh(geometry, material);
+      mesh.name = 'BloodPool';
+      mesh.visible = false;
+      mesh.renderOrder = 1;
+      parent.add(mesh);
+      this.pools.push({ mesh, material, age: 0, size: 1 });
+    }
+  }
+
+  /** Starts a pool spreading at floor point (x, z) up to `size` metres across. */
+  spill(x: number, z: number, size: number): void {
+    const pool = this.pools[this.next];
+    this.next = (this.next + 1) % this.pools.length;
+    pool.mesh.position.set(x, 0.004 + this.next * 0.0002, z);
+    pool.mesh.rotation.y = Math.random() * Math.PI * 2;
+    pool.size = size;
+    pool.age = 0;
+    pool.mesh.visible = true;
+  }
+
+  update(dt: number): void {
+    for (const pool of this.pools) {
+      if (!pool.mesh.visible) continue;
+      pool.age += dt;
+      const grow = Math.min(1, pool.age / 1.6);
+      pool.mesh.scale.setScalar(pool.size * (0.2 + 0.8 * Math.sqrt(grow)));
+      pool.material.opacity = pool.age < 9 ? 0.9 : Math.max(0, 0.9 - (pool.age - 9) / 3);
+      if (pool.material.opacity <= 0) pool.mesh.visible = false;
+    }
+  }
+
+  clear(): void {
+    for (const pool of this.pools) pool.mesh.visible = false;
+  }
 }

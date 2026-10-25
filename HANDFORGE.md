@@ -34,6 +34,16 @@ throughout (no Marvel or other third-party names/designs).
   by meeting their weapon with a sword/claw (stuns, double damage). REAVER
   = energy-sword alien; Stalkers dash. Gunners fire 1-2 volleys then push.
   Player hits: directional blood splatter, low-health pulse.
+- Flesh: red blood (normal-blended particles), blood pools on the floor,
+  flesh/bone cut faces on severed parts. Sword/claw thrusts IMPALE: the
+  body stays skewered on the blade until flung (bodies fly, knock others).
+  WEAVER: web shots (web pose or open-palm thrust) splat like bullets;
+  whip the hand to throw the webbed enemy (fist + pull still rips).
+- Worlds: every level has its own sky (worlds.ts: palette, nebula, planet
+  or black hole, rings, stars). VR shows it as the whole sky; MR tears it
+  into the room (rift grows at the boss, closes on victory).
+- Galaxy map (PLAY): 8 hero planets around OBLIVAX's core, level moons,
+  Anchor gems and beams; poke a planet to deploy/unlock, core = finale.
 - Gloves: per-hero gauntlet style (finish, trim, extras; HAVOC fingerless).
 - Enemies: walking humanoid aliens (Grunt, Brute, Stalker, Colossus) from
   wall portals, plasma shots you dodge or shoot; flying boss mechs.
