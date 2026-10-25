@@ -22,6 +22,7 @@ import {
   UPGRADES,
 } from './progression.js';
 import { chapterFor, type Speaker } from './story.js';
+import { ANCHORS_TO_FINALE, anchorsRecovered, finaleUnlocked, PROLOGUE_DONE } from './saga.js';
 
 export type Screen = 'main' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
 
@@ -72,6 +73,10 @@ export interface MenuActions {
   txNext(): void;
   txSkip(): void;
   resetProgress(): void;
+  /** Starts the prologue. */
+  story(): void;
+  /** Starts the finale, CONVERGENCE. */
+  finale(): void;
 }
 
 export interface ResultInfo {
@@ -187,9 +192,27 @@ export class GameMenus {
   private mainScreen(accent: string): PanelContent {
     const hero = HEROES.find((h) => h.id === this.hero)!;
     const next = this.nextStage();
+    const begun = this.profile.unlocks.includes(PROLOGUE_DONE);
+    const anchors = anchorsRecovered(this.profile).length;
+    const finale = finaleUnlocked(this.profile);
+    const play: Widget = begun
+      ? {
+          id: 'play',
+          x: 640,
+          y: 220,
+          w: 896,
+          h: 200,
+          label: 'PLAY',
+          icon: 'play',
+          sub: `${chapterFor(this.hero).region}: ${chapterFor(this.hero).levels[next.number - 1].location}`,
+          selected: true,
+          color: accent,
+          size: 80,
+        }
+      : { id: 'story', x: 640, y: 220, w: 896, h: 200, label: 'START STORY', icon: 'play', sub: 'PROLOGUE: learn your powers in 4 minutes', selected: true, color: '#FF4FD8', size: 72 };
     return {
       title: 'SURGE',
-      subtitle: 'Hands of Heroes',
+      subtitle: begun ? `OBLIVAX is unmaking reality. Win back the Anchors. ${anchors}/8` : 'Hands of Heroes',
       coins: this.profile.coins,
       accent,
       widgets: [
@@ -208,19 +231,7 @@ export class GameMenus {
           size: 64,
           icon: hero.id,
         },
-        {
-          id: 'play',
-          x: 640,
-          y: 220,
-          w: 896,
-          h: 200,
-          label: 'PLAY',
-          icon: 'play',
-          sub: `${chapterFor(this.hero).region}: ${chapterFor(this.hero).levels[next.number - 1].location}`,
-          selected: true,
-          color: accent,
-          size: 80,
-        },
+        play,
         { id: 'garage', x: 640, y: 450, w: 438, h: 150, label: 'GARAGE', sub: 'Upgrades & skins', icon: 'garage' },
         { id: 'settings', x: 1098, y: 450, w: 438, h: 150, label: 'SETTINGS', sub: 'Sound & difficulty', icon: 'settings' },
         { id: 'howto', x: 640, y: 630, w: 438, h: 150, label: 'HOW TO PLAY', icon: 'map' },
@@ -234,17 +245,32 @@ export class GameMenus {
           label: `Stars ${totalStars(this.profile)}/${STAGES.length * 3}\nHeroes ${this.profile.heroes.length}/${HEROES.length}`,
           size: 36,
         },
-        {
-          id: 'tip',
-          kind: 'text',
-          x: 640,
-          y: 830,
-          w: 896,
-          h: 80,
-          label: 'Poke buttons with a fingertip. Left wrist button pauses a fight.',
-          size: 30,
-          color: 'rgba(233,252,255,0.6)',
-        },
+        begun
+          ? {
+              id: 'finale',
+              x: 640,
+              y: 800,
+              w: 896,
+              h: 120,
+              label: finale ? 'CONVERGENCE: FACE OBLIVAX' : `ANCHORS ${anchors} / 8`,
+              sub: finale ? 'The final battle. Every hero, one fight.' : `Beat ${ANCHORS_TO_FINALE - anchors} more region bosses to face OBLIVAX`,
+              icon: finale ? 'skull' : 'lock',
+              color: '#FF4FD8',
+              selected: finale,
+              disabled: !finale,
+              size: 40,
+            }
+          : {
+              id: 'tip',
+              kind: 'text',
+              x: 640,
+              y: 830,
+              w: 896,
+              h: 80,
+              label: 'Poke buttons with a fingertip. Left wrist button pauses a fight.',
+              size: 30,
+              color: 'rgba(233,252,255,0.6)',
+            },
       ],
     };
   }
@@ -273,7 +299,7 @@ export class GameMenus {
     const pick = !playable ? 'COMING SOON' : hero.id === this.hero ? 'SELECTED - TAP TO PLAY' : owned ? 'SELECT HERO' : `UNLOCK FOR ${price} C`;
     return {
       title: 'CHOOSE YOUR HERO',
-      subtitle: 'Swipe your hand sideways, or use the arrows',
+      subtitle: 'Swipe an open hand sideways (one hero per swipe), or poke the arrows',
       coins: this.profile.coins,
       accent: color,
       widgets: [
@@ -354,7 +380,7 @@ export class GameMenus {
     );
     return {
       title: chapter.region,
-      subtitle: `${HEROES.find((h) => h.id === this.hero)!.name} vs ${chapter.villain.name}, ${chapter.villain.title}`,
+      subtitle: `${HEROES.find((h) => h.id === this.hero)!.name} vs ${chapter.villain.name}  |  Boss holds an ANCHOR (${anchorsRecovered(this.profile).length}/8 recovered)`,
       coins: this.profile.coins,
       accent,
       widgets,
@@ -499,7 +525,8 @@ export class GameMenus {
       accent,
       widgets: [
         BACK,
-        { id: 'howto-text', kind: 'text', x: 80, y: 250, w: 1440, h: 500, label: lines, size: 38 },
+        { id: 'howto-text', kind: 'text', x: 80, y: 250, w: 1440, h: 500, label: lines, size: 34 },
+        { id: 'story', x: 1036, y: 150, w: 180, h: 70, label: 'PROLOGUE', size: 26 },
         {
           id: 'howto-more',
           kind: 'text',
@@ -589,6 +616,13 @@ export class GameMenus {
         return;
       case 'howto':
         this.open('howto');
+        return;
+      case 'story':
+        this.actions.story();
+        return;
+      case 'finale':
+        if (finaleUnlocked(p)) this.actions.finale();
+        else this.actions.denied();
         return;
       case 'hero-prev':
       case 'hero-next':

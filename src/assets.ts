@@ -14,6 +14,7 @@ import {
   createTitan,
 } from './scene-assets/combat.scene-asset.js';
 import { createDebris } from './scene-assets/props.scene-asset.js';
+import { createOblivax } from './scene-assets/oblivax.scene-asset.js';
 import { createHeroFigure, createPedestal } from './scene-assets/heroes.scene-asset.js';
 import {
   createBowDisplay,
@@ -73,6 +74,7 @@ export default defineAssets({
   'boss-scrap-wastes': createBoss('#FF5A1F'),
   'boss-moon-temple': createBoss('#FF3355'),
   'boss-sky-ruins': createBoss('#E05CFF'),
+  'boss-oblivion': createOblivax(),
   orb: createOrb(),
   pod: createPod(),
   'pickup-heal': createPickup('heal'),

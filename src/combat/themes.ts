@@ -89,6 +89,18 @@ export const THEMES: Readonly<Record<string, Theme>> = {
     bandB: '#3DE0C8',
     ambient: 'dust',
   },
+  oblivion: {
+    top: '#000000',
+    mid: '#12001A',
+    horizon: '#FF4FD8',
+    accent: '#FFE8FF',
+    gridMinor: '#5A1A6A',
+    gridMajor: '#FF4FD8',
+    ring: '#FF4FD8',
+    bandA: '#FF4FD8',
+    bandB: '#FFFFFF',
+    ambient: 'void',
+  },
   'moon-temple': {
     top: '#01030C',
     mid: '#0B1838',

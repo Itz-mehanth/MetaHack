@@ -98,7 +98,7 @@ const HTML = () => `
   </div>
   <div class="burst"><h1>SURGE</h1></div>
   <div class="sub">HANDS OF HEROES</div>
-  <p class="tag">The Hollow Legion is caging your city. Your bare hands are the only superpower left.</p>
+  <p class="tag">OBLIVAX, the Unmaker, is erasing reality, starting with the room you are standing in. Channel eight heroes through your bare hands, win back the Anchors, and stop the end.</p>
   <div class="buttons">
     <button class="mr" id="enter-mr">ENTER MR</button>
     <button class="vr" id="enter-vr">ENTER VR</button>
@@ -111,9 +111,9 @@ const HTML = () => `
 
   <h2>HOW TO PLAY</h2>
   <div class="how">
-    ${how('play', '#3DF5FF', 'SUIT UP', 'Put the controllers down. Pick a hero from the 3D lineup with a sideways swipe and a poke.')}
-    ${how('hostage', '#FFD23F', 'SAVE THEM', 'Enemies breach your real walls. Smash cages to free civilians, beat the boss.')}
-    ${how('overdrive', '#FF2D9A', 'SURGE', 'Grab power-ups, chain combos, then clap your palms to unleash OVERDRIVE.')}
+    ${how('play', '#3DF5FF', 'JUST PLAY', 'Put the controllers down. A 4-minute prologue teaches three heroes, one gesture at a time.')}
+    ${how('hostage', '#FFD23F', 'WIN BACK THE ANCHORS', 'Aliens breach your real walls. Free the caged, beat each region boss, recover its Anchor.')}
+    ${how('overdrive', '#FF2D9A', 'CONVERGENCE', 'With three Anchors, face OBLIVAX in your own room. Every hero joins in. Clap to end it.')}
   </div>
 
   <footer>

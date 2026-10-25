@@ -6,7 +6,7 @@ import type { HeroId } from './heroes.js';
  * lieutenants over three levels, the last a boss fight. Pure data.
  */
 
-export type Speaker = 'villain' | 'hero' | 'civilian' | 'vex';
+export type Speaker = 'villain' | 'hero' | 'civilian' | 'vex' | 'oblivax' | 'echo';
 
 export interface Line {
   readonly speaker: Speaker;

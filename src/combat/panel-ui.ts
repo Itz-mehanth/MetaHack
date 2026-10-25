@@ -498,6 +498,38 @@ export class Panel {
       c.moveTo(cx - r * 0.5, cy + r * 0.45);
       for (let i = 0; i <= 8; i += 1) c.lineTo(cx - r * 0.5 + i * r * 0.125, cy + r * (i % 2 ? 0.62 : 0.45));
       c.stroke();
+    } else if (speaker === 'oblivax') {
+      // Faceless mask: one burning vertical eye under a crown of shards.
+      for (let i = -3; i <= 3; i += 1) {
+        c.beginPath();
+        c.moveTo(cx + i * r * 0.26 - r * 0.08, cy - r * 1.1);
+        c.lineTo(cx + i * r * 0.26, cy - r * (1.75 - Math.abs(i) * 0.14));
+        c.lineTo(cx + i * r * 0.26 + r * 0.08, cy - r * 1.1);
+        c.fill();
+      }
+      c.fillStyle = '#FFFFFF';
+      c.beginPath();
+      c.ellipse(cx, cy - r * 0.1, r * 0.09, r * 0.45, 0, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = color;
+      for (const side of [-1, 1]) c.fillRect(cx + side * r * 0.45 - r * 0.03, cy + r * 0.2, r * 0.06, r * 0.5);
+    } else if (speaker === 'echo') {
+      // Command AI: concentric rings and a live waveform.
+      c.lineWidth = 4;
+      for (const k of [0.35, 0.6]) {
+        c.beginPath();
+        c.arc(cx, cy, r * k, 0, Math.PI * 2);
+        c.stroke();
+      }
+      c.lineWidth = 6;
+      c.beginPath();
+      for (let i = 0; i <= 24; i += 1) {
+        const x = cx - r * 0.8 + (i / 24) * r * 1.6;
+        const y = cy + Math.sin(i * 1.3 + (w.value ?? 0) * 20) * r * 0.18 * Math.sin((i / 24) * Math.PI);
+        if (i === 0) c.moveTo(x, y);
+        else c.lineTo(x, y);
+      }
+      c.stroke();
     } else if (speaker === 'hero') {
       // Hero visor band.
       c.beginPath();

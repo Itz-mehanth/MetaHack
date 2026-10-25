@@ -26,6 +26,27 @@ import { applyRealism, loadSurfaceMaps } from './combat/materials.js';
 import { Claws } from './combat/claws.js';
 import { segmentDistance, Sword } from './combat/sword.js';
 import { PsiLink } from './combat/telekinesis.js';
+import { CLAP_TIP, Coach, HERO_TIPS, type Tip } from './combat/coach.js';
+import { Erasure } from './combat/erasure.js';
+import {
+  anchorLine,
+  chapterCall,
+  CONVERGENCE_AT,
+  ECHO,
+  FINALE,
+  FINALE_DONE,
+  FINALE_PHASES,
+  finalePhase,
+  isSagaStage,
+  OBLIVAX,
+  PROLOGUE,
+  PROLOGUE_DONE,
+  PROLOGUE_ERASE_AT,
+  PROLOGUE_ERASURE,
+  PROLOGUE_HEROES,
+  SAGA_STORY,
+  anchorsRecovered,
+} from './combat/saga.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
 import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose } from './combat/gestures.js';
@@ -97,6 +118,8 @@ const SLOWMO_SCALE = 0.25;
 const SWORD_WAVE_SPEED = 3.4;
 const SWORD_WAVE_COOLDOWN = 0.45;
 const X_STRIKE_COOLDOWN = 2.5;
+/** Seconds each coach tip stays up. */
+const TIP_SECONDS = 3.4;
 /** Mean finger extension: open to aim, curled to grab, opened again to throw. */
 const PSI_OPEN = 1.6;
 const PSI_GRAB = 1.5;
@@ -140,7 +163,8 @@ const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   orb: ORANGE,
   pod: GOLD,
 };
-const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins'];
+const OBLIVAX_COLOR = new Color(OBLIVAX.color);
+const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins', 'oblivion'];
 type PickupKind = 'heal' | 'rapid' | 'power';
 const BUFF_SECONDS = 8;
 
@@ -378,6 +402,29 @@ export class CombatSystem extends createSystem({
   private xUp = new Vector3();
   private xDiag = new Vector3();
   private impactPoint = new Vector3();
+  private coach = new Coach();
+  private erasure = new Erasure(OBLIVAX.color);
+  private eraseTarget = 0;
+  private veilTarget = 0;
+  /** Scripted saga mission running, if any. */
+  private script: 'prologue' | 'finale' | null = null;
+  private scriptWave = -1;
+  /** Seconds into the prologue erasure cutscene (-1: not started). */
+  private erasing = -1;
+  /** OBLIVAX ignores damage (cutscene, CONVERGENCE). */
+  private bossLocked = false;
+  private finaleIndex = -1;
+  /** Seconds into CONVERGENCE (-1: not started); `volley` once the clap lands. */
+  private convergence = -1;
+  private volley = -1;
+  private volleyTimer = 0;
+  private holograms: Object3D[] = [];
+  private tipQueue: readonly Tip[] = [];
+  private tipIndex = 0;
+  private tipTimer = 0;
+  private accentHex = '#3DF5FF';
+  /** Elapsed time to auto-start the prologue on a first XR session (-1: none). */
+  private autoPrologueAt = -1;
   private mapPokeCooldown = 0;
   private story: LevelStory | null = null;
   private taunt = '';
@@ -401,6 +448,13 @@ export class CombatSystem extends createSystem({
   private swipeCooldown = 0;
   private swipePrev = [new Vector3(), new Vector3()];
   private swipeValid = [false, false];
+  /** Sideways distance of the current stroke, per hand (m, signed). */
+  private swipeStroke = [0, 0];
+  /** After a step, a hand must slow down before its next stroke counts. */
+  private swipeLatched = [false, false];
+  private swipeStill = [0, 0];
+  /** Direction of the last step, so the hand's return stroke is ignored. */
+  private swipeDir = 0;
   private bow!: Bow;
   /** Hand holding the bow (-1: loose in the world). */
   private bowHolder = -1;
@@ -502,6 +556,8 @@ export class CombatSystem extends createSystem({
       },
       txNext: () => this.nextTransmissionLine(),
       txSkip: () => this.endTransmission(),
+      story: () => this.startStage('arc', PROLOGUE),
+      finale: () => this.startStage('arc', FINALE),
       resetProgress: () => {
         this.profile = resetProfile();
         this.menus.setProfile(this.profile);
@@ -665,6 +721,7 @@ export class CombatSystem extends createSystem({
       if (this.panel.visible) this.replaceMenuAt = this.elapsed + 0.6;
       this.music.play(this.run.phase === 'title' ? 'menu' : this.run.stage.world.id);
       this.scanTime = 0;
+      if (!hasUnlock(this.profile, PROLOGUE_DONE) && this.run.phase === 'title' && this.tx == null) this.autoPrologueAt = this.elapsed + 3;
     };
     xr.addEventListener('sessionstart', onSessionStart);
     const canvas = this.world.renderer.domElement;
@@ -831,6 +888,26 @@ export class CombatSystem extends createSystem({
       const display = { tempest: 'hammer', havoc: 'blaster' }[hero.id as string] ?? `weapon-${hero.id}`;
       this.weaponDisplays.set(hero.id, await this.world.assets.instantiate(display));
     }
+    // CONVERGENCE: life-size hologram of every hero.
+    for (const hero of HEROES) {
+      const figure = await this.world.assets.instantiate(`hero-${hero.id}`);
+      const color = new Color(hero.color);
+      const body = new MeshBasicMaterial({ color: color.clone().multiplyScalar(0.6), transparent: true, opacity: 0.45, blending: AdditiveBlending, depthWrite: false, toneMapped: false });
+      const edge = new MeshBasicMaterial({ color, transparent: true, opacity: 0.7, wireframe: true, blending: AdditiveBlending, depthWrite: false, toneMapped: false });
+      const meshes: Mesh[] = [];
+      figure.traverse((o) => {
+        if ((o as Mesh).isMesh) meshes.push(o as Mesh);
+      });
+      for (const mesh of meshes) {
+        mesh.material = body;
+        mesh.add(new Mesh(mesh.geometry, edge));
+      }
+      figure.userData.color = color;
+      figure.visible = false;
+      this.root.add(figure);
+      this.holograms.push(figure);
+    }
+    this.root.add(this.coach.group, this.erasure.mesh);
     // PSION's props, plus slots that carry lifted aliens.
     for (const kind of ['crate', 'barrel', 'boulder', 'girder', 'crate', 'boulder'] as const) {
       const object = await this.world.assets.instantiate(`debris-${kind}`);
@@ -891,11 +968,26 @@ export class CombatSystem extends createSystem({
       wave: this.run.wave,
       health: this.run.health,
       transmission: this.tx != null,
+      script: this.script,
+      hero: this.hero,
+      erase: Math.round(this.erasure.progress * 100) / 100,
+      coach: this.coach.visible,
       screen: this.menus.screen,
       panel: this.panel.visible,
       live: this.powersLive,
       enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}:${d.state}`),
     });
+    // Test hook: set the boss to a health fraction (e.g. to reach CONVERGENCE).
+    (window as unknown as { __surgeBoss: (f: number) => void }).__surgeBoss = (f: number) => {
+      const boss = this.findBoss();
+      if (boss) boss.hp = boss.maxHp * f;
+    };
+    (window as unknown as { __surgeSkip: () => void }).__surgeSkip = () => this.endTransmission();
+    (window as unknown as { __surgeClear: () => void }).__surgeClear = () => {
+      for (const drone of this.drones) {
+        if (drone.state !== 'off' && drone.kind !== 'boss' && drone.kind !== 'pod') this.damageDrone(drone, 999, true);
+      }
+    };
     const params = new URLSearchParams(window.location.search);
     const screen = params.get('menu');
     if (screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings') {
@@ -905,10 +997,10 @@ export class CombatSystem extends createSystem({
       this.showMenu(screen);
       return;
     }
-    const stage = STAGES.find((s) => s.id === params.get('autostart'));
+    const stage = [...STAGES, PROLOGUE, FINALE].find((s) => s.id === params.get('autostart'));
     if (stage == null) return;
     const hero = (HEROES.find((h) => h.id === params.get('hero'))?.id ?? 'arc') as HeroId;
-    if (params.has('skipstory')) {
+    if (params.has('skipstory') && !isSagaStage(stage)) {
       this.story = levelStory(stage.world.id, stage.number) ?? null;
       this.launchStage(hero, stage);
     } else this.startStage(hero, stage);
@@ -969,6 +1061,9 @@ export class CombatSystem extends createSystem({
     this.updateClaws(realDt);
     this.updateSwords(realDt, time);
     this.updatePsion(realDt, dt, time);
+    this.updateScript(realDt, time);
+    this.coach.update(realDt, this.head, this.forward);
+    this.erasure.update(realDt, time, this.head, this.eraseTarget, this.veilTarget);
     this.updateHammer(realDt, time);
     this.updateBow(realDt);
     this.updateGun(realDt);
@@ -1153,22 +1248,33 @@ export class CombatSystem extends createSystem({
 
   /** Plays the level's intro transmission (if any), then the level. */
   private startStage(hero: HeroId, stage: Stage): void {
+    this.autoPrologueAt = -1;
+    const saga = isSagaStage(stage);
+    if (saga) {
+      this.script = stage.id === FINALE.id ? 'finale' : 'prologue';
+      hero = this.script === 'finale' ? FINALE_PHASES[0].hero : PROLOGUE_HEROES[0];
+      this.story = SAGA_STORY[this.script];
+    } else {
+      this.endScript();
+      this.menus.hero = hero;
+      this.story = levelStory(stage.world.id, stage.number) ?? null;
+    }
     this.hero = hero;
-    this.menus.hero = hero;
-    this.story = levelStory(stage.world.id, stage.number) ?? null;
     this.setTheme(stage.world.id);
     this.music.play(stage.world.id);
-    if (this.story) this.beginTransmission(this.story.intro, () => this.launchStage(hero, stage));
+    let intro = this.story?.intro ?? [];
+    if (!saga && stage.number === 1 && hasUnlock(this.profile, PROLOGUE_DONE)) {
+      const chapter = chapterForWorld(stage.world.id);
+      if (chapter) intro = [chapterCall(chapter.region, HEROES.find((h) => h.id === hero)!.name), ...intro];
+    }
+    if (intro.length > 0) this.beginTransmission(intro, () => this.launchStage(hero, stage));
     else this.launchStage(hero, stage);
   }
 
   /** Starts `stage` with `hero`, applying difficulty, upgrades and skin. */
   private launchStage(hero: HeroId, stage: Stage): void {
     this.hero = hero;
-    this.menus.hero = hero;
-    this.applySkin();
-    const def = HEROES.find((h) => h.id === hero)!;
-    this.wrist.setHero(`${def.name} | PAUSE`, this.accent);
+    if (!isSagaStage(stage)) this.menus.hero = hero;
     this.panel.hide();
     this.paused = false;
     this.resultTimer = -1;
@@ -1189,25 +1295,44 @@ export class CombatSystem extends createSystem({
     });
     this.lastPhase = 'intro';
     this.sfx.wave();
+    this.buffRapid = 0;
+    this.buffPower = 0;
+    this.overdrive = 0;
+    for (const pickup of this.pickups) this.retirePickup(pickup);
+    this.xCooldown = 0;
+    this.resetScript();
+    this.equipHero(hero);
+    this.spawnPods(this.story?.hostages ?? 0);
+  }
+
+  /** Equips `hero` (also mid-stage): skin, wrist label, weapon, props, coach tips. */
+  private equipHero(hero: HeroId): void {
+    this.hero = hero;
+    this.applySkin();
+    const def = HEROES.find((h) => h.id === hero)!;
+    this.wrist.setHero(`${def.name} | PAUSE`, this.accent);
     if (hero === 'tempest') this.summonHammer();
     // Bow and pistol start in hand (bow in the off hand, pistol in the main hand).
     this.bowHolder = hero === 'orion' ? (this.profile.settings.leftHanded ? 1 : 0) : -1;
     this.bowLoose.recall = -1;
     this.gunHolder = hero === 'havoc' ? (this.profile.settings.leftHanded ? 0 : 1) : -1;
     this.gunLoose.recall = -1;
-    this.buffRapid = 0;
-    this.buffPower = 0;
-    this.overdrive = 0;
-    this.applyWeaponTier();
-    for (const pickup of this.pickups) this.retirePickup(pickup);
     this.hideDebris();
     if (hero === 'psion') this.placeDebris();
-    this.xCooldown = 0;
-    this.spawnPods(this.story?.hostages ?? 0);
+    this.applyWeaponTier();
+    this.teach(HERO_TIPS[hero]);
+  }
+
+  /** Queues coach tips; they cycle while the stage runs. */
+  private teach(tips: readonly Tip[]): void {
+    this.tipQueue = tips;
+    this.tipIndex = 0;
+    this.tipTimer = 0;
   }
 
   private applySkin(): void {
     this.accent.set(equippedColor(this.profile, this.hero));
+    this.accentHex = `#${this.accent.getHexString()}`;
     this.bow.setColor(this.accent);
     for (const hand of this.hands) {
       hand.gauntlet.setAccent(this.accent);
@@ -1252,6 +1377,7 @@ export class CombatSystem extends createSystem({
   }
 
   private quitToMenu(): void {
+    this.endScript();
     this.paused = false;
     this.resultTimer = -1;
     this.run.toTitle();
@@ -1339,12 +1465,13 @@ export class CombatSystem extends createSystem({
     const line = tx.lines[tx.index];
     const chapter = chapterForWorld(this.run.stage.world.id) ?? chapterFor(this.hero);
     const hero = HEROES.find((h) => h.id === this.hero)!;
+    const s = line.speaker;
     const name =
-      line.speaker === 'vex' ? 'WARLORD VEX' : line.speaker === 'villain' ? chapter.villain.name : line.speaker === 'hero' ? hero.name : 'CIVILIAN';
+      s === 'vex' ? 'WARLORD VEX' : s === 'oblivax' ? OBLIVAX.name : s === 'echo' ? ECHO.name : s === 'villain' ? chapter.villain.name : s === 'hero' ? hero.name : 'CIVILIAN';
     const title =
-      line.speaker === 'vex' ? 'Lord of the Hollow Legion' : line.speaker === 'villain' ? chapter.villain.title : line.speaker === 'hero' ? hero.power : 'Rescued';
+      s === 'vex' ? 'Herald of the Unmaker' : s === 'oblivax' ? OBLIVAX.title : s === 'echo' ? ECHO.title : s === 'villain' ? chapter.villain.title : s === 'hero' ? hero.power : 'Rescued';
     const color =
-      line.speaker === 'vex' ? '#C04DFF' : line.speaker === 'villain' ? chapter.villain.color : line.speaker === 'hero' ? equippedColor(this.profile, this.hero) : '#FFE58A';
+      s === 'vex' ? '#C04DFF' : s === 'oblivax' ? OBLIVAX.color : s === 'echo' ? ECHO.color : s === 'villain' ? chapter.villain.color : s === 'hero' ? equippedColor(this.profile, this.hero) : '#FFE58A';
     // The line types itself out; reading time starts once it is complete.
     tx.full = wrap(line.text, 34);
     tx.typed = 0;
@@ -1549,25 +1676,52 @@ export class CombatSystem extends createSystem({
   }
 
   /** Sideways hand swipes spin the carousel. */
+  /**
+   * Carousel swipe: one deliberate sideways stroke of an open hand steps
+   * exactly one hero. A stroke has to travel 12 cm at speed; the hand must
+   * then slow down before another stroke counts, and the return stroke the
+   * other way is ignored for a moment. Pokes (index only) never swipe.
+   */
   private updateSwipe(dt: number): void {
     this.swipeCooldown -= dt;
     if (!this.carousel.visible || dt <= 0) return;
     this.v3.set(-this.forward.z, 0, this.forward.x).normalize();
     for (let i = 0; i < this.hands.length; i += 1) {
       const hand = this.hands[i];
-      if (!hand.pose.tracked || hand.indexTip == null) {
+      const point = hand.gauntlet.palmPoint;
+      if (!hand.pose.tracked) {
         this.swipeValid[i] = false;
+        this.swipeStroke[i] = 0;
         continue;
       }
       const prev = this.swipePrev[i];
-      const speed = this.v4.subVectors(hand.indexTip, prev).dot(this.v3) / dt;
+      const speed = this.v4.subVectors(point, prev).dot(this.v3) / dt;
       const valid = this.swipeValid[i];
-      prev.copy(hand.indexTip);
+      prev.copy(point);
       this.swipeValid[i] = true;
-      if (!valid || this.swipeCooldown > 0 || Math.abs(speed) < 1.0) continue;
-      if (hand.indexTip.distanceTo(this.head) > 0.8) continue;
-      if (this.menus.moveFocus(speed < 0 ? 1 : -1)) {
-        this.swipeCooldown = 0.45;
+      if (!valid) continue;
+      if (this.swipeLatched[i]) {
+        this.swipeStill[i] = Math.abs(speed) < 0.35 ? this.swipeStill[i] + dt : 0;
+        if (this.swipeStill[i] > 0.12) this.swipeLatched[i] = false;
+        continue;
+      }
+      if (!isOpenPalm(hand.joints) || point.distanceTo(this.head) > 0.8 || Math.abs(speed) < 0.4) {
+        this.swipeStroke[i] = 0;
+        continue;
+      }
+      // Accumulate while moving one way; a change of direction starts over.
+      if (this.swipeStroke[i] !== 0 && Math.sign(speed) !== Math.sign(this.swipeStroke[i])) this.swipeStroke[i] = 0;
+      this.swipeStroke[i] += speed * dt;
+      const stroke = this.swipeStroke[i];
+      if (Math.abs(stroke) < 0.12 || Math.abs(speed) < 0.8) continue;
+      const dir = Math.sign(stroke);
+      this.swipeStroke[i] = 0;
+      this.swipeLatched[i] = true;
+      this.swipeStill[i] = 0;
+      if (dir === -this.swipeDir && this.swipeCooldown > 0) continue;
+      this.swipeDir = dir;
+      this.swipeCooldown = 0.7;
+      if (this.menus.moveFocus(dir < 0 ? 1 : -1)) {
         this.focusHero(this.menus.heroFocus);
         this.panel.setContent(this.menus.content());
       }
@@ -1628,6 +1782,10 @@ export class CombatSystem extends createSystem({
     this.resultTimer = -1;
     const run = this.run;
     const won = run.phase === 'victory';
+    if (isSagaStage(run.stage)) {
+      this.finishFinale(won);
+      return;
+    }
     const reward = recordResult(this.profile, run.stage, {
       won,
       health: run.health,
@@ -1639,7 +1797,12 @@ export class CombatSystem extends createSystem({
     saveProfile(this.profile);
     const info = { won, stage: run.stage, reward, score: run.score, kills: run.kills, bestCombo: run.bestCombo, saved: this.hostagesSaved, hostages: this.hostagesTotal };
     if (won && this.story) {
-      this.beginTransmission(this.story.outro, () => this.presentResults(info));
+      let outro = this.story.outro;
+      const chapter = chapterForWorld(run.stage.world.id);
+      if (run.stage.number === 3 && chapter && hasUnlock(this.profile, PROLOGUE_DONE)) {
+        outro = [...outro, anchorLine(chapter.region, anchorsRecovered(this.profile).length)];
+      }
+      this.beginTransmission(outro, () => this.presentResults(info));
       return;
     }
     this.presentResults(info);
@@ -2490,6 +2653,268 @@ export class CombatSystem extends createSystem({
     this.sfx.crescent();
   }
 
+  // ---------------------------------------------------------------- saga
+
+  private resetScript(): void {
+    this.scriptWave = -1;
+    this.erasing = -1;
+    this.bossLocked = false;
+    this.finaleIndex = -1;
+    this.convergence = -1;
+    this.volley = -1;
+    for (const figure of this.holograms) figure.visible = false;
+    this.eraseTarget = this.script === 'finale' ? 0.45 : 0;
+    this.veilTarget = this.script === 'finale' ? 0.2 : 0;
+  }
+
+  /** Leaves any saga mission: back to the player's own hero, world restored. */
+  private endScript(): void {
+    if (this.script != null) {
+      this.script = null;
+      this.hero = this.menus.hero;
+      this.applySkin();
+      this.hideDebris();
+    }
+    this.resetScript();
+    this.tipQueue = [];
+    this.coach.hide();
+  }
+
+  private findBoss(): Drone | null {
+    for (const drone of this.drones) if (drone.kind === 'boss' && drone.state === 'boss') return drone;
+    return null;
+  }
+
+  /** Coach tips, the prologue tutorial and the finale's hero relay. */
+  private updateScript(dt: number, time: number): void {
+    if (this.autoPrologueAt > 0 && this.elapsed > this.autoPrologueAt) {
+      this.autoPrologueAt = -1;
+      if (this.run.phase === 'title' && this.tx == null && !hasUnlock(this.profile, PROLOGUE_DONE)) this.startStage('arc', PROLOGUE);
+    }
+    const running = this.run.phase !== 'title' && !this.panel.visible && !this.paused;
+    if (!running) {
+      if (this.coach.visible) this.coach.hide();
+    } else if (this.tipQueue.length > 0) {
+      this.tipTimer += dt;
+      if (this.tipTimer > TIP_SECONDS) {
+        this.tipTimer = 0;
+        this.tipIndex += 1;
+        // The tutorial keeps repeating until the wave is beaten; missions show tips once.
+        if (this.tipIndex >= this.tipQueue.length) {
+          if (this.script === 'prologue') this.tipIndex = 0;
+          else this.tipQueue = [];
+        }
+      }
+      if (this.tipQueue.length > 0) {
+        const n = this.tipQueue.length;
+        this.coach.show(this.tipQueue[this.tipIndex], this.accentHex, n > 1 ? `${this.tipIndex + 1} / ${n}` : '');
+      } else this.coach.hide();
+    }
+    if (this.script === 'prologue') this.updatePrologue(dt);
+    else if (this.script === 'finale') this.updateFinale(dt, time);
+  }
+
+  private updatePrologue(dt: number): void {
+    const run = this.run;
+    if (run.phase === 'intro' && run.wave !== this.scriptWave) {
+      this.scriptWave = run.wave;
+      const next = PROLOGUE_HEROES[Math.min(run.wave, PROLOGUE_HEROES.length - 1)];
+      if (run.wave > 0) this.swapFx(next);
+      this.equipHero(next);
+      if (run.waveDef.boss) {
+        this.teach([{ gesture: 'palm', title: 'BLAST OBLIVAX!', sub: 'Aim your open palm at the glowing core.' }]);
+        this.eraseTarget = 0.12;
+        this.veilTarget = 0.1;
+      }
+    }
+    const boss = this.findBoss();
+    if (boss && this.erasing < 0 && boss.hp / boss.maxHp < PROLOGUE_ERASE_AT) {
+      // He stops playing: the room starts to vanish.
+      this.erasing = 0;
+      this.bossLocked = true;
+      this.tipQueue = [];
+      this.coach.hide();
+      this.eraseTarget = 0.55;
+      this.veilTarget = 0.35;
+      for (const drone of this.drones) {
+        if (drone !== boss && drone.state !== 'off' && drone.kind !== 'pod') this.explodeDrone(drone, false);
+      }
+      this.v1.copy(boss.object.position).setY(boss.object.position.y + 1.2);
+      this.comic.pop('ERASED!', this.v1, OBLIVAX_COLOR, 1);
+      this.flashes.spawn(boss.object.position, OBLIVAX_COLOR, 0.5, 4, 1.2);
+      this.sfx.thunder();
+      this.slowmo = 1.5;
+    }
+    if (this.erasing >= 0 && this.tx == null) {
+      this.erasing += dt;
+      if (this.erasing > 3) {
+        this.erasing = -10;
+        this.beginTransmission(PROLOGUE_ERASURE, () => this.finishPrologue());
+      }
+    }
+  }
+
+  private finishPrologue(): void {
+    if (!hasUnlock(this.profile, PROLOGUE_DONE)) {
+      this.profile.unlocks.push(PROLOGUE_DONE);
+      this.profile.coins += 300;
+    }
+    saveProfile(this.profile);
+    for (const drone of this.drones) if (drone.state !== 'off') this.retireDrone(drone);
+    this.run.toTitle();
+    this.endScript();
+    this.sfx.victory();
+    this.showMenu('main');
+  }
+
+  private updateFinale(dt: number, time: number): void {
+    const boss = this.findBoss();
+    if (boss && this.convergence < 0) {
+      const fraction = boss.hp / boss.maxHp;
+      // Reality grows back as OBLIVAX weakens.
+      this.eraseTarget = 0.1 + 0.35 * fraction;
+      const phase = finalePhase(fraction);
+      if (phase >= 0 && phase !== this.finaleIndex) {
+        const first = this.finaleIndex < 0;
+        this.finaleIndex = phase;
+        const step = FINALE_PHASES[phase];
+        if (!first) this.swapFx(step.hero);
+        if (step.hero !== this.hero) this.equipHero(step.hero);
+        this.taunt = step.call;
+        this.v1.copy(this.head).addScaledVector(this.forward, 1.4);
+        this.comic.pop(step.call.split(':')[0] + '!', this.v1, this.accent, 0.6);
+      }
+      if (fraction <= CONVERGENCE_AT) this.startConvergence(boss);
+    }
+    if (this.convergence >= 0) this.updateConvergence(dt, time, boss);
+  }
+
+  /** Flash and callout when the relay hands over to another hero. */
+  private swapFx(hero: HeroId): void {
+    const def = HEROES.find((h) => h.id === hero)!;
+    const color = new Color(def.color);
+    this.v1.copy(this.head).addScaledVector(this.forward, 0.9);
+    this.flashes.spawn(this.v1, color, 0.2, 2.2, 0.5);
+    this.particles.burst(this.v1, color, 60, 2.5, 0.5, this.v2);
+    this.comic.pop(`${def.name}!`, this.v1, color, 0.7);
+    this.sfx.swap();
+  }
+
+  /** Every hero appears as a hologram; one clap and they all fire. */
+  private startConvergence(boss: Drone): void {
+    this.convergence = 0;
+    this.bossLocked = true;
+    this.eraseTarget = 0.1;
+    this.veilTarget = 0;
+    this.teach([]);
+    this.hideDebris();
+    this.coach.show(CLAP_TIP, this.accentHex);
+    for (const drone of this.drones) {
+      if (drone !== boss && drone.state !== 'off' && drone.kind !== 'pod') this.explodeDrone(drone, false);
+    }
+    this.v3.set(this.forward.x, 0, this.forward.z);
+    if (this.v3.lengthSq() < 1e-4) this.v3.set(0, 0, -1);
+    this.v3.normalize();
+    const count = this.holograms.length;
+    this.holograms.forEach((figure, i) => {
+      // Flanking the player on both sides, leaving the view of OBLIVAX clear.
+      const half = Math.ceil(count / 2);
+      const side = i < half ? -1 : 1;
+      const k = i < half ? i : i - half;
+      const a = side * (0.75 + (k / Math.max(1, half - 1)) * 1.6);
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      figure.position.set(this.head.x + (this.v3.x * c - this.v3.z * s) * 2.1, 0, this.head.z + (this.v3.x * s + this.v3.z * c) * 2.1);
+      figure.lookAt(boss.object.position.x, 0, boss.object.position.z);
+      figure.scale.setScalar(0.01);
+      figure.visible = true;
+    });
+    this.v1.copy(this.head).addScaledVector(this.forward, 1.5);
+    this.comic.pop('CONVERGENCE!', this.v1, GOLD, 1.1);
+    this.flashes.spawn(this.v1, WHITE, 0.3, 3, 0.8);
+    this.sfx.thunder();
+    this.sfx.victory();
+  }
+
+  private updateConvergence(dt: number, time: number, boss: Drone | null): void {
+    this.convergence += dt;
+    const rise = Math.min(1, this.convergence / 1.2);
+    this.holograms.forEach((figure, i) => {
+      figure.scale.setScalar(1.75 * rise);
+      figure.position.y = Math.sin(time * 2 + i) * 0.02;
+    });
+    if (boss == null) return;
+    if (this.volley < 0) {
+      // Wait for the clap (palms meet); never stall a player without hands.
+      const left = this.hands[0];
+      const right = this.hands[1];
+      const clap = left.tracked && right.tracked && left.gauntlet.palmPoint.distanceTo(right.gauntlet.palmPoint) < 0.1;
+      if ((clap && this.convergence > 0.8) || this.convergence > 10) {
+        this.volley = 0;
+        this.volleyTimer = 0;
+        this.coach.hide();
+        this.comic.pop('TOGETHER!', this.v1.copy(this.head).addScaledVector(this.forward, 1), WHITE, 0.9);
+        this.sfx.thunderHit();
+      }
+      return;
+    }
+    this.volley += dt;
+    this.volleyTimer -= dt;
+    if (this.volleyTimer <= 0 && this.volley < 2) {
+      // Every hero fires a beam into the Unmaker's core.
+      this.volleyTimer = 0.12;
+      const figure = this.holograms[Math.floor(Math.random() * this.holograms.length)];
+      this.v1.copy(figure.position).setY(1.3);
+      boss.eye.getWorldPosition(this.v2);
+      this.lightningFx.strike(this.v1, this.v2, figure.userData.color as Color, 0.35);
+      this.flashes.spawn(this.v2, figure.userData.color as Color, 0.3, 1.6, 0.3);
+      this.particles.burst(this.v2, figure.userData.color as Color, 30, 4, 0.5, this.v3);
+      this.sfx.blast();
+    }
+    if (this.volley >= 2) {
+      this.volley = -1;
+      this.convergence = -1;
+      this.bossLocked = false;
+      this.eraseTarget = 0;
+      for (const figure of this.holograms) figure.visible = false;
+      this.defeatBoss(boss);
+    }
+  }
+
+  /** Finale over: the ending, then results. */
+  private finishFinale(won: boolean): void {
+    const run = this.run;
+    let coins = run.coins;
+    let unlocked: string | undefined;
+    if (won) {
+      coins += 1000;
+      if (!hasUnlock(this.profile, FINALE_DONE)) {
+        this.profile.unlocks.push(FINALE_DONE);
+        unlocked = FINALE_DONE;
+      }
+    }
+    this.profile.coins += coins;
+    saveProfile(this.profile);
+    const info = {
+      won,
+      stage: run.stage,
+      reward: { stars: won ? 3 : 0, coins, newBest: won, unlocked },
+      score: run.score,
+      kills: run.kills,
+      bestCombo: run.bestCombo,
+      saved: 0,
+      hostages: 0,
+    };
+    this.eraseTarget = 0;
+    this.veilTarget = 0;
+    const done = () => {
+      this.endScript();
+      this.presentResults(info);
+    };
+    if (won && this.story) this.beginTransmission(this.story.outro, done);
+    else done();
+  }
+
   // ---------------------------------------------------------------- RONIN
 
   /**
@@ -3134,7 +3559,8 @@ export class CombatSystem extends createSystem({
       this.run.kill('boss');
       return null;
     }
-    const scale = 1 + Math.min(5, REGIONS.indexOf(region)) * 0.2;
+    const oblivax = region === 'oblivion';
+    const scale = oblivax ? (this.script === 'finale' ? 3.2 : 1.5) : 1 + Math.min(5, REGIONS.indexOf(region)) * 0.2;
     boss.counted = true;
     boss.maxHp = ENEMIES.boss.hp * scale;
     boss.hp = boss.maxHp;
@@ -3145,8 +3571,8 @@ export class CombatSystem extends createSystem({
     this.v1.set(this.forward.x, 0, this.forward.z);
     if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
     this.v1.normalize();
-    boss.spawn.copy(this.head).addScaledVector(this.v1, 4.6);
-    boss.spawn.y = this.head.y + 0.35;
+    boss.spawn.copy(this.head).addScaledVector(this.v1, oblivax ? 6 : 4.6);
+    boss.spawn.y = this.head.y + (oblivax ? 0.55 : 0.35);
     boss.normal.copy(this.v1).negate();
     boss.object.position.copy(boss.spawn);
     boss.object.scale.setScalar(0.01);
@@ -3159,8 +3585,8 @@ export class CombatSystem extends createSystem({
     this.particles.burst(boss.spawn, ENEMY_COLOR.boss, 160, 3, 0.9, this.v2);
     this.flashes.spawn(boss.spawn, ENEMY_COLOR.boss, 0.5, 3, 0.8);
     this.sfx.thunder();
-    this.music.play('void-rift');
-    const villain = chapterForWorld(region)?.villain.name ?? 'BOSS';
+    this.music.play(oblivax ? 'oblivion' : 'void-rift');
+    const villain = oblivax ? OBLIVAX.name : chapterForWorld(region)?.villain.name ?? 'BOSS';
     this.comic.pop('BOSS!', this.v2.copy(boss.spawn).setY(boss.spawn.y + 0.9), ENEMY_COLOR.boss, 0.9);
     this.taunt = `${villain} has arrived!`;
     return boss;
@@ -3171,10 +3597,11 @@ export class CombatSystem extends createSystem({
     const object = boss.object;
     this.v3.set(-boss.normal.z, 0, boss.normal.x).normalize();
     object.position.copy(boss.spawn).addScaledVector(boss.normal, 0.6);
-    object.position.addScaledVector(this.v3, Math.sin(time * 0.6) * 1.4);
+    object.position.addScaledVector(this.v3, Math.sin(time * 0.6) * (boss.world === 'oblivion' ? 0.5 : 1.4));
     object.position.y += Math.sin(time * 1.3) * 0.25;
     object.lookAt(this.head);
     boss.eye.scale.setScalar(1 + Math.sin(time * 6) * 0.15);
+    if (this.bossLocked) return;
     const fraction = boss.hp / boss.maxHp;
     const phase = fraction > 0.66 ? 1 : fraction > 0.33 ? 2 : 3;
     if (phase !== boss.bossPhase) {
@@ -3539,6 +3966,8 @@ export class CombatSystem extends createSystem({
   }
 
   private hurtPlayer(damage: number, counted: boolean): void {
+    // The prologue teaches; it never kills.
+    if (this.script === 'prologue') damage = 0;
     if (counted) this.run.hit(damage);
     else this.run.damage(damage);
     this.damageMaterial.opacity = 0.55;
@@ -3653,6 +4082,10 @@ export class CombatSystem extends createSystem({
 
   private damageDrone(drone: Drone, amount = 1, raw = false): void {
     if (drone.state === 'off') return;
+    if (drone.kind === 'boss' && this.bossLocked) {
+      this.flashes.spawn(drone.object.position, OBLIVAX_COLOR, 0.2, 0.9, 0.2);
+      return;
+    }
     drone.hp -= raw ? amount : amount * this.damageScale();
     if (drone.kind === 'boss') this.chargeOverdrive(0.02);
     if (drone.hp > 0) {

@@ -7,8 +7,17 @@ Submission deadline: **Nov 18, 2026, 12:00 PM PST (Nov 19, 1:30 AM IST)**. Aim t
 **SURGE: Hands of Heroes** - a hands-only MR/VR hero-combat game. Original IP
 throughout (no Marvel or other third-party names/designs).
 
-- Story campaign: Warlord VEX and the Hollow Legion cage civilians; eight
-  regions, one per hero, three levels each ending in a boss (24 missions).
+- Saga: OBLIVAX, the Unmaker, has pulled the eight Anchors that hold reality
+  together; Warlord VEX is his herald. First XR session auto-starts a 4-min
+  guided PROLOGUE (ARC -> RONIN -> PSION relay with coach cards, no damage,
+  then OBLIVAX erases the room and leaves). Eight regions, one per hero,
+  three levels each; every region boss returns an Anchor (24 missions).
+  With 3 Anchors the finale CONVERGENCE opens: hero relay by boss health
+  (ARC, RONIN, PSION, TEMPEST), then all eight heroes appear as holograms
+  and a clap fires the final volley; the erased room grows back.
+  Coach cards (animated hand pictograms) teach each hero at mission start.
+  Test hooks: ?autostart=prologue|finale, window.__surgeBoss(f),
+  __surgeSkip(), __surgeClear().
   Typewriter "incoming transmission" dialogue (no voices).
 - Heroes: ARC palm blaster, TALON energy claws, TEMPEST storm hammer,
   ORION light bow, WEAVER light webs, HAVOC plasma pistol, RONIN, PSION. Hammer, bow and
