@@ -3,26 +3,29 @@
 Meta VR Start Developer Competition 2026 · Gaming track · New Experience division.
 Submission deadline: **Nov 18, 2026, 12:00 PM PST (Nov 19, 1:30 AM IST)**. Aim to submit by Nov 17.
 
-## The game (pivot, 2026-10-25)
-A standing, in-place MR action game. Drones breach the player's real walls in
-waves; the player fights with hero powers made from their own hands and
-switches hero with a wrist button. Visually loud: emissive bolts, trails,
-lightning, dissolve kills, slow-motion on the last kill of a wave.
+## The game (current, 2026-10-25)
+**SURGE: Hands of Heroes** - a hands-only MR/VR hero-combat game. Original IP
+throughout (no Marvel or other third-party names/designs).
 
-All heroes and weapons are **original IP** (no Marvel/third-party names or
-designs). Powers, in build order (cut from the bottom if time runs out):
-1. **Palm blaster**: open palm toward a target fires an energy bolt.
-2. **Energy claws**: fist extends knuckle blades; fast swings slash.
-3. **Storm hammer**: grab and throw; lightning on hit; open hand recalls it.
-4. **Rebound disc**: thrown disc bounces between enemies.
-5. **Light bow**: two-hand draw with an invisible string. Stretch goal.
-
-The earlier block-puzzle prototype (`src/gameplay`, `src/puzzles`,
-`src/puzzle-system.ts`) is parked, not the product.
+- Story campaign: Warlord VEX and the Hollow Legion cage civilians; six
+  regions, one per hero, three levels each ending in a boss (18 missions).
+  Typewriter "incoming transmission" dialogue (no voices).
+- Heroes: ARC palm blaster, TALON energy claws, TEMPEST storm hammer,
+  ORION light bow, WEAVER light webs, HAVOC plasma pistol. Hammer, bow and
+  pistol are physical: they drop onto the floor or real tables, either hand
+  grabs or recalls them.
+- Enemies: walking humanoid aliens (Grunt, Brute, Stalker, Colossus) from
+  wall portals, plasma shots you dodge or shoot; flying boss mechs.
+- Flow: landing page -> 3D hero carousel -> holographic war map -> mission
+  -> results. Armory garage with holographic weapons, coin upgrades gated by
+  story progress, weapon tiers that change visuals. Saved in localStorage.
+- MR: room-scan sweep, enemies from real walls (ahead or all around),
+  threat arrows. Debug links: ?autostart=<stage>&hero=<id>&skipstory=1,
+  ?menu=garage|heroes|map.
 
 ## Hard requirements
 - Every core interaction works **without controllers** (hand tracking only).
-- Standing in place, no locomotion.
+- Standing play; room-scale walking supported in MR (no artificial locomotion).
 - MR passthrough is the headline mode; enemies spawn from detected walls, with
   a fallback ring of spawn points when plane/mesh detection is unavailable.
 - Judges open the deployed URL, understand it in seconds, finish a run in minutes.
