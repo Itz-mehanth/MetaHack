@@ -169,7 +169,8 @@ export function setupLanding(world: World): void {
   });
   xr.addEventListener('sessionend', () => show(true));
   // Debug/recording deep links go straight into the game.
-  if (new URLSearchParams(window.location.search).has('autostart')) show(false);
+  const deep = new URLSearchParams(window.location.search);
+  if (deep.has('autostart') || deep.has('menu')) show(false);
 
   const nav = navigator.xr;
   if (nav == null) {

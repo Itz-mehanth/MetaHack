@@ -15,6 +15,8 @@ import {
   STAGES,
   STAGES_PER_WORLD,
   starsFor,
+  upgradeCap,
+  weaponTier,
   WORLDS,
 } from './progression.js';
 
@@ -49,6 +51,8 @@ describe('economy', () => {
   it('buys upgrades with rising costs up to the max level', () => {
     const p = defaultProfile();
     p.coins = 100000;
+    // Hero upgrades unlock with story progress: clear ARC's levels first.
+    for (const s of STAGES.filter((st) => st.world.id === 'neon-grid')) p.stars[s.id] = 1;
     let spent = 0;
     for (let i = 0; i < MAX_UPGRADE; i += 1) {
       const cost = nextUpgradeCost(p, 'arc-rate')!;
@@ -78,6 +82,21 @@ describe('economy', () => {
     expect(equippedColor(p, 'arc')).toBe('#3DF5FF');
     expect(buySkin(p, solar.id)).toBe(true);
     expect(equippedColor(p, 'arc')).toBe(solar.color);
+  });
+
+  it('caps hero upgrades by story progress and raises the weapon tier', () => {
+    const p = defaultProfile();
+    p.coins = 100000;
+    expect(upgradeCap(p, 'arc-power')).toBe(1);
+    expect(upgradeCap(p, 'shield')).toBe(5);
+    expect(buyUpgrade(p, 'arc-power')).toBe(true);
+    expect(buyUpgrade(p, 'arc-power')).toBe(false);
+    p.stars[STAGES[0].id] = 2;
+    expect(upgradeCap(p, 'arc-power')).toBe(3);
+    expect(buyUpgrade(p, 'arc-power')).toBe(true);
+    expect(weaponTier(p, 'arc')).toBe(0);
+    expect(buyUpgrade(p, 'arc-rate')).toBe(true);
+    expect(weaponTier(p, 'arc')).toBe(1);
   });
 
   it('shield upgrades and difficulty set max health', () => {

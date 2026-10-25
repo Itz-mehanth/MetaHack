@@ -1,6 +1,6 @@
 import type { HeroId } from './heroes.js';
 import type { EnemyKind, WaveDef } from './missions.js';
-import { levelStory } from './story.js';
+import { chapterFor, levelStory } from './story.js';
 
 /**
  * Pure game progression: worlds and stages, difficulty, rewards, the coin
@@ -249,6 +249,28 @@ export function upgradeLevel(profile: Profile, id: string): number {
   return Math.min(MAX_UPGRADE, profile.upgrades[id] ?? 0);
 }
 
+/** Levels cleared in `hero`'s story region. */
+export function levelsCleared(profile: Profile, hero: HeroId): number {
+  const worldId = chapterFor(hero).worldId;
+  return STAGES.filter((s) => s.world.id === worldId && (profile.stars[s.id] ?? 0) > 0).length;
+}
+
+/**
+ * Highest level an upgrade can reach right now: hero upgrades unlock as the
+ * hero's story levels are cleared (1, then 3, then 5); shared ones are open.
+ */
+export function upgradeCap(profile: Profile, id: string): number {
+  const def = UPGRADES.find((u) => u.id === id);
+  if (def == null || def.hero === 'all') return MAX_UPGRADE;
+  return [1, 3, 5, 5][Math.min(3, levelsCleared(profile, def.hero))];
+}
+
+/** Weapon tier 0-5 from the hero's total upgrade levels; drives visuals. */
+export function weaponTier(profile: Profile, hero: HeroId): number {
+  const total = UPGRADES.filter((u) => u.hero === hero).reduce((sum, u) => sum + upgradeLevel(profile, u.id), 0);
+  return Math.min(5, Math.floor(total / 3));
+}
+
 export function nextUpgradeCost(profile: Profile, id: string): number | null {
   const level = upgradeLevel(profile, id);
   return level >= MAX_UPGRADE ? null : UPGRADE_COSTS[level];
@@ -257,7 +279,7 @@ export function nextUpgradeCost(profile: Profile, id: string): number | null {
 /** Each returns true and mutates the profile only when the purchase succeeds. */
 export function buyUpgrade(profile: Profile, id: string): boolean {
   const cost = nextUpgradeCost(profile, id);
-  if (cost == null || profile.coins < cost) return false;
+  if (cost == null || profile.coins < cost || upgradeLevel(profile, id) >= upgradeCap(profile, id)) return false;
   profile.coins -= cost;
   profile.upgrades[id] = upgradeLevel(profile, id) + 1;
   return true;

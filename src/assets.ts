@@ -15,6 +15,12 @@ import {
 } from './scene-assets/combat.scene-asset.js';
 import { createHeroFigure, createPedestal } from './scene-assets/heroes.scene-asset.js';
 import {
+  createBowDisplay,
+  createClawDisplay,
+  createGauntletDisplay,
+  createWebShooterDisplay,
+} from './scene-assets/weapons.scene-asset.js';
+import {
   createForgePlate,
   createGhost,
   createPiece,
@@ -42,6 +48,10 @@ export default defineAssets({
   titan: createTitan(),
   hammer: createHammer(),
   blaster: createBlaster(),
+  'weapon-arc': createGauntletDisplay(),
+  'weapon-talon': createClawDisplay(),
+  'weapon-orion': createBowDisplay(),
+  'weapon-weaver': createWebShooterDisplay(),
   'alien-grunt': createAlien('grunt'),
   'alien-brute': createAlien('brute'),
   'alien-stalker': createAlien('stalker'),

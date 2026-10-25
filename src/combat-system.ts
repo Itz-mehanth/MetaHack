@@ -20,6 +20,7 @@ import {
   XRPlane,
 } from '@iwsdk/core';
 import { Bow, MAX_DRAW } from './combat/bow.js';
+import { Armory, TierAura } from './combat/armory.js';
 import { HeroCarousel } from './combat/carousel.js';
 import { Claws } from './combat/claws.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
@@ -44,6 +45,7 @@ import {
   type Stage,
   STAGES,
   upgradeLevel,
+  weaponTier,
 } from './combat/progression.js';
 import { loadProfile, resetProfile, saveProfile } from './combat/save.js';
 import { applyTheme, setFlash, type Theme, THEMES } from './combat/themes.js';
@@ -298,6 +300,12 @@ export class CombatSystem extends createSystem({
   private hostagesSaved = 0;
   private hostagesTotal = 0;
   private carousel = new HeroCarousel();
+  private armory = new Armory();
+  private weaponDisplays = new Map<string, Object3D>();
+  private hammerAura: TierAura | null = null;
+  private gunAura: TierAura | null = null;
+  private bowAura: TierAura | null = null;
+  private weaponTierNow = 0;
   private holomap = new HoloMap();
   private markers = new Map<string, Object3D>();
   private mapPokeCooldown = 0;
@@ -401,6 +409,7 @@ export class CombatSystem extends createSystem({
     this.bow = new Bow(new Color('#5DFFB0'));
     this.root.add(this.bow.group);
     this.root.add(this.carousel.group);
+    this.root.add(this.armory.group);
     this.root.add(this.holomap.group);
     this.comic = new Onomatopoeia(this.root);
     this.panel = new Panel();
@@ -714,6 +723,13 @@ export class CombatSystem extends createSystem({
     this.root.add(this.blaster);
     this.blasterMuzzle = this.blaster.getObjectByName('Muzzle') ?? this.blaster;
     addOutline(this.blaster, 0.08, (m) => m.name === 'Body');
+    this.hammerAura = new TierAura(0.13, this.accent);
+    this.hammerHead.add(this.hammerAura.group);
+    this.gunAura = new TierAura(0.07, this.accent);
+    this.gunAura.group.position.set(0, 0.06, 0.08);
+    this.blaster.add(this.gunAura.group);
+    this.bowAura = new TierAura(0.1, this.accent);
+    this.bow.group.add(this.bowAura.group);
     addOutline(this.hammer, 0.08, (m) => m.parent?.name === 'Head' || m.name === 'Handle');
     for (const hero of HEROES) {
       const figure = await this.world.assets.instantiate(`hero-${hero.id}`);
@@ -722,6 +738,8 @@ export class CombatSystem extends createSystem({
       this.carousel.add(hero.id, figure, pedestal);
       const marker = await this.world.assets.instantiate(`hero-${hero.id}`);
       this.markers.set(hero.id, marker);
+      const display = { tempest: 'hammer', havoc: 'blaster' }[hero.id as string] ?? `weapon-${hero.id}`;
+      this.weaponDisplays.set(hero.id, await this.world.assets.instantiate(display));
     }
     this.showMenu('main');
     this.ready = true;
@@ -756,6 +774,14 @@ export class CombatSystem extends createSystem({
       enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}:${d.state}`),
     });
     const params = new URLSearchParams(window.location.search);
+    const screen = params.get('menu');
+    if (screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings') {
+      const hero = HEROES.find((h) => h.id === params.get('hero'))?.id;
+      if (hero) this.menus.hero = hero;
+      if (screen === 'garage') this.menus.handle({ id: 'garage', point: this.v1.set(0, 0, 0) });
+      this.showMenu(screen);
+      return;
+    }
     const stage = STAGES.find((s) => s.id === params.get('autostart'));
     if (stage == null) return;
     const hero = (HEROES.find((h) => h.id === params.get('hero'))?.id ?? 'arc') as HeroId;
@@ -844,6 +870,17 @@ export class CombatSystem extends createSystem({
     }
     this.comicCooldown -= realDt;
     this.carousel.update(realDt, time, this.head);
+    this.armory.update(time);
+    for (const aura of [this.hammerAura, this.gunAura, this.bowAura]) aura?.update(time);
+    if (this.weaponTierNow > 0 && this.powersLive && (this.hero === 'arc' || this.hero === 'talon' || this.hero === 'weaver')) {
+      // Worn powers: tier sparks swirl around the hands.
+      for (const hand of this.hands) {
+        if (!hand.tracked || Math.random() > this.weaponTierNow * 0.08) continue;
+        this.v1.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.12).add(hand.gauntlet.palmPoint);
+        this.v2.set(0, 0.2, 0);
+        this.particles.emit(this.v1, this.v2, this.accent, 0.5, 0.5, -0.2);
+      }
+    }
     this.holomap.update(realDt, time, this.head);
     this.updateMapPoke(realDt);
     this.updateTransmission(realDt);
@@ -1016,6 +1053,7 @@ export class CombatSystem extends createSystem({
     }
     for (const bolt of this.bolts) if (bolt.active) this.retireBolt(bolt);
     this.syncMap();
+    this.syncArmory();
     this.setTheme(stage.world.id);
     this.music.play(stage.world.id);
     this.run.start(stage, {
@@ -1033,6 +1071,7 @@ export class CombatSystem extends createSystem({
     this.buffRapid = 0;
     this.buffPower = 0;
     this.overdrive = 0;
+    this.applyWeaponTier();
     for (const pickup of this.pickups) this.retirePickup(pickup);
     this.spawnPods(this.story?.hostages ?? 0);
   }
@@ -1100,6 +1139,7 @@ export class CombatSystem extends createSystem({
     this.panel.show();
     this.syncCarousel();
     this.syncMap();
+    this.syncArmory();
     if (screen !== 'pause' && screen !== 'transmission') this.music.play('menu');
   }
 
@@ -1107,6 +1147,7 @@ export class CombatSystem extends createSystem({
   private placePanel(): void {
     if (this.menus.screen === 'heroes') this.panel.place(this.head, this.forward, 0.42, 0.58);
     else if (this.menus.screen === 'map') this.panel.place(this.head, this.forward, 0.55, 0.02);
+    else if (this.menus.screen === 'garage') this.panel.place(this.head, this.forward, 0.42, 0.58);
     else this.panel.place(this.head, this.forward);
   }
 
@@ -1287,6 +1328,25 @@ export class CombatSystem extends createSystem({
   }
 
   /** Shows the hero carousel only on the hero screen, in sync with its focus. */
+  /** Shows the holographic armory only on the garage screen. */
+  private syncArmory(): void {
+    const on = this.panel.visible && this.menus.screen === 'garage';
+    if (!on) {
+      if (this.armory.visible) this.armory.hide();
+      return;
+    }
+    const hero = this.menus.garageHeroId;
+    const model = this.weaponDisplays.get(hero);
+    if (model) this.armory.setWeapon(hero, model, equippedColor(this.profile, hero), weaponTier(this.profile, hero));
+    if (!this.armory.visible) this.armory.show(this.head, this.forward);
+  }
+
+  /** Weapon tier visuals in a mission: auras on held weapons, sparks on hands. */
+  private applyWeaponTier(): void {
+    this.weaponTierNow = weaponTier(this.profile, this.hero);
+    for (const aura of [this.hammerAura, this.gunAura, this.bowAura]) aura?.set(this.weaponTierNow, this.accent);
+  }
+
   private syncCarousel(): void {
     const on = this.panel.visible && this.menus.screen === 'heroes';
     if (on && !this.carousel.visible) {
@@ -1354,12 +1414,14 @@ export class CombatSystem extends createSystem({
     if (!this.panel.visible) {
       this.syncCarousel();
       this.syncMap();
+      this.syncArmory();
       return;
     }
     if (this.menus.screen !== before) this.placePanel();
     this.panel.setContent(this.menus.content());
     this.syncCarousel();
     this.syncMap();
+    this.syncArmory();
   }
 
   private profileChanged(): void {

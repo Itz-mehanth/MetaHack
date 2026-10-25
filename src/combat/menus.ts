@@ -7,6 +7,7 @@ import {
   type Difficulty,
   equippedColor,
   HERO_PRICE,
+  levelsCleared,
   isStageUnlocked,
   MAX_UPGRADE,
   nextUpgradeCost,
@@ -15,7 +16,9 @@ import {
   SKINS,
   type Stage,
   STAGES,
+  upgradeCap,
   upgradeLevel,
+  weaponTier,
   UPGRADES,
 } from './progression.js';
 import { chapterFor, type Speaker } from './story.js';
@@ -102,6 +105,11 @@ export class GameMenus {
   mapLevel = 0;
   transmission: TransmissionView | null = null;
   private garageHero: HeroId = 'arc';
+
+  /** Hero whose weapon the garage armory is showing. */
+  get garageHeroId(): HeroId {
+    return this.garageHero;
+  }
   private confirmReset = false;
   private settingsReturn: Screen = 'main';
   private result: ResultInfo | null = null;
@@ -394,6 +402,7 @@ export class GameMenus {
       const y = 330 + r * 128;
       const level = upgradeLevel(p, u.id);
       const cost = nextUpgradeCost(p, u.id);
+      const capped = cost != null && level >= upgradeCap(p, u.id);
       const pips = '■'.repeat(level) + '□'.repeat(MAX_UPGRADE - level);
       widgets.push(
         { id: `up-name:${u.id}`, kind: 'text', x: 80, y: y + 4, w: 700, h: 40, label: u.name, size: 40, color: '#FFFFFF' },
@@ -405,10 +414,10 @@ export class GameMenus {
           y: y + 6,
           w: 336,
           h: 104,
-          label: cost == null ? 'MAX' : 'UPGRADE',
-          sub: cost == null ? undefined : `${cost} C`,
-          disabled: cost == null,
-          color: cost != null && p.coins >= cost ? accent : '#888899',
+          label: cost == null ? 'MAX' : capped ? 'LOCKED' : 'UPGRADE',
+          sub: cost == null ? undefined : capped ? `Clear ${chapterFor(hero).region} ${levelsCleared(p, hero) + 1}` : `${cost} C`,
+          disabled: cost == null || capped,
+          color: cost != null && !capped && p.coins >= cost ? accent : '#888899',
           size: 34,
           icon: u.hero === 'all' ? 'shield' : u.hero,
         },
@@ -431,7 +440,14 @@ export class GameMenus {
         icon: hero,
       });
     });
-    return { title: 'GARAGE', subtitle: `${HEROES.find((h) => h.id === hero)!.name} upgrades & skins`, coins: p.coins, accent, widgets };
+    const tier = weaponTier(p, hero);
+    return {
+      title: 'ARMORY',
+      subtitle: `${HEROES.find((h) => h.id === hero)!.name} - weapon tier ${tier}/5 - every 3 upgrades powers up its look`,
+      coins: p.coins,
+      accent,
+      widgets,
+    };
   }
 
   private settingsScreen(accent: string): PanelContent {
