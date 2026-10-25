@@ -35,7 +35,8 @@ import { Galaxy } from './combat/galaxy.js';
 import { lookFor, transitFor, WORLD_LOOKS } from './combat/worlds.js';
 import { CHAMPIONS, TWIST_INFO, type TwistId, twistFor } from './combat/twists.js';
 import { Transit } from './combat/transit.js';
-import { ARSENAL, equippedWeapon, type WeaponDef } from './combat/arsenal.js';
+import { ARSENAL, equippedWeapon, finishFor, type WeaponDef } from './combat/arsenal.js';
+import { applyFinish } from './scene-assets/lib/forge.js';
 import { Erasure } from './combat/erasure.js';
 import {
   anchorLine,
@@ -1099,7 +1100,7 @@ export class CombatSystem extends createSystem({
     this.blaster.add(this.gunAura.group);
     this.bowAura = new TierAura(0.1, this.accent);
     this.bow.group.add(this.bowAura.group);
-    addOutline(this.hammer, 0.08, (m) => m.parent?.name === 'Head' || m.name === 'Handle');
+    addOutline(this.hammer, 0.08, (m) => m.name === 'Block' || m.name === 'Handle');
     for (const hero of HEROES) {
       const figure = await this.world.assets.instantiate(`hero-${hero.id}`);
       const pedestal = await this.world.assets.instantiate('pedestal');
@@ -1636,7 +1637,9 @@ export class CombatSystem extends createSystem({
   private applySkin(): void {
     this.accent.set(equippedColor(this.profile, this.hero));
     this.accentHex = `#${this.accent.getHexString()}`;
-    this.weaponColor.set(this.weaponDef.hero === this.hero && this.weaponDef.color ? this.weaponDef.color : this.accent);
+    // Energy colour: the finish wins, then the weapon's own, then the suit.
+    const finishEnergy = finishFor(this.profile, this.hero).energy;
+    this.weaponColor.set(finishEnergy ?? (this.weaponDef.hero === this.hero && this.weaponDef.color ? this.weaponDef.color : this.accent));
     this.bow.setColor(this.weaponColor);
     for (const hand of this.hands) {
       hand.gauntlet.setAccent(this.accent);
@@ -1988,7 +1991,9 @@ export class CombatSystem extends createSystem({
     const id = this.menus.garageWeaponId;
     const def = ARSENAL.find((w) => w.id === id);
     const model = this.weaponModels.get(id) ?? this.weaponDisplays.get(hero);
-    if (model) this.armory.setWeapon(id, model, def?.color ?? equippedColor(this.profile, hero), weaponTier(this.profile, hero));
+    const finish = finishFor(this.profile, hero);
+    if (model) applyFinish(model, finish, '');
+    if (model) this.armory.setWeapon(`${id}:${finish.id}`, model, finish.energy ?? def?.color ?? equippedColor(this.profile, hero), weaponTier(this.profile, hero));
     if (!this.armory.visible) this.armory.show(this.head, this.forward);
   }
 
@@ -3167,6 +3172,7 @@ export class CombatSystem extends createSystem({
       copy.color.set(color);
       copy.emissive?.set(color);
       mesh.material = copy as unknown as Mesh['material'];
+      mesh.userData.variantGlow = copy.color.getHex();
     });
   }
 
@@ -3187,19 +3193,21 @@ export class CombatSystem extends createSystem({
       }
       const base = mesh.userData.base as { color: number; emissive: number };
       const glowing = (m.emissiveIntensity ?? 0) >= 1.5;
+      if (!glowing) return;
       m.color.setHex(base.color);
       if (m.emissive) m.emissive.setHex(base.emissive);
       if (id === 'tempest-inferno') {
         if (glowing) {
           m.color.set('#FF5A1F');
           m.emissive!.set('#FF5A1F');
-        } else if ((m.metalness ?? 0) > 0.8) m.color.set('#2A1A14');
+        }
       } else if (id === 'tempest-godbreaker') {
         if (glowing) {
           m.color.set('#FFD23F');
           m.emissive!.set('#FFD23F');
-        } else if ((m.metalness ?? 0) > 0.8) m.color.set('#8C6A2A');
+        }
       }
+      mesh.userData.variantGlow = m.color.getHex();
     });
     model.scale.setScalar(id === 'tempest-godbreaker' ? 1.35 : 1);
   }
@@ -3223,6 +3231,14 @@ export class CombatSystem extends createSystem({
       this.tint(this.shield, this.weaponDef.color ?? this.accentHex);
       this.shieldState = 'worn';
     }
+    // The finish restyles the real weapon in hand.
+    const finish = finishFor(this.profile, this.hero);
+    const energy = this.weaponColor.getHexString();
+    if (this.hero === 'havoc' && this.blaster) applyFinish(this.blaster, finish, energy);
+    if (this.hero === 'tempest' && this.hammer) applyFinish(this.hammer, finish, energy);
+    if (this.hero === 'vanguard' && this.shield) applyFinish(this.shield, finish, energy);
+    if (this.hero === 'orion') applyFinish(this.bow.group, finish, energy);
+    if (this.hero === 'ronin') for (const hand of this.hands) applyFinish(hand.sword.group, finish, energy);
   }
 
   /** ARC's PROTON BEAM: a continuous laser that burns the first thing it touches. */
@@ -3400,8 +3416,8 @@ export class CombatSystem extends createSystem({
     if (this.armory.visible) {
       // A key light on the weapon in the armory.
       this.handLight.color.set('#FFFFFF');
-      this.handLight.intensity = 5;
-      this.handLight.position.copy(this.armory.group.position).add(this.v1.set(0.3, 0.4, 0)).addScaledVector(this.forward, -0.4);
+      this.handLight.intensity = 2.2;
+      this.handLight.position.copy(this.armory.group.position).add(this.v1.set(0.5, 0.6, 0)).addScaledVector(this.forward, -0.6);
     } else if (this.twist !== 'blackout') this.handLight.intensity = 0;
     if (this.twist === 'blackout') {
       this.applyDarkness(this.run.phase !== 'title');

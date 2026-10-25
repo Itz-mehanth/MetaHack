@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
   type Color,
@@ -11,6 +12,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  OctahedronGeometry,
   type Quaternion,
   SphereGeometry,
   TorusGeometry,
@@ -58,6 +60,9 @@ export class Bow {
   constructor(color: Color) {
     this.group.name = 'LightBow';
     this.limbMaterial = new MeshStandardMaterial({ color: '#1E2430', metalness: 0.9, roughness: 0.3 });
+    this.limbMaterial.name = 'metal';
+    const trim = new MeshStandardMaterial({ color: '#C9CED8', metalness: 1, roughness: 0.14 });
+    trim.name = 'trim';
     this.glow = new MeshBasicMaterial({ color: color.clone(), toneMapped: false });
 
     const limbGeometry = new TorusGeometry(RADIUS, 0.009, 6, 40, HALF_ANGLE * 2);
@@ -97,7 +102,22 @@ export class Bow {
     this.arrow.add(shaft, this.arrowHead);
     this.arrow.visible = false;
 
-    this.group.add(limb, edge, grip, gem, this.string, this.arrow);
+    // Inner trim layer, crystal nodes at the limb tips and a carved riser.
+    const inner = new Mesh(new TorusGeometry(RADIUS - 0.011, 0.003, 4, 40, HALF_ANGLE * 2), trim);
+    inner.geometry.rotateZ(-HALF_ANGLE);
+    inner.geometry.translate(-RADIUS + 0.011, 0, 0);
+    for (const side of [-1, 1]) {
+      const node = new Mesh(new OctahedronGeometry(0.013, 0), this.glow);
+      node.position.set(-TIP_BACK, side * TIP_HEIGHT, 0);
+      node.scale.y = 1.6;
+      this.group.add(node);
+    }
+    const riser = new Mesh(new BoxGeometry(0.026, 0.16, 0.026), this.limbMaterial);
+    const riserTrim = new Mesh(new BoxGeometry(0.03, 0.02, 0.03), trim);
+    riserTrim.position.y = 0.07;
+    const riserTrim2 = riserTrim.clone();
+    riserTrim2.position.y = -0.07;
+    this.group.add(limb, edge, inner, riser, riserTrim, riserTrim2, grip, gem, this.string, this.arrow);
     this.group.visible = false;
   }
 

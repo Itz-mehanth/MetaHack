@@ -24,7 +24,7 @@ import {
 import { chapterFor, type Speaker } from './story.js';
 import { ANCHORS_TO_FINALE, anchorsRecovered, finaleUnlocked, PROLOGUE_DONE } from './saga.js';
 import { TWIST_INFO, twistFor } from './twists.js';
-import { buyWeapon, equippedWeapon, ownsWeapon, weaponById, weaponsFor, weaponUnlocked } from './arsenal.js';
+import { buyFinish, buyWeapon, equippedWeapon, FINISHES, finishFor, ownsFinish, ownsWeapon, weaponById, weaponsFor, weaponUnlocked } from './arsenal.js';
 
 export type Screen = 'main' | 'galaxy' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
 
@@ -571,6 +571,27 @@ export class GameMenus {
         icon: hero,
       });
     });
+    if (this.garageTab === 'skins') {
+      // Weapon finishes: a full restyle of the hero's weapon.
+      const current = finishFor(p, hero).id;
+      widgets.push({ id: 'finish-title', kind: 'text', x: 80, y: 600, w: 1440, h: 50, label: 'WEAPON FINISH', size: 40, color: '#FFFFFF' });
+      const w = (1472 - 4 * 16) / 5;
+      FINISHES.forEach((finish, i) => {
+        const owned = ownsFinish(p, hero, finish.id);
+        widgets.push({
+          id: `finish:${finish.id}`,
+          x: 64 + i * (w + 16),
+          y: 680,
+          w,
+          h: 200,
+          label: finish.name,
+          sub: finish.id === current ? 'EQUIPPED' : owned ? 'EQUIP' : `${finish.price} C`,
+          color: finish.energy ?? accent,
+          selected: finish.id === current,
+          size: 34,
+        });
+      });
+    }
     const tier = weaponTier(p, hero);
     return {
       title: 'ARMORY',
@@ -792,6 +813,15 @@ export class GameMenus {
         this.actions.changed();
         return;
       }
+      case 'finish':
+        if (ownsFinish(p, this.garageHero, arg)) p.finish[this.garageHero] = arg;
+        else if (buyFinish(p, this.garageHero, arg)) this.actions.bought();
+        else {
+          this.actions.denied();
+          return;
+        }
+        this.actions.changed();
+        return;
       case 'garage-tab':
         this.garageTab = arg as 'weapons' | 'upgrades' | 'skins';
         return;

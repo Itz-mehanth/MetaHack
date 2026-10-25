@@ -60,6 +60,50 @@ export const ARSENAL: readonly WeaponDef[] = [
   W('psion-inferno', 'psion', 'INFERNO MIND', 'Thrown things explode in fire', 900, 1, '#FF6A1A'),
 ];
 
+/** Finishes: a full restyle of a weapon's metals plus its energy colour. */
+export interface FinishDef {
+  readonly id: string;
+  readonly name: string;
+  readonly price: number;
+  /** [colour, metalness, roughness, emissive glow] per role. */
+  readonly metal: readonly [string, number, number, number];
+  readonly trim: readonly [string, number, number, number];
+  readonly dark: readonly [string, number, number, number];
+  /** Energy colour (null keeps the weapon's own). */
+  readonly energy: string | null;
+}
+
+export const FINISHES: readonly FinishDef[] = [
+  { id: 'standard', name: 'STANDARD', price: 0, metal: ['#3A3F4C', 1, 0.22, 0], trim: ['#C9CED8', 1, 0.14, 0], dark: ['#15171D', 0.4, 0.6, 0], energy: null },
+  { id: 'gilded', name: 'GILDED', price: 600, metal: ['#B8862A', 1, 0.18, 0], trim: ['#FFE6A0', 1, 0.1, 0], dark: ['#2A1C0A', 0.6, 0.45, 0], energy: '#FFE9B0' },
+  { id: 'crystal', name: 'CRYSTAL', price: 800, metal: ['#9FE8FF', 0.3, 0.05, 0.25], trim: ['#FFFFFF', 1, 0.05, 0.1], dark: ['#1A3550', 0.5, 0.2, 0], energy: '#7FF6FF' },
+  { id: 'infernal', name: 'INFERNAL', price: 1000, metal: ['#1A1210', 0.8, 0.55, 0.12], trim: ['#7A2A10', 1, 0.3, 0.2], dark: ['#0A0606', 0.3, 0.8, 0], energy: '#FF4A00' },
+  { id: 'void', name: 'VOID', price: 1200, metal: ['#160E24', 1, 0.2, 0], trim: ['#7A4DFF', 1, 0.3, 0.12], dark: ['#06040A', 0.5, 0.4, 0], energy: '#C04DFF' },
+];
+
+/** Owned finish ids are stored as `hero:finish`. */
+export function ownsFinish(profile: Profile, hero: HeroId, id: string): boolean {
+  return id === 'standard' || profile.finishes.includes(`${hero}:${id}`);
+}
+
+export function finishFor(profile: Profile, hero: HeroId): FinishDef {
+  const id = profile.finish[hero];
+  return FINISHES.find((f) => f.id === id && ownsFinish(profile, hero, f.id)) ?? FINISHES[0];
+}
+
+/** Buys (if needed) and equips finish `id` for `hero`. */
+export function buyFinish(profile: Profile, hero: HeroId, id: string): boolean {
+  const finish = FINISHES.find((f) => f.id === id);
+  if (finish == null) return false;
+  if (!ownsFinish(profile, hero, id)) {
+    if (profile.coins < finish.price) return false;
+    profile.coins -= finish.price;
+    profile.finishes.push(`${hero}:${id}`);
+  }
+  profile.finish[hero] = id;
+  return true;
+}
+
 export function weaponsFor(hero: HeroId): WeaponDef[] {
   return ARSENAL.filter((w) => w.hero === hero);
 }

@@ -3,6 +3,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CapsuleGeometry,
   Color,
   CylinderGeometry,
   DoubleSide,
@@ -12,6 +13,7 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   Quaternion,
+  SphereGeometry,
   TorusGeometry,
   Vector3,
 } from '@iwsdk/core';
@@ -89,7 +91,25 @@ export class Sword {
     this.group.name = `Sword-${handedness}`;
     this.color.copy(color);
     const wrap = new MeshStandardMaterial({ color: '#15151C', roughness: 0.85, metalness: 0.1 });
+    wrap.name = 'dark';
     const gold = new MeshStandardMaterial({ color: '#C9973A', roughness: 0.3, metalness: 1 });
+    gold.name = 'trim';
+    const steel = new MeshStandardMaterial({ color: '#4A505E', roughness: 0.15, metalness: 1 });
+    steel.name = 'metal';
+    // Guard petals, a gold collar and a silk tassel from the pommel.
+    for (let k = 0; k < 4; k += 1) {
+      const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+      const petal = new Mesh(new SphereGeometry(0.014, 10, 6), gold);
+      petal.position.set(Math.cos(a) * 0.034, GUARD, Math.sin(a) * 0.026);
+      petal.scale.y = 0.45;
+      this.group.add(petal);
+    }
+    const collar = new Mesh(new BoxGeometry(0.012, 0.024, 0.03), gold);
+    collar.position.y = GUARD + 0.014;
+    const tassel = new Mesh(new CapsuleGeometry(0.006, 0.07, 2, 6), new MeshStandardMaterial({ color: '#8A1020', roughness: 0.9 }));
+    tassel.position.set(0.012, -0.2, 0);
+    tassel.rotation.z = 0.3;
+    this.group.add(collar, tassel);
     const hilt = new Mesh(new CylinderGeometry(0.014, 0.016, 0.24, 10), wrap);
     hilt.position.y = -0.03;
     const pommel = new Mesh(new CylinderGeometry(0.018, 0.016, 0.02, 10), gold);
@@ -118,7 +138,10 @@ export class Sword {
       depthWrite: false,
       toneMapped: false,
     });
-    this.blade.add(new Mesh(bladeGeometry(0.022, 0.004), core), new Mesh(bladeGeometry(0.05, 0.016), this.sheath));
+    // A steel spine inside the plasma: a real blade wrapped in energy.
+    const spine = new Mesh(bladeGeometry(0.018, 0.007), steel);
+    spine.position.z = -0.012;
+    this.blade.add(spine, new Mesh(bladeGeometry(0.022, 0.004), core), new Mesh(bladeGeometry(0.05, 0.016), this.sheath));
     this.blade.position.y = GUARD + 0.005;
     this.group.add(hilt, pommel, guard, rim, this.blade);
     this.group.visible = false;

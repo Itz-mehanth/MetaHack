@@ -1,14 +1,18 @@
 import {
   BoxGeometry,
+  CapsuleGeometry,
   ConeGeometry,
   CylinderGeometry,
   Group,
   IcosahedronGeometry,
   Mesh,
   MeshStandardMaterial,
+  OctahedronGeometry,
   SphereGeometry,
   TorusGeometry,
 } from '@iwsdk/core';
+import { band, forge, piece, tube } from './lib/forge.js';
+import { bevelBox } from './lib/hardsurface.js';
 
 /**
  * Original "Breacher" drone enemies and the start core. Each drone is centred
@@ -129,53 +133,65 @@ export function createTitan(): Group {
 }
 
 /**
- * TEMPEST's storm hammer. Origin at the grip point; handle along +Y, head
- * (named `Head`) centred at y = 0.2 with its long axis along X.
+ * TEMPEST's storm hammer. Origin at the grip centre, head along +Y.
+ * `Head` holds the striking block (`Block`), `Handle` is the shaft.
+ * An octagonal war-hammer head with raised runic face plates, a crystal
+ * core behind hexagonal windows, a crown of spikes and wing blades; a
+ * wrapped shaft with glowing channels and a caged orb pommel.
  */
 export function createHammer(): Group {
   const root = new Group();
   root.name = 'Hammer';
-  const steel = new MeshStandardMaterial({ color: '#3A3F55', roughness: 0.25, metalness: 0.95 });
-  const grip = new MeshStandardMaterial({ color: '#1A1420', roughness: 0.8, metalness: 0.1 });
-  const rune = glow('#9D8CFF', 3);
-  const spark = glow('#D9F2FF', 4);
-
-  const handle = new Mesh(new CylinderGeometry(0.016, 0.018, 0.3, 12), grip);
+  const f = forge('#9D8CFF');
+  // Shaft: dark core, gold bands, leather wraps, four glowing channels.
+  const handle = piece(root, new CylinderGeometry(0.016, 0.018, 0.3, 12), f.dark, 0, 0.04);
   handle.name = 'Handle';
-  handle.position.y = 0.04;
-  const pommel = new Mesh(new IcosahedronGeometry(0.024, 1), spark);
-  pommel.name = 'Pommel';
-  pommel.position.y = -0.115;
-  root.add(handle, pommel);
-  for (let i = 0; i < 3; i += 1) {
-    const band = new Mesh(new TorusGeometry(0.018, 0.004, 6, 16), rune);
-    band.rotation.x = Math.PI / 2;
-    band.position.y = -0.06 + i * 0.07;
-    root.add(band);
+  for (let i = 0; i < 9; i += 1) {
+    const ring = piece(root, new TorusGeometry(0.0185, i % 3 === 0 ? 0.004 : 0.0025, 6, 16), i % 3 === 0 ? f.trim : f.dark, 0, -0.08 + i * 0.03, 0, Math.PI / 2);
+    ring.scale.z = 1.2;
   }
+  for (let k = 0; k < 4; k += 1) {
+    const a = (k / 4) * Math.PI * 2;
+    piece(root, new BoxGeometry(0.003, 0.24, 0.003), f.energy, Math.cos(a) * 0.017, 0.04, Math.sin(a) * 0.017);
+  }
+  // Caged orb pommel with a ring.
+  const pommel = piece(root, new IcosahedronGeometry(0.02, 1), f.core, 0, -0.12, 0);
+  pommel.name = 'Pommel';
+  piece(root, new TorusGeometry(0.026, 0.003, 6, 20), f.trim, 0, -0.12, 0);
+  piece(root, new TorusGeometry(0.026, 0.003, 6, 20), f.trim, 0, -0.12, 0, 0, Math.PI / 2);
+  piece(root, new TorusGeometry(0.012, 0.003, 6, 16), f.trim, 0, -0.152, 0, 0, Math.PI / 2);
+  piece(root, new CylinderGeometry(0.022, 0.018, 0.02, 8), f.metal, 0, -0.1, 0);
 
   const head = new Group();
   head.name = 'Head';
   head.position.y = 0.2;
-  const block = new Mesh(new CylinderGeometry(0.05, 0.05, 0.17, 8), steel);
-  block.rotation.z = Math.PI / 2;
-  const capL = new Mesh(new CylinderGeometry(0.056, 0.05, 0.02, 8), steel);
-  capL.rotation.z = Math.PI / 2;
-  capL.position.x = -0.095;
-  const capR = capL.clone();
-  capR.position.x = 0.095;
-  const faceL = new Mesh(new CylinderGeometry(0.03, 0.03, 0.004, 6), spark);
-  faceL.rotation.z = Math.PI / 2;
-  faceL.position.x = -0.107;
-  const faceR = faceL.clone();
-  faceR.position.x = 0.107;
-  head.add(block, capL, capR, faceL, faceR);
-  for (let i = 0; i < 4; i += 1) {
-    const strip = new Mesh(new BoxGeometry(0.12, 0.006, 0.006), rune);
-    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-    strip.position.set(0, Math.cos(a) * 0.051, Math.sin(a) * 0.051);
-    head.add(strip);
+  // The block: an octagonal prism along X with bevelled collars.
+  const block = piece(head, new CylinderGeometry(0.058, 0.058, 0.17, 8), f.metal, 0, 0, 0, 0, 0, Math.PI / 2);
+  block.name = 'Block';
+  for (const side of [-1, 1]) {
+    piece(head, new CylinderGeometry(0.064, 0.058, 0.022, 8), f.trim, side * 0.09, 0, 0, 0, 0, Math.PI / 2);
+    // Raised face plate with a glowing rune disc and a lightning glyph.
+    piece(head, new CylinderGeometry(0.05, 0.056, 0.012, 8), f.metal, side * 0.106, 0, 0, 0, 0, Math.PI / 2);
+    piece(head, new CylinderGeometry(0.032, 0.032, 0.004, 24), f.energy, side * 0.113, 0, 0, 0, 0, Math.PI / 2);
+    for (const [y, z, r] of [[0.014, -0.006, 0.5], [0, 0.004, -0.5], [-0.014, -0.004, 0.5]] as const) {
+      piece(head, new BoxGeometry(0.004, 0.016, 0.004), f.core, side * 0.116, y, z, r, 0, 0);
+    }
+    // Wing blades sweeping back from the collars.
+    const wing = piece(head, new BoxGeometry(0.004, 0.05, 0.06), f.trim, side * 0.07, 0.058, -0.03, -0.6, 0, side * -0.3);
+    wing.scale.y = 1.1;
   }
+  // Crystal core seen through hexagonal windows front and back.
+  piece(head, new OctahedronGeometry(0.03, 0), f.core, 0, 0, 0);
+  for (const side of [-1, 1]) {
+    piece(head, new TorusGeometry(0.03, 0.005, 6, 6), f.trim, 0, 0, side * 0.055);
+    piece(head, new CylinderGeometry(0.027, 0.027, 0.004, 6), f.energy, 0, 0, side * 0.056, Math.PI / 2);
+  }
+  // Rune strips along the diagonal faces and a crown of spikes.
+  for (let i = 0; i < 4; i += 1) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    piece(head, new BoxGeometry(0.13, 0.005, 0.005), f.energy, 0, Math.cos(a) * 0.056, Math.sin(a) * 0.056);
+  }
+  for (let i = -1; i <= 1; i += 1) piece(head, new ConeGeometry(0.01, 0.04 - Math.abs(i) * 0.01, 4), f.trim, i * 0.045, 0.072, 0);
   root.add(head);
   return root;
 }
@@ -306,38 +322,58 @@ export function createPickup(kind: 'heal' | 'rapid' | 'power'): Group {
 
 /**
  * HAVOC's plasma pistol. Origin at the grip, barrel along +Z, top along +Y;
- * `Muzzle` marks the barrel tip, `Cells` the glowing energy cells.
+ * `Muzzle` marks the barrel tip, `Body` the slide (outlined). A machined
+ * slide with serrations and a glowing top channel, a hexagonal barrel
+ * shroud with plasma coils behind vents, a ported muzzle brake, a chamber
+ * window and an energy cell in the grip.
  */
 export function createBlaster(): Group {
   const root = new Group();
   root.name = 'Blaster';
-  const metal = new MeshStandardMaterial({ color: '#2B2E38', roughness: 0.3, metalness: 0.9 });
-  const grip = new MeshStandardMaterial({ color: '#1A1612', roughness: 0.8, metalness: 0.1 });
-  const energy = glow('#FFB01F', 3);
-  const handle = new Mesh(new BoxGeometry(0.03, 0.1, 0.045), grip);
-  handle.rotation.x = 0.25;
-  const body = new Mesh(new BoxGeometry(0.036, 0.05, 0.17), metal);
-  body.name = 'Body';
-  body.position.set(0, 0.06, 0.05);
-  const barrel = new Mesh(new CylinderGeometry(0.012, 0.014, 0.12, 12), metal);
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.065, 0.18);
+  const f = forge('#FFB01F');
+  // Grip with finger grooves and a cell window.
+  const grip = piece(root, bevelBox(0.032, 0.105, 0.046, 0.006), f.dark, 0, 0, 0, 0.25);
+  grip.name = 'Grip';
+  for (let i = 0; i < 3; i += 1) piece(root, new CapsuleGeometry(0.006, 0.026, 2, 8), f.dark, 0, -0.025 + i * 0.026, 0.026 - i * 0.006, 0, 0, Math.PI / 2);
+  // Glowing cell windows down both grip panels.
+  for (const side of [-1, 1]) piece(root, new BoxGeometry(0.003, 0.05, 0.012), f.energy, side * 0.0165, -0.008, -0.002, 0.25);
+  piece(root, new BoxGeometry(0.036, 0.012, 0.05), f.trim, 0, -0.054, -0.012, 0.25);
+  // Frame and slide.
+  piece(root, bevelBox(0.036, 0.03, 0.17, 0.005), f.metal, 0, 0.04, 0.06);
+  const slide = piece(root, bevelBox(0.04, 0.036, 0.2, 0.006), f.metal, 0, 0.074, 0.07);
+  slide.name = 'Body';
+  for (let i = 0; i < 6; i += 1) {
+    for (const side of [-1, 1]) piece(root, new BoxGeometry(0.002, 0.026, 0.004), f.dark, side * 0.0205, 0.074, -0.015 + i * 0.008);
+  }
+  piece(root, new BoxGeometry(0.008, 0.004, 0.15), f.energy, 0, 0.093, 0.08);
+  piece(root, new BoxGeometry(0.014, 0.012, 0.012), f.trim, 0, 0.098, -0.02);
+  piece(root, new BoxGeometry(0.006, 0.012, 0.008), f.trim, 0, 0.098, 0.165);
+  // Chamber window with a white-hot core.
+  piece(root, new BoxGeometry(0.041, 0.016, 0.03), f.core, 0, 0.074, 0.06);
+  // Hexagonal shroud, vents and plasma coils.
+  tube(root, 0.022, 0.022, 0.1, f.metal, 0, 0.072, 0.21, 6);
+  tube(root, 0.011, 0.011, 0.12, f.dark, 0, 0.072, 0.22, 12);
+  for (let i = 0; i < 3; i += 1) {
+    band(root, 0.016, 0.0035, 0.18 + i * 0.025, f.energy, 0.072);
+    for (const side of [-1, 1]) piece(root, new BoxGeometry(0.002, 0.012, 0.012), f.dark, side * 0.022, 0.072, 0.18 + i * 0.025);
+  }
+  // Ported muzzle brake.
+  tube(root, 0.024, 0.02, 0.03, f.trim, 0, 0.072, 0.275, 8);
+  for (const side of [-1, 1]) piece(root, new BoxGeometry(0.004, 0.01, 0.014), f.dark, side * 0.023, 0.072, 0.275);
+  band(root, 0.02, 0.003, 0.291, f.energy, 0.072);
+  // Under-rail emitter, trigger guard and trigger.
+  piece(root, new BoxGeometry(0.02, 0.012, 0.09), f.dark, 0, 0.022, 0.15);
+  piece(root, new SphereGeometry(0.008, 10, 8), f.energy, 0, 0.022, 0.198);
+  const guard = piece(root, new TorusGeometry(0.022, 0.004, 6, 16, Math.PI), f.trim, 0, 0.02, 0.028);
+  guard.rotation.y = Math.PI / 2;
+  piece(root, new BoxGeometry(0.006, 0.02, 0.006), f.trim, 0, 0.012, 0.024, 0.3);
   const cells = new Group();
   cells.name = 'Cells';
-  for (let i = 0; i < 3; i += 1) {
-    const cell = new Mesh(new BoxGeometry(0.04, 0.012, 0.025), energy);
-    cell.position.set(0, 0.092, 0.0 + i * 0.035);
-    cells.add(cell);
-  }
-  const ring = new Mesh(new TorusGeometry(0.017, 0.004, 6, 16), energy);
-  ring.position.set(0, 0.065, 0.24);
+  root.add(cells);
   const muzzle = new Group();
   muzzle.name = 'Muzzle';
-  muzzle.position.set(0, 0.065, 0.25);
-  const guard = new Mesh(new TorusGeometry(0.022, 0.004, 4, 12, Math.PI), metal);
-  guard.position.set(0, 0.02, 0.025);
-  guard.rotation.y = Math.PI / 2;
-  root.add(handle, body, barrel, cells, ring, muzzle, guard);
+  muzzle.position.set(0, 0.072, 0.3);
+  root.add(muzzle);
   return root;
 }
 

@@ -85,3 +85,21 @@ describe('champions', () => {
     }
   });
 });
+
+describe('finishes', () => {
+  it('buys a finish once per hero and equips it', async () => {
+    const { buyFinish, finishFor } = await import('./arsenal.js');
+    const { defaultProfile } = await import('./progression.js');
+    const p = defaultProfile();
+    expect(finishFor(p, 'havoc').id).toBe('standard');
+    expect(buyFinish(p, 'havoc', 'gilded')).toBe(false);
+    p.coins = 2000;
+    expect(buyFinish(p, 'havoc', 'gilded')).toBe(true);
+    expect(p.coins).toBe(1400);
+    expect(finishFor(p, 'havoc').id).toBe('gilded');
+    expect(finishFor(p, 'ronin').id).toBe('standard');
+    expect(buyFinish(p, 'havoc', 'standard')).toBe(true);
+    expect(buyFinish(p, 'havoc', 'gilded')).toBe(true);
+    expect(p.coins).toBe(1400);
+  });
+});

@@ -49,6 +49,13 @@ throughout (no Marvel or other third-party names/designs).
   TEMPEST thunder/inferno/godbreaker; ORION longbow/volley/blast/storm;
   WEAVER silk/electro/burst; RONIN katana/flame/void; PSION mind/inferno.
   Burn and shock damage-over-time; explosions; quake rings.
+  Weapon models use role-named forge materials (scene-assets/lib/forge.ts:
+  metal, trim, dark, energy, core); FINISHES (STANDARD, GILDED, CRYSTAL,
+  INFERNAL, VOID) restyle the real weapon in hand and in the armory
+  (bought per hero in the SKINS tab).
+- Audio: cinematic synthesised score (music.ts: drums, sub bass, strings,
+  brass, choir, bells, per-track lead melody, reverb + echo, 16-bar songs,
+  intensity 0 calm / 1 combat / 2 boss) and layered SFX with a hall reverb.
 - Heroes also include VANGUARD (energy shield: worn on the off-hand,
   blocks blades, deflects shots, swing + open hand throws it to ricochet).
 - Travel: before every level a 4 s jump tunnel (transit.ts: hyperspace

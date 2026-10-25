@@ -241,6 +241,9 @@ export interface Profile {
   /** Arsenal weapons bought, and the one equipped per hero. */
   weapons: string[];
   loadout: Partial<Record<HeroId, string>>;
+  /** Weapon finishes owned (`hero:finish`) and equipped per hero. */
+  finishes: string[];
+  finish: Partial<Record<HeroId, string>>;
   settings: Settings;
 }
 
@@ -256,6 +259,8 @@ export function defaultProfile(): Profile {
     unlocks: [],
     weapons: [],
     loadout: {},
+    finishes: [],
+    finish: {},
     settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false },
   };
 }
@@ -276,6 +281,8 @@ export function normalizeProfile(raw: unknown): Profile {
     unlocks: Array.isArray(r.unlocks) ? [...r.unlocks] : [],
     weapons: Array.isArray(r.weapons) ? [...r.weapons] : [],
     loadout: { ...(r.loadout ?? {}) },
+    finishes: Array.isArray(r.finishes) ? [...r.finishes] : [],
+    finish: { ...(r.finish ?? {}) },
     settings: { ...base.settings, ...(r.settings ?? {}) },
   };
 }
