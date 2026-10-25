@@ -229,6 +229,9 @@ export interface Profile {
   stars: Record<string, number>;
   /** Story rewards earned (overdrive-*, core-*, legend-*). */
   unlocks: string[];
+  /** Arsenal weapons bought, and the one equipped per hero. */
+  weapons: string[];
+  loadout: Partial<Record<HeroId, string>>;
   settings: Settings;
 }
 
@@ -242,6 +245,8 @@ export function defaultProfile(): Profile {
     equipped: {},
     stars: {},
     unlocks: [],
+    weapons: [],
+    loadout: {},
     settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false },
   };
 }
@@ -260,6 +265,8 @@ export function normalizeProfile(raw: unknown): Profile {
     equipped: { ...(r.equipped ?? {}) },
     stars: { ...(r.stars ?? {}) },
     unlocks: Array.isArray(r.unlocks) ? [...r.unlocks] : [],
+    weapons: Array.isArray(r.weapons) ? [...r.weapons] : [],
+    loadout: { ...(r.loadout ?? {}) },
     settings: { ...base.settings, ...(r.settings ?? {}) },
   };
 }

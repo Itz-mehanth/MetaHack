@@ -24,6 +24,7 @@ import {
 import { chapterFor, type Speaker } from './story.js';
 import { ANCHORS_TO_FINALE, anchorsRecovered, finaleUnlocked, PROLOGUE_DONE } from './saga.js';
 import { TWIST_INFO, twistFor } from './twists.js';
+import { buyWeapon, equippedWeapon, ownsWeapon, weaponById, weaponsFor, weaponUnlocked } from './arsenal.js';
 
 export type Screen = 'main' | 'galaxy' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
 
@@ -113,6 +114,15 @@ export class GameMenus {
   mapLevel = 0;
   transmission: TransmissionView | null = null;
   private garageHero: HeroId = 'arc';
+  private garageTab: 'weapons' | 'upgrades' | 'skins' = 'weapons';
+  /** Weapon shown on the armory projector (null: the equipped one). */
+  private garageWeapon: string | null = null;
+
+  /** Weapon id the armory hologram should show. */
+  get garageWeaponId(): string {
+    const w = this.garageWeapon ? weaponById(this.garageWeapon) : undefined;
+    return w && w.hero === this.garageHero ? w.id : equippedWeapon(this.profile, this.garageHero).id;
+  }
 
   /** Hero whose weapon the garage armory is showing. */
   get garageHeroId(): HeroId {
@@ -487,7 +497,38 @@ export class GameMenus {
         selected: h.id === hero,
       });
     });
-    const rows = UPGRADES.filter((u) => u.hero === 'all' || u.hero === hero);
+    (['weapons', 'upgrades', 'skins'] as const).forEach((tab, i) => {
+      widgets.push({ id: `garage-tab:${tab}`, x: 64 + i * 250, y: 150, w: 235, h: 70, label: tab.toUpperCase(), size: 30, selected: this.garageTab === tab, color: accent });
+    });
+    if (this.garageTab === 'weapons') {
+      // The arsenal: every weapon for this hero, equip / buy / locked.
+      const list = weaponsFor(hero);
+      const equipped = equippedWeapon(p, hero).id;
+      const shown = this.garageWeaponId;
+      const w = (1472 - (list.length - 1) * 16) / list.length;
+      list.forEach((weapon, i) => {
+        const owned = ownsWeapon(p, weapon.id);
+        const open = weaponUnlocked(p, weapon);
+        const status = weapon.id === equipped ? 'EQUIPPED' : owned ? 'TAP TO EQUIP' : !open ? `CLEAR LEVEL ${weapon.requires}` : `${weapon.price} C`;
+        widgets.push({
+          id: `weapon:${weapon.id}`,
+          kind: 'tile',
+          x: 64 + i * (w + 16),
+          y: 330,
+          w,
+          h: 600,
+          label: weapon.name,
+          sub: status,
+          detail: wrap(weapon.tagline, Math.floor(w / 22)),
+          color: !owned && !open ? '#666677' : weapon.color ?? accent,
+          badge: weapon.id === shown ? 'VIEWING' : undefined,
+          selected: weapon.id === equipped,
+          size: w < 360 ? 40 : 48,
+          icon: owned ? hero : open ? 'coins' : 'lock',
+        });
+      });
+    }
+    const rows = this.garageTab === 'upgrades' ? UPGRADES.filter((u) => u.hero === 'all' || u.hero === hero) : [];
     rows.forEach((u, r) => {
       const y = 330 + r * 128;
       const level = upgradeLevel(p, u.id);
@@ -513,15 +554,15 @@ export class GameMenus {
         },
       );
     });
-    SKINS.filter((s) => s.hero === hero).forEach((skin, i) => {
+    (this.garageTab === 'skins' ? SKINS.filter((s) => s.hero === hero) : []).forEach((skin, i) => {
       const ownedSkin = p.skins.includes(skin.id);
       const equipped = equippedColor(p, hero) === skin.color;
       widgets.push({
         id: `skin:${skin.id}`,
-        x: 64 + i * 330,
-        y: 860,
-        w: 310,
-        h: 100,
+        x: 64 + i * 490,
+        y: 360,
+        w: 470,
+        h: 200,
         label: skin.name,
         sub: equipped ? 'EQUIPPED' : ownedSkin ? 'EQUIP' : `${skin.price} C`,
         color: skin.color,
@@ -751,7 +792,22 @@ export class GameMenus {
         this.actions.changed();
         return;
       }
+      case 'garage-tab':
+        this.garageTab = arg as 'weapons' | 'upgrades' | 'skins';
+        return;
+      case 'weapon': {
+        this.garageWeapon = arg;
+        if (ownsWeapon(p, arg)) p.loadout[weaponById(arg)!.hero] = arg;
+        else if (buyWeapon(p, arg)) this.actions.bought();
+        else {
+          this.actions.denied();
+          return;
+        }
+        this.actions.changed();
+        return;
+      }
       case 'garage-hero':
+        this.garageWeapon = null;
         this.garageHero = arg as HeroId;
         return;
       case 'upgrade':

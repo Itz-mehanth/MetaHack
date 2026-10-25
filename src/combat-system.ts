@@ -34,6 +34,7 @@ import { BloodPools, BloodScreen, captureParts, Gibs, type Part, type PartName, 
 import { Galaxy } from './combat/galaxy.js';
 import { lookFor, WORLD_LOOKS } from './combat/worlds.js';
 import { TWIST_INFO, type TwistId, twistFor } from './combat/twists.js';
+import { ARSENAL, equippedWeapon, type WeaponDef } from './combat/arsenal.js';
 import { Erasure } from './combat/erasure.js';
 import {
   anchorLine,
@@ -90,6 +91,8 @@ import { Sfx } from './combat/sfx.js';
 import { createGlowSprite, Flashes, getGlowTexture, Particles } from './combat/vfx.js';
 
 type Handedness = 'left' | 'right';
+/** The bits of MeshStandardMaterial the arsenal recolours. */
+type MeshStandardMaterialLike = { color: Color; emissive?: Color; emissiveIntensity?: number; metalness?: number };
 type Triple = [number, number, number];
 
 const FIRE_COOLDOWN = 0.26;
@@ -116,7 +119,7 @@ const NOCK_REACH = 0.3;
 const PINCH_RELEASE = 0.065;
 const WEB_SPEED = 30;
 const WEB_FLIGHT = 0.7;
-const WEB_COOLDOWN = 0.45;
+const WEB_COOLDOWN = 0.3;
 const YANK_SPEED = 1.3;
 const HOMING_RATE = 3;
 const AIM_SMOOTHING = 0.45;
@@ -331,6 +334,10 @@ interface Drone {
   dashCool: number;
   /** Dead body skewered on hand `heldBy`'s blade (-1: none). */
   heldBy: number;
+  /** Burning / electrocuted seconds left, and the damage-tick timer. */
+  burn: number;
+  shock: number;
+  dotTimer: number;
   /** Dropping from the ceiling: height of the chest and fall speed (0: grounded). */
   dropY: number;
   dropV: number;
@@ -366,6 +373,14 @@ interface Bolt {
   target: Drone | null;
   /** Base size multiplier (crescents). */
   scale: number;
+  /** Explodes on impact with this radius (rockets, blast arrows); 0 = no. */
+  blast: number;
+  /** Chains lightning on hit (storm arrows). */
+  zap: boolean;
+  /** Seconds of burning applied on hit. */
+  burn: number;
+  /** Homing strength multiplier (rockets home hard). */
+  homing: number;
 }
 
 function triple(): Triple {
@@ -489,8 +504,16 @@ export class CombatSystem extends createSystem({
   private handLight = new PointLight('#FFFFFF', 0, 5, 2);
   private sky = new Vector3();
   private envBase = -1;
+  /** Equipped arsenal weapon for the current hero, and its colour. */
+  private weaponDef: WeaponDef = ARSENAL[0];
+  private weaponColor = new Color('#3DF5FF');
+  private weaponModels = new Map<string, Object3D>();
+  private guns = new Map<string, Object3D>();
+  private gunSpin = 0;
+  private gunShots = 0;
+  private hammerPainted = false;
   /** How the next damageDrone call landed: drives flinch, fall and cuts. */
-  private hitStyle: 'blast' | 'slice' | 'impale' = 'blast';
+  private hitStyle: 'blast' | 'slice' | 'impale' | 'dot' = 'blast';
   private hitPoint = new Vector3();
   private hitDir = new Vector3();
   private cutNormal = new Vector3();
@@ -798,6 +821,10 @@ export class CombatSystem extends createSystem({
         velocity: new Vector3(),
         target: null,
         scale: 1,
+        blast: 0,
+        zap: false,
+        burn: 0,
+        homing: 1,
       });
     }
 
@@ -923,6 +950,9 @@ export class CombatSystem extends createSystem({
           dash: 0,
           dashCool: 0,
           heldBy: -1,
+          burn: 0,
+          shock: 0,
+          dotTimer: 0,
           dropY: 0,
           dropV: 0,
           flying: false,
@@ -994,6 +1024,9 @@ export class CombatSystem extends createSystem({
         dash: 0,
         dashCool: 0,
         heldBy: -1,
+        burn: 0,
+        shock: 0,
+        dotTimer: 0,
         dropY: 0,
         dropV: 0,
         flying: false,
@@ -1026,6 +1059,14 @@ export class CombatSystem extends createSystem({
     this.root.add(this.blaster);
     this.blasterMuzzle = this.blaster.getObjectByName('Muzzle') ?? this.blaster;
     addOutline(this.blaster, 0.08, (m) => m.name === 'Body');
+    this.guns.set('havoc-pistol', this.blaster);
+    for (const [id, asset] of [['havoc-smg', 'gun-smg'], ['havoc-shotgun', 'gun-shotgun'], ['havoc-minigun', 'gun-minigun']] as const) {
+      const gun = await this.world.assets.instantiate(asset);
+      gun.visible = false;
+      addOutline(gun, 0.08, (m) => m.name === 'Body');
+      this.root.add(gun);
+      this.guns.set(id, gun);
+    }
     this.hammerAura = new TierAura(0.13, this.accent);
     this.hammerHead.add(this.hammerAura.group);
     this.gunAura = new TierAura(0.07, this.accent);
@@ -1064,6 +1105,8 @@ export class CombatSystem extends createSystem({
       this.holograms.push(figure);
     }
     this.root.add(this.coach.group, this.erasure.mesh);
+    // Real models of every arsenal weapon for the armory projector.
+    for (const weapon of ARSENAL) this.weaponModels.set(weapon.id, await this.buildWeaponModel(weapon));
     // PSION's props, plus slots that carry lifted aliens.
     for (const kind of ['crate', 'barrel', 'boulder', 'girder', 'crate', 'boulder'] as const) {
       const object = await this.world.assets.instantiate(`debris-${kind}`);
@@ -1389,6 +1432,15 @@ export class CombatSystem extends createSystem({
       const ready = Math.min(1, hand.armTime / ARM_TIME);
       hand.glow.material.opacity = 0.35 + 0.5 * ready;
       hand.glow.scale.setScalar(0.06 + 0.05 * ready + Math.max(0, hand.cooldown) * 0.3);
+      if (hand.armTime >= ARM_TIME && this.weaponDef.id === 'arc-beam') {
+        this.updateLaser(hand, dt);
+        continue;
+      }
+      if (hand.armTime >= ARM_TIME && hand.cooldown <= 0 && this.weaponDef.id === 'arc-rockets') {
+        hand.cooldown = 1.3 * (1 - 0.1 * this.level('arc-rate')) * (this.buffRapid > 0 ? 0.5 : 1);
+        this.fireRockets(hand.palm, hand.normal);
+        continue;
+      }
       if (hand.armTime >= ARM_TIME && hand.cooldown <= 0) {
         hand.cooldown = FIRE_COOLDOWN * (1 - 0.1 * this.level('arc-rate')) * (this.buffRapid > 0 ? 0.5 : 1);
         this.fire(hand.palm, hand.normal);
@@ -1501,7 +1553,9 @@ export class CombatSystem extends createSystem({
   /** Equips `hero` (also mid-stage): skin, wrist label, weapon, props, coach tips. */
   private equipHero(hero: HeroId): void {
     this.hero = hero;
+    this.weaponDef = equippedWeapon(this.profile, hero);
     this.applySkin();
+    this.applyArsenal();
     const def = HEROES.find((h) => h.id === hero)!;
     this.wrist.setHero(`${def.name} | PAUSE`, this.accent);
     if (hero === 'tempest') this.summonHammer();
@@ -1526,13 +1580,14 @@ export class CombatSystem extends createSystem({
   private applySkin(): void {
     this.accent.set(equippedColor(this.profile, this.hero));
     this.accentHex = `#${this.accent.getHexString()}`;
-    this.bow.setColor(this.accent);
+    this.weaponColor.set(this.weaponDef.hero === this.hero && this.weaponDef.color ? this.weaponDef.color : this.accent);
+    this.bow.setColor(this.weaponColor);
     for (const hand of this.hands) {
       hand.gauntlet.setAccent(this.accent);
       hand.gauntlet.setStyle(this.hero);
-      hand.claws.setColor(this.accent);
-      hand.web.setColor(this.accent);
-      hand.sword.setColor(this.accent);
+      hand.claws.setColor(this.weaponColor);
+      hand.web.setColor(this.weaponColor);
+      hand.sword.setColor(this.weaponColor);
       hand.psi.setColor(this.accent);
       hand.beamMaterial.color.copy(this.accent);
       hand.glow.material.color.copy(this.accent);
@@ -1874,8 +1929,10 @@ export class CombatSystem extends createSystem({
       return;
     }
     const hero = this.menus.garageHeroId;
-    const model = this.weaponDisplays.get(hero);
-    if (model) this.armory.setWeapon(hero, model, equippedColor(this.profile, hero), weaponTier(this.profile, hero));
+    const id = this.menus.garageWeaponId;
+    const def = ARSENAL.find((w) => w.id === id);
+    const model = this.weaponModels.get(id) ?? this.weaponDisplays.get(hero);
+    if (model) this.armory.setWeapon(id, model, def?.color ?? equippedColor(this.profile, hero), weaponTier(this.profile, hero));
     if (!this.armory.visible) this.armory.show(this.head, this.forward);
   }
 
@@ -2287,8 +2344,17 @@ export class CombatSystem extends createSystem({
     // Trigger: curl the index finger; holding it curled keeps firing.
     const curled = e[0] < 1.4;
     if (e[0] > 1.6) this.triggerArmed = true;
-    const auto = 0.34 * (1 - 0.1 * this.level('havoc-rate')) * (this.buffRapid > 0 ? 0.5 : 1);
-    if (curled && this.gunCooldown <= 0) {
+    const type = this.weaponDef.id;
+    // Minigun barrels spin up while the trigger is held.
+    this.gunSpin = type === 'havoc-minigun' ? Math.max(0, Math.min(1, this.gunSpin + (curled ? dt * 2 : -dt))) : 0;
+    const barrels = gun.getObjectByName('Barrels');
+    if (barrels) barrels.rotation.z += dt * this.gunSpin * 45;
+    const pump = gun.getObjectByName('Pump');
+    if (pump) pump.position.z = 0.24 - Math.max(0, this.gunCooldown - 0.45) * 0.25;
+    const base = type === 'havoc-smg' ? 0.085 : type === 'havoc-shotgun' ? 0.8 : type === 'havoc-minigun' ? 0.05 : 0.34;
+    const auto = base * (1 - 0.1 * this.level('havoc-rate')) * (this.buffRapid > 0 ? 0.5 : 1);
+    const ready = type !== 'havoc-minigun' || this.gunSpin > 0.6;
+    if (curled && ready && this.gunCooldown <= 0) {
       this.triggerArmed = false;
       this.gunCooldown = auto;
       this.shootGun();
@@ -2300,15 +2366,27 @@ export class CombatSystem extends createSystem({
     gun.updateMatrixWorld();
     this.blasterMuzzle!.getWorldPosition(this.v3);
     this.v4.set(0, 0, 1).transformDirection(gun.matrixWorld);
-    const bolt = this.fire(this.v3, this.v4, true);
-    if (bolt) {
-      bolt.damage = 1 + Math.floor(this.level('havoc-damage') / 2);
-      bolt.pierceLeft = this.level('havoc-pierce') > 0 ? Math.ceil(this.level('havoc-pierce') / 2) : 0;
+    const type = this.weaponDef.id;
+    const pellets = type === 'havoc-shotgun' ? 7 : 1;
+    const spread = type === 'havoc-shotgun' ? 0.09 : type === 'havoc-smg' ? 0.035 : type === 'havoc-minigun' ? 0.05 : 0;
+    const damage = (type === 'havoc-shotgun' ? 1 : type === 'havoc-pistol' ? 1 + Math.floor(this.level('havoc-damage') / 2) : 0.5) * (1 + 0.15 * this.level('havoc-damage'));
+    this.sa.copy(this.v4);
+    for (let k = 0; k < pellets; k += 1) {
+      this.sb.copy(this.sa);
+      if (spread > 0) this.sb.add(this.sc.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(spread * 2)).normalize();
+      const bolt = this.fire(this.v3, this.sb, true);
+      if (bolt) {
+        bolt.damage = damage;
+        bolt.pierceLeft = this.level('havoc-pierce') > 0 ? Math.ceil(this.level('havoc-pierce') / 2) : 0;
+        if (spread > 0) bolt.target = null;
+      }
     }
-    this.gunKick = 1;
-    this.flashes.spawn(this.v3, this.accent, 0.05, 0.3, 0.12);
-    this.particles.burst(this.v3, this.accent, 8, 1.2, 0.15, this.v2);
-    this.sfx.blast();
+    this.gunKick = type === 'havoc-shotgun' ? 2.2 : type === 'havoc-pistol' ? 1 : 0.35;
+    this.flashes.spawn(this.v3, this.weaponColor, 0.05, type === 'havoc-shotgun' ? 0.6 : 0.3, 0.12);
+    this.particles.burst(this.v3, this.weaponColor, type === 'havoc-shotgun' ? 20 : 6, 1.2, 0.15, this.v2);
+    if (type === 'havoc-shotgun') this.sfx.shotgun();
+    else if (type === 'havoc-pistol') this.sfx.blast();
+    else if ((this.gunShots += 1) % 2 === 0) this.sfx.rattle();
   }
 
   private updateBow(dt: number): void {
@@ -2378,7 +2456,7 @@ export class CombatSystem extends createSystem({
     const power = Math.min(1, draw / full);
     const fullDraw = power >= 0.95;
     const speed = 10 + 18 * power;
-    const extra = fullDraw ? this.level('orion-volley') : 0;
+    const extra = Math.max(fullDraw ? this.level('orion-volley') : 0, this.weaponDef.id === 'orion-volley' ? 2 : 0);
     for (let k = 0; k <= extra; k += 1) {
       const bolt = this.bolts.find((b) => !b.active);
       if (bolt == null) break;
@@ -2388,10 +2466,14 @@ export class CombatSystem extends createSystem({
         this.v4.addScaledVector(this.v1, (k % 2 === 1 ? 1 : -1) * 0.07 * Math.ceil(k / 2)).normalize();
       }
       bolt.kind = 'arrow';
+      bolt.blast = this.weaponDef.id === 'orion-blast' ? 1.2 : 0;
+      bolt.zap = this.weaponDef.id === 'orion-storm';
+      bolt.burn = 0;
+      bolt.homing = 1;
       bolt.radius = 0.05;
       bolt.damage = fullDraw ? 2 : 1;
       bolt.speed = speed;
-      bolt.pierceLeft = this.level('orion-pierce') + (fullDraw ? 1 : 0);
+      bolt.pierceLeft = this.weaponDef.id === 'orion-storm' ? 99 : this.level('orion-pierce') + (fullDraw ? 1 : 0);
       bolt.gravity = ARROW_GRAVITY * (1 - power * 0.6);
       bolt.target = null;
       if (this.profile.settings.aimAssist) {
@@ -2482,7 +2564,9 @@ export class CombatSystem extends createSystem({
             hand.webTime = 0;
             this.particles.burst(hit.object.position, WHITE, 20, 1.5, 0.3, this.v1);
             this.sfx.splat();
-            this.damageDrone(hit, 1);
+            if (this.weaponDef.id === 'weaver-electro') hit.shock = 5;
+            if (this.weaponDef.id === 'weaver-burst') this.webNet(hit);
+            this.damageDrone(hit, 2);
           } else if (hand.webTime > WEB_FLIGHT) {
             hand.webState = 'retracting';
           }
@@ -2564,7 +2648,7 @@ export class CombatSystem extends createSystem({
 
   /** Rips a webbed enemy apart; the blast hurts enemies around it. */
   private yank(hand: HandState, target: Drone): void {
-    const damage = 3 + this.level('weaver-yank');
+    const damage = 5 + this.level('weaver-yank');
     this.v1.copy(target.object.position);
     this.sfx.yank();
     this.flashes.spawn(this.v1, this.accent, 0.1, 0.9, 0.3);
@@ -2573,7 +2657,7 @@ export class CombatSystem extends createSystem({
     this.damageDrone(target, damage);
     for (const drone of this.drones) {
       if (drone === target || drone.state === 'off') continue;
-      if (drone.object.position.distanceTo(this.v1) < 0.9) this.damageDrone(drone, 2);
+      if (drone.object.position.distanceTo(this.v1) < 1.3) this.damageDrone(drone, 3);
     }
     hand.webTarget = null;
     hand.webState = 'retracting';
@@ -2774,8 +2858,9 @@ export class CombatSystem extends createSystem({
     const swinging = this.hammerState === 'gripped' && this.hammerVelocity.length() > 1.2;
     if (moving || swinging) {
       this.v2.set(0, 0, 0);
-      this.particles.emit(this.hammerHeadPos, this.v2, Math.random() < 0.3 ? WHITE : VIOLET, 0.35, 0, 0);
-      if (Math.random() < (moving ? 0.25 : 0.08)) {
+      const fire = this.weaponDef.id === 'tempest-inferno';
+      this.particles.emit(this.hammerHeadPos, this.v2.set(0, fire ? 0.6 : 0, 0), Math.random() < 0.3 ? WHITE : this.weaponColor, fire ? 0.6 : 0.35, 0, fire ? -0.4 : 0);
+      if (this.weaponDef.id === 'tempest-thunder' && Math.random() < (moving ? 0.25 : 0.08)) {
         this.v1.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.5).add(this.hammerHeadPos);
         this.lightningFx.strike(this.hammerHeadPos, this.v1, VIOLET, 0.12);
       }
@@ -2788,8 +2873,12 @@ export class CombatSystem extends createSystem({
         this.v1.copy(drone.object.position);
         this.sfx.thunderHit();
         this.flashes.spawn(this.v1, WHITE, 0.1, 0.7, 0.2);
-        this.damageDrone(drone, (this.hammerState === 'flying' ? 3 : 2) + Math.floor(this.level('tempest-impact') / 2));
-        this.chainLightning(this.v1, drone);
+        const hammerType = this.weaponDef.id;
+        if (hammerType === 'tempest-inferno') drone.burn = Math.max(drone.burn, 4);
+        this.damageDrone(drone, (this.hammerState === 'flying' ? 3 : 2) + Math.floor(this.level('tempest-impact') / 2) + (hammerType === 'tempest-godbreaker' ? 1 : 0));
+        if (hammerType === 'tempest-thunder') this.chainLightning(this.v1, drone);
+        else if (hammerType === 'tempest-inferno') this.explodeAt(this.v1, 1.1, 1);
+        else this.quake(this.v1);
         if (this.hammerState === 'flying') this.hammerVelocity.multiplyScalar(0.8);
       }
     }
@@ -2865,7 +2954,7 @@ export class CombatSystem extends createSystem({
       const claws = hand.claws;
       const out = this.powersLive && this.hero === 'talon' && hand.tracked && isFist(hand.joints);
       const wasOut = claws.extension > 0.5;
-      claws.lengthScale = 1 + 0.12 * this.level('talon-reach');
+      claws.lengthScale = (1 + 0.12 * this.level('talon-reach')) * (this.weaponDef.id === 'talon-phase' ? 1.35 : 1);
       claws.update(hand.pose, out, dt, this.elapsed);
       hand.slashCooldown -= dt;
       if (out && !wasOut && claws.extension > 0.5) this.sfx.shing();
@@ -2892,6 +2981,7 @@ export class CombatSystem extends createSystem({
         this.v4.subVectors(claws.tip, hand.prevTip);
         this.v2.crossVectors(this.v4, claws.direction);
         this.markHit('slice', this.hitPoint, this.v4, this.v2);
+        if (this.weaponDef.id === 'talon-molten') drone.burn = Math.max(drone.burn, 3);
         this.damageDrone(drone, 2);
       }
 
@@ -2910,6 +3000,10 @@ export class CombatSystem extends createSystem({
     const bolt = this.bolts.find((b) => !b.active);
     if (bolt == null) return;
     bolt.kind = 'crescent';
+    bolt.blast = 0;
+    bolt.zap = false;
+    bolt.burn = this.weaponDef.id === 'ronin-flame' || this.weaponDef.id === 'talon-molten' ? 3 : 0;
+    bolt.homing = 1;
     bolt.radius = radius ?? 0.24 + 0.03 * this.level('talon-wave');
     bolt.damage = damage ?? 2 + Math.floor(this.level('talon-wave') / 2);
     bolt.scale = scale;
@@ -2937,6 +3031,229 @@ export class CombatSystem extends createSystem({
     if (quiet) return;
     this.flashes.spawn(origin, this.accent, 0.05, 0.35, 0.18);
     this.sfx.crescent();
+  }
+
+  // ---------------------------------------------------------------- arsenal
+
+  /** Builds the armory's real model of `weapon` (cloned, own materials). */
+  private async buildWeaponModel(weapon: WeaponDef): Promise<Object3D> {
+    const asset =
+      weapon.id === 'havoc-pistol'
+        ? 'blaster'
+        : weapon.hero === 'havoc'
+          ? `gun-${weapon.id.slice(6)}`
+          : weapon.hero === 'tempest'
+            ? 'hammer'
+            : `weapon-${weapon.hero}`;
+    const model = await this.world.assets.instantiate(asset);
+    if (weapon.hero === 'tempest') this.paintHammer(model, weapon.id);
+    else if (weapon.color) this.tint(model, weapon.color);
+    if (weapon.id === 'ronin-void' || weapon.id === 'talon-phase') model.scale.setScalar(1.2);
+    return model;
+  }
+
+  /** Recolours every glowing part of `model` (materials cloned first). */
+  private tint(model: Object3D, color: string): void {
+    model.traverse((o) => {
+      const mesh = o as Mesh;
+      if (!mesh.isMesh) return;
+      const m = mesh.material as unknown as MeshStandardMaterialLike;
+      if (!m.emissive || (m.emissiveIntensity ?? 0) < 1.5) return;
+      const copy = (m as unknown as { clone(): MeshStandardMaterialLike }).clone();
+      copy.color.set(color);
+      copy.emissive?.set(color);
+      mesh.material = copy as unknown as Mesh['material'];
+    });
+  }
+
+  /**
+   * Hammer looks: THUNDERCLAP (violet runes), INFERNO (charred head, fire
+   * runes), GODBREAKER (gold, bigger). Materials are cloned once per model.
+   */
+  private paintHammer(model: Object3D, id: string): void {
+    model.traverse((o) => {
+      const mesh = o as Mesh;
+      if (!mesh.isMesh) return;
+      let m = mesh.material as unknown as MeshStandardMaterialLike;
+      if (!mesh.userData.painted) {
+        m = (m as unknown as { clone(): MeshStandardMaterialLike }).clone();
+        mesh.material = m as unknown as Mesh['material'];
+        mesh.userData.painted = true;
+        mesh.userData.base = { color: m.color.getHex(), emissive: m.emissive?.getHex() ?? 0 };
+      }
+      const base = mesh.userData.base as { color: number; emissive: number };
+      const glowing = (m.emissiveIntensity ?? 0) >= 1.5;
+      m.color.setHex(base.color);
+      if (m.emissive) m.emissive.setHex(base.emissive);
+      if (id === 'tempest-inferno') {
+        if (glowing) {
+          m.color.set('#FF5A1F');
+          m.emissive!.set('#FF5A1F');
+        } else if ((m.metalness ?? 0) > 0.8) m.color.set('#2A1A14');
+      } else if (id === 'tempest-godbreaker') {
+        if (glowing) {
+          m.color.set('#FFD23F');
+          m.emissive!.set('#FFD23F');
+        } else if ((m.metalness ?? 0) > 0.8) m.color.set('#8C6A2A');
+      }
+    });
+    model.scale.setScalar(id === 'tempest-godbreaker' ? 1.35 : 1);
+  }
+
+  /** Applies the equipped weapon to the hero's live gear (gun model, hammer). */
+  private applyArsenal(): void {
+    const id = this.weaponDef.id;
+    if (this.hero === 'havoc') {
+      const gun = this.guns.get(id) ?? this.guns.get('havoc-pistol')!;
+      for (const g of this.guns.values()) g.visible = false;
+      if (gun !== this.blaster && this.gunAura) gun.add(this.gunAura.group);
+      this.blaster = gun;
+      this.blasterMuzzle = gun.getObjectByName('Muzzle') ?? gun;
+      this.gunSpin = 0;
+    }
+    if (this.hero === 'tempest' && this.hammer) {
+      this.paintHammer(this.hammer, id);
+      this.hammerPainted = true;
+    }
+  }
+
+  /** ARC's PROTON BEAM: a continuous laser that burns the first thing it touches. */
+  private updateLaser(hand: HandState, dt: number): void {
+    const palm = hand.palm;
+    const dir = hand.normal;
+    let best: Drone | null = null;
+    let distance = 12;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging') continue;
+      this.v1.subVectors(drone.object.position, palm);
+      const t = this.v1.dot(dir);
+      if (t <= 0 || t > distance) continue;
+      this.v2.copy(dir).multiplyScalar(t);
+      if (this.v1.sub(this.v2).length() > ENEMIES[drone.kind].radius + 0.05) continue;
+      best = drone;
+      distance = t;
+    }
+    hand.beam.visible = true;
+    hand.beam.position.copy(palm);
+    this.v1.copy(palm).add(dir);
+    hand.beam.lookAt(this.v1);
+    hand.beam.scale.set(7 + Math.random() * 2, 7 + Math.random() * 2, distance);
+    hand.beamMaterial.opacity = 0.9;
+    hand.beamMaterial.color.copy(this.weaponColor);
+    this.v3.copy(palm).addScaledVector(dir, distance);
+    hand.glow.visible = true;
+    hand.glow.position.copy(palm);
+    hand.glow.scale.setScalar(0.12 + Math.random() * 0.03);
+    this.v2.set((Math.random() - 0.5) * 1.5, Math.random() * 1.5, (Math.random() - 0.5) * 1.5);
+    this.particles.emit(this.v3, this.v2, Math.random() < 0.5 ? WHITE : ORANGE, 0.3, 1, 2);
+    hand.cooldown -= dt;
+    if (best && hand.cooldown <= 0) {
+      hand.cooldown = 0.1;
+      this.markHit('blast', best.object.position, dir);
+      this.damageDrone(best, 0.4 * (1 + 0.2 * this.level('arc-power')));
+      this.flashes.spawn(this.v3, this.weaponColor, 0.05, 0.25, 0.1);
+      this.sfx.laser();
+    }
+  }
+
+  /** ARC's SWARM ROCKETS: four homing rockets, each a small explosion. */
+  private fireRockets(palm: Vector3, dir: Vector3): void {
+    this.v3.set(0, 1, 0).cross(dir).normalize();
+    for (let k = 0; k < 4; k += 1) {
+      this.v4.copy(dir).addScaledVector(this.v3, (k - 1.5) * 0.25).addScaledVector(this.v1.set(0, 1, 0), 0.25).normalize();
+      const bolt = this.fire(palm, this.v4, true);
+      if (bolt == null) break;
+      bolt.speed = 8;
+      bolt.velocity.setLength(8);
+      bolt.homing = 3;
+      bolt.blast = 0.8;
+      bolt.damage = 2 + Math.floor(this.level('arc-power') / 2);
+      // Spread the salvo across different targets.
+      let n = 0;
+      for (const drone of this.drones) {
+        if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'pod' || drone.kind === 'orb') continue;
+        if (n++ === k) bolt.target = drone;
+      }
+    }
+    this.flashes.spawn(palm, ORANGE, 0.05, 0.4, 0.2);
+    this.sfx.crescent();
+  }
+
+  /** An explosion: flash, fire and smoke, damage in `radius`. */
+  private explodeAt(at: Vector3, radius: number, damage: number): void {
+    this.impactPoint.copy(at);
+    const p = this.impactPoint;
+    this.flashes.spawn(p, ORANGE, 0.2, radius * 1.6, 0.4);
+    this.flashes.spawn(p, WHITE, 0.1, radius * 0.6, 0.15);
+    this.particles.burst(p, ORANGE, 40, 3, 0.5, this.v2);
+    this.particles.burst(p, DUST, 20, 1.5, 0.8, this.v2);
+    this.sfx.explode(false);
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'orb') continue;
+      if (drone.object.position.distanceTo(p) > radius + ENEMIES[drone.kind].radius) continue;
+      this.v1.subVectors(drone.object.position, p);
+      this.markHit('blast', drone.object.position, this.v1);
+      this.damageDrone(drone, damage);
+    }
+  }
+
+  /** GODBREAKER: a ground quake ring that hits everything nearby. */
+  private quake(at: Vector3): void {
+    this.impactPoint.copy(at);
+    if (this.shockwave) {
+      this.shockwave.position.set(at.x, 0.05, at.z);
+      this.shockwave.rotation.set(Math.PI / 2, 0, 0);
+      this.shockwave.visible = true;
+      (this.shockwave.material as MeshBasicMaterial).color.set('#FFD23F');
+      this.shockwaveTime = 0.3;
+    }
+    this.particles.burst(this.impactPoint, DUST, 40, 2.5, 0.8, this.v2);
+    this.particles.burst(this.impactPoint, GOLD, 30, 3, 0.4, this.v2);
+    this.sfx.thunder();
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'orb' || !ENEMIES[drone.kind].ground) continue;
+      this.v1.set(drone.object.position.x - at.x, 0, drone.object.position.z - at.z);
+      if (this.v1.length() > 2.2) continue;
+      this.markHit('blast', drone.object.position, this.v1.setY(0.6));
+      this.damageDrone(drone, 2);
+    }
+  }
+
+  /** BURST WEB: the web blooms into a net that catches everyone nearby. */
+  private webNet(hit: Drone): void {
+    this.particles.burst(hit.object.position, WHITE, 60, 3, 0.4, this.v1);
+    for (const drone of this.drones) {
+      if (drone === hit || drone.state === 'off' || !ENEMIES[drone.kind].ground) continue;
+      if (drone.object.position.distanceTo(hit.object.position) > 1.6) continue;
+      drone.snare = 4;
+      this.lightningFx.strike(hit.object.position, drone.object.position, WHITE, 0.2);
+      this.damageDrone(drone, 1);
+    }
+  }
+
+  /** Burning and electrocution: damage ticks with fire or sparks. */
+  private updateAfflictions(drone: Drone, dt: number): void {
+    const at = drone.object.position;
+    drone.dotTimer -= dt;
+    if (drone.burn > 0) {
+      drone.burn -= dt;
+      this.v1.set((Math.random() - 0.5) * 0.3, (Math.random() - 0.2) * 0.6, (Math.random() - 0.5) * 0.3).add(at);
+      this.v2.set(0, 0.8 + Math.random() * 0.5, 0);
+      this.particles.emit(this.v1, this.v2, Math.random() < 0.5 ? ORANGE : EMBER, 0.45, 0.5, -0.5);
+    }
+    if (drone.shock > 0) {
+      drone.shock -= dt;
+      if (Math.random() < 0.3) {
+        this.v1.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.6).add(at);
+        this.lightningFx.strike(at, this.v1, CYAN, 0.1);
+      }
+    }
+    if (drone.dotTimer <= 0) {
+      drone.dotTimer = 0.5;
+      this.markHit('dot', at, this.v1.set(0, 1, 0));
+      this.damageDrone(drone, drone.shock > 0 ? 0.7 : 0.5, true);
+      if (drone.burn > 0) this.sfx.sizzle();
+    }
   }
 
   // ---------------------------------------------------------------- twists
@@ -2972,6 +3289,12 @@ export class CombatSystem extends createSystem({
   /** Runs the level's twist: meteors, lightning, blackout light, floaty motes. */
   private updateTwist(dt: number, time: number): void {
     const fighting = this.run.phase === 'fighting' && this.script == null;
+    if (this.armory.visible) {
+      // A key light on the weapon in the armory.
+      this.handLight.color.set('#FFFFFF');
+      this.handLight.intensity = 5;
+      this.handLight.position.copy(this.armory.group.position).add(this.v1.set(0.3, 0.4, 0)).addScaledVector(this.forward, -0.4);
+    } else if (this.twist !== 'blackout') this.handLight.intensity = 0;
     if (this.twist === 'blackout') {
       this.applyDarkness(this.run.phase !== 'title');
       // The only light is the player's hands.
@@ -3367,7 +3690,7 @@ export class CombatSystem extends createSystem({
       else hand.swordHold -= dt;
       const lit = active && hand.tracked && hand.swordHold > 0;
       const was = sword.extension > 0.5;
-      sword.lengthScale = 1 + 0.08 * this.level('ronin-edge');
+      sword.lengthScale = (1 + 0.08 * this.level('ronin-edge')) * (this.weaponDef.id === 'ronin-void' ? 1.25 : 1);
       if (hand.tracked) this.gripPoint(i, this.swordGrip);
       sword.update(hand.pose, this.swordGrip, lit, dt, time);
       if (lit && !was && sword.extension > 0.5) {
@@ -3395,6 +3718,7 @@ export class CombatSystem extends createSystem({
         this.v4.subVectors(sword.tip, hand.prevTip);
         this.v2.crossVectors(this.v4, sword.direction);
         this.markHit('slice', this.hitPoint, this.v4, this.v2);
+        if (this.weaponDef.id === 'ronin-flame') drone.burn = Math.max(drone.burn, 3);
         this.damageDrone(drone, damage);
       }
       hand.slashCooldown -= dt;
@@ -3404,8 +3728,9 @@ export class CombatSystem extends createSystem({
         this.v4.subVectors(sword.tip, hand.prevTip).normalize();
         this.fireCrescent(sword.tip, this.v4, sword.direction, 0.3 + 0.04 * wave, 2 + Math.ceil(wave / 2), 1.5 + 0.12 * wave);
       }
-      // Weapon tier: flames lick up the blade.
-      if (this.weaponTierNow > 0 && Math.random() < this.weaponTierNow * 0.15) {
+      // Weapon tier (and the flame blade): flames lick up the blade.
+      const flame = this.weaponDef.id === 'ronin-flame';
+      if ((this.weaponTierNow > 0 || flame) && Math.random() < (flame ? 0.9 : this.weaponTierNow * 0.15)) {
         this.v1.copy(sword.base).lerp(sword.tip, Math.random());
         this.v2.set((Math.random() - 0.5) * 0.1, 0.3 + Math.random() * 0.3, (Math.random() - 0.5) * 0.1);
         this.particles.emit(this.v1, this.v2, Math.random() < 0.3 ? WHITE : this.accent, 0.35, 0.5, -0.4);
@@ -3818,14 +4143,17 @@ export class CombatSystem extends createSystem({
 
   /** A thrown object lands: blast damage around it, extra on a direct hit. */
   private psiImpact(at: Vector3, hit: Drone | null, thrown: Drone | null): void {
-    const radius = 1 + 0.2 * this.level('psion-quake');
+    const inferno = this.weaponDef.id === 'psion-inferno';
+    const radius = 1 + 0.2 * this.level('psion-quake') + (inferno ? 0.6 : 0);
     const damage = 3 + Math.ceil(this.level('psion-mass') / 2);
     this.impactPoint.copy(at);
     for (const drone of this.drones) {
       if (drone.state === 'off' || drone === thrown) continue;
       if (drone.object.position.distanceTo(this.impactPoint) > radius + ENEMIES[drone.kind].radius) continue;
+      if (inferno) drone.burn = Math.max(drone.burn, 3);
       this.damageDrone(drone, drone === hit ? damage + 2 : damage);
     }
+    if (inferno) this.particles.burst(this.impactPoint, ORANGE, 50, 3, 0.7, this.v2);
     const p = this.impactPoint;
     this.flashes.spawn(p, this.accent, 0.2, 1.4 + radius * 0.3, 0.45);
     this.flashes.spawn(p, WHITE, 0.1, 0.6, 0.15);
@@ -3855,6 +4183,10 @@ export class CombatSystem extends createSystem({
       }
     }
     bolt.kind = 'bolt';
+    bolt.blast = 0;
+    bolt.zap = false;
+    bolt.burn = 0;
+    bolt.homing = 1;
     bolt.radius = 0.06;
     bolt.damage = 1 + Math.floor(this.level('arc-power') / 2);
     bolt.speed = BOLT_SPEED;
@@ -3899,7 +4231,7 @@ export class CombatSystem extends createSystem({
         this.retireBolt(bolt);
         continue;
       }
-      this.steer(bolt, Math.min(1, dt * HOMING_RATE));
+      this.steer(bolt, Math.min(1, dt * HOMING_RATE * bolt.homing));
       if (bolt.gravity > 0) bolt.velocity.y -= bolt.gravity * this.gravityScale * dt;
       bolt.previous.copy(bolt.position);
       bolt.position.addScaledVector(bolt.velocity, dt);
@@ -3908,7 +4240,8 @@ export class CombatSystem extends createSystem({
       bolt.object.lookAt(this.v1);
       this.v2.set(0, 0, 0);
       const crescent = bolt.kind === 'crescent';
-      this.particles.emit(bolt.previous, this.v2, bolt.kind === 'bolt' ? CYAN : this.accent, crescent ? 0.3 : 0.18, 0);
+      this.particles.emit(bolt.previous, this.v2, bolt.blast > 0 ? ORANGE : bolt.zap ? VIOLET : bolt.kind === 'bolt' ? CYAN : this.weaponColor, crescent ? 0.3 : 0.18, 0);
+      if (bolt.blast > 0 && bolt.kind === 'bolt') this.particles.emit(bolt.previous, this.v2.set(0, 0.3, 0), DUST, 0.6, 0.5, -0.2);
       if (crescent) bolt.crescent.scale.setScalar(bolt.scale * (1 + (BOLT_LIFE - bolt.life) * 1.2));
 
 
@@ -3918,7 +4251,15 @@ export class CombatSystem extends createSystem({
         if (this.segmentHits(bolt.previous, bolt.position, drone.object.position, radius)) {
           if (crescent) this.markHit('slice', drone.object.position, bolt.velocity, bolt.object.up);
           else this.markHit('blast', drone.object.position, bolt.velocity);
+          if (bolt.burn > 0) drone.burn = Math.max(drone.burn, bolt.burn);
+          this.v4.copy(drone.object.position);
           this.damageDrone(drone, bolt.damage);
+          if (bolt.zap) this.chainLightning(this.v4, drone);
+          if (bolt.blast > 0) {
+            this.explodeAt(bolt.position, bolt.blast, 2);
+            this.retireBolt(bolt);
+            break;
+          }
           // Crescents and piercing arrows cut through what they hit.
           if (bolt.pierceLeft > 0) {
             bolt.pierceLeft -= 1;
@@ -4331,6 +4672,8 @@ export class CombatSystem extends createSystem({
         if (drone.portalMaterial.opacity <= 0) drone.portal.visible = false;
       }
 
+      if (drone.burn > 0 || drone.shock > 0) this.updateAfflictions(drone, dt);
+      if ((drone.state as DroneState) === 'off') continue;
       if (drone.state === 'boss') {
         this.updateBoss(drone, dt, time);
         continue;
@@ -5004,7 +5347,7 @@ export class CombatSystem extends createSystem({
   }
 
   /** Records how the next hit lands (style, point, travel direction, cut plane). */
-  private markHit(style: 'blast' | 'slice' | 'impale', point: Vector3, direction: Vector3, cutNormal?: Vector3): void {
+  private markHit(style: 'blast' | 'slice' | 'impale' | 'dot', point: Vector3, direction: Vector3, cutNormal?: Vector3): void {
     this.hitStyle = style;
     this.hitPoint.copy(point);
     this.hitDir.copy(direction).normalize();
@@ -5031,7 +5374,7 @@ export class CombatSystem extends createSystem({
     if (drone.kind === 'boss') this.chargeOverdrive(0.02);
     if (drone.hp > 0) {
       this.flashes.spawn(drone.object.position, WHITE, 0.1, drone.kind === 'boss' ? 0.8 : 0.4, 0.12);
-      if (ENEMIES[drone.kind].ground) {
+      if (ENEMIES[drone.kind].ground && this.hitStyle !== 'dot') {
         this.bleed(this.hitPoint, this.hitDir, 14);
         // Flinch: knocked back a step, a hit interrupts a wind-up.
         drone.stagger = drone.kind === 'titan' ? 0.15 : 0.35;

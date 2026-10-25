@@ -168,6 +168,31 @@ export class Sfx {
     this.tone('sawtooth', 600, 120, 0.12, 0.15);
   }
 
+  /** Laser beam burning a target. */
+  laser(): void {
+    this.tone('sawtooth', 180, 160, 0.09, 0.05);
+    this.tone('square', 1400, 1300, 0.06, 0.02);
+  }
+
+  /** Shotgun blast and pump. */
+  shotgun(): void {
+    this.hiss(0.35, 3500, 0.7);
+    this.tone('sawtooth', 160, 50, 0.3, 0.45);
+    this.tone('square', 900, 700, 0.05, 0.08, 0.32);
+    this.tone('square', 700, 900, 0.05, 0.08, 0.42);
+  }
+
+  /** One minigun / SMG round: short and light. */
+  rattle(): void {
+    this.tone('square', 900 + Math.random() * 200, 200, 0.05, 0.07);
+    this.hiss(0.05, 4000, 0.12);
+  }
+
+  /** Burning tick. */
+  sizzle(): void {
+    this.hissHigh(0.12, 0.12);
+  }
+
   /** Two blades crossing: a bright metallic ring. */
   clang(): void {
     this.tone('triangle', 2350, 2200, 0.45, 0.12);

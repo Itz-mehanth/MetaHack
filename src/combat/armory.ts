@@ -5,7 +5,6 @@ import {
   CylinderGeometry,
   DoubleSide,
   Group,
-  type Material,
   Mesh,
   MeshBasicMaterial,
   type Object3D,
@@ -15,8 +14,6 @@ import {
   Vector3,
 } from '@iwsdk/core';
 import { createGlowSprite } from './vfx.js';
-
-const WHITE = new Color('#FFFFFF');
 
 function holo(color: Color, opacity: number, wireframe = false): MeshBasicMaterial {
   return new MeshBasicMaterial({
@@ -126,29 +123,11 @@ export class Armory {
     this.scanMaterial.color.copy(this.color);
     this.aura.set(tier, this.color);
     if (this.display) this.holder.remove(this.display);
-    // Hologram look: translucent glowing body plus a wireframe overlay. A
-    // model is converted once; later calls just recolour its materials.
-    let materials = model.userData.holo as { body: MeshBasicMaterial; wire: MeshBasicMaterial } | undefined;
-    if (materials == null) {
-      materials = { body: holo(this.color, 0.4), wire: holo(this.color, 0.55, true) };
-      const meshes: Mesh[] = [];
-      model.traverse((o) => {
-        const mesh = o as Mesh;
-        if (mesh.isMesh && mesh.name !== 'Outline') meshes.push(mesh);
-        if (o.name === 'Outline') o.visible = false;
-      });
-      for (const mesh of meshes) {
-        mesh.material = materials.body as Material;
-        mesh.add(new Mesh(mesh.geometry, materials.wire));
-      }
-      model.userData.holo = materials;
-      model.position.set(0, 0, 0);
-      model.scale.setScalar(1);
-      model.rotation.set(0, model.rotation.y, 0);
-    }
-    materials.body.color.copy(this.color).multiplyScalar(0.55).lerp(WHITE, 0.05);
-    materials.body.opacity = 0.28 + tier * 0.05;
-    materials.wire.color.copy(this.color);
+    // The real weapon, with its real materials, standing in the projector beam.
+    model.traverse((o) => {
+      if (o.name === 'Outline') o.visible = false;
+    });
+    model.visible = true;
     const display = new Group();
     display.add(model);
     // Fit to about 0.45 m and centre it over the projector.

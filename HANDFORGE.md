@@ -42,6 +42,13 @@ throughout (no Marvel or other third-party names/designs).
 - Worlds: every level has its own sky (worlds.ts: palette, nebula, planet
   or black hole, rings, stars). VR shows it as the whole sky; MR tears it
   into the room (rift grows at the boss, closes on victory).
+- Arsenal (arsenal.ts): 2-4 weapons per hero, unlocked by clearing that
+  hero's levels and bought in the ARMORY (tabs WEAPONS / UPGRADES / SKINS);
+  the projector shows the real weapon model. HAVOC pistol/SMG/shotgun/
+  minigun; ARC repulsor/proton beam/swarm rockets; TALON steel/molten/phase;
+  TEMPEST thunder/inferno/godbreaker; ORION longbow/volley/blast/storm;
+  WEAVER silk/electro/burst; RONIN katana/flame/void; PSION mind/inferno.
+  Burn and shock damage-over-time; explosions; quake rings.
 - Twists (twists.ts): each level adds a rule: METEOR RAIN / LIGHTNING
   STORM (warning circles, impacts hurt aliens and the player), LOW GRAVITY
   (bodies and gibs float), BLACKOUT (lights + HDRI dimmed, palm light only),

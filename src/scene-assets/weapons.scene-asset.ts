@@ -167,3 +167,95 @@ export function createPsiDisplay(): Group {
   }
   return root;
 }
+
+export type GunType = 'smg' | 'shotgun' | 'minigun';
+
+/**
+ * HAVOC's guns, held like the pistol: origin at the grip, barrel along +Z,
+ * top along +Y, a `Muzzle` at the barrel tip. The minigun's spinning
+ * barrel cluster is `Barrels`; the shotgun's pump is `Pump`.
+ */
+export function createGun(type: GunType): Group {
+  const root = new Group();
+  root.name = `Gun-${type}`;
+  const metal = new MeshStandardMaterial({ color: '#2A2D36', roughness: 0.28, metalness: 0.92 });
+  const polymer = new MeshStandardMaterial({ color: '#16171C', roughness: 0.75, metalness: 0.15 });
+  const accentColor = type === 'smg' ? '#3DFF8A' : type === 'shotgun' ? '#FF3B5C' : '#FFD23F';
+  const energy = glow(accentColor);
+  const part = (geometry: ConstructorParameters<typeof Mesh>[0], material: MeshStandardMaterial, x: number, y: number, z: number, rx = 0) => {
+    const mesh = new Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.x = rx;
+    root.add(mesh);
+    return mesh;
+  };
+  const tube = (r: number, length: number, material: MeshStandardMaterial, x: number, y: number, z: number) =>
+    part(new CylinderGeometry(r, r, length, 14), material, x, y, z, Math.PI / 2);
+  // Pistol grip with a trigger guard.
+  part(new BoxGeometry(0.03, 0.1, 0.045), polymer, 0, 0, 0, 0.25);
+  part(new TorusGeometry(0.02, 0.004, 4, 12, Math.PI), metal, 0, 0.022, 0.03).rotation.y = Math.PI / 2;
+  const muzzle = new Group();
+  muzzle.name = 'Muzzle';
+  if (type === 'smg') {
+    part(new BoxGeometry(0.04, 0.06, 0.22), metal, 0, 0.065, 0.06).name = 'Body';
+    part(new BoxGeometry(0.026, 0.12, 0.035), polymer, 0, -0.02, 0.1, 0.12);
+    part(new BoxGeometry(0.022, 0.06, 0.025), polymer, 0, 0.01, 0.17, -0.1);
+    tube(0.02, 0.12, metal, 0, 0.068, 0.23);
+    for (let i = 0; i < 4; i += 1) tube(0.0215, 0.006, polymer, 0, 0.068, 0.19 + i * 0.022);
+    part(new BoxGeometry(0.03, 0.008, 0.16), metal, 0, 0.1, 0.06);
+    part(new BoxGeometry(0.024, 0.03, 0.04), metal, 0, 0.12, 0.05);
+    part(new BoxGeometry(0.018, 0.02, 0.004), energy, 0, 0.125, 0.07);
+    part(new BoxGeometry(0.044, 0.012, 0.12), energy, 0, 0.04, 0.06);
+    part(new BoxGeometry(0.02, 0.025, 0.14), polymer, 0, 0.06, -0.09);
+    muzzle.position.set(0, 0.068, 0.3);
+  } else if (type === 'shotgun') {
+    part(new BoxGeometry(0.042, 0.065, 0.2), metal, 0, 0.065, 0.05).name = 'Body';
+    tube(0.017, 0.42, metal, 0, 0.078, 0.34);
+    tube(0.014, 0.34, metal, 0, 0.048, 0.3);
+    const pump = new Group();
+    pump.name = 'Pump';
+    const grip = new Mesh(new CylinderGeometry(0.022, 0.022, 0.1, 12), polymer);
+    grip.rotation.x = Math.PI / 2;
+    pump.add(grip);
+    for (let i = 0; i < 4; i += 1) {
+      const ridge = new Mesh(new TorusGeometry(0.0225, 0.003, 4, 14), polymer);
+      ridge.position.z = -0.035 + i * 0.023;
+      pump.add(ridge);
+    }
+    pump.position.set(0, 0.048, 0.24);
+    root.add(pump);
+    part(new BoxGeometry(0.035, 0.06, 0.22), polymer, 0, 0.05, -0.15, 0.12);
+    for (let i = 0; i < 4; i += 1) part(new CylinderGeometry(0.008, 0.008, 0.03, 8), energy, 0.024, 0.07, -0.02 + i * 0.022);
+    part(new BoxGeometry(0.006, 0.008, 0.008), energy, 0, 0.099, 0.53);
+    muzzle.position.set(0, 0.078, 0.56);
+  } else {
+    // Minigun: motor housing, six barrels around a spinning axis, ammo drum.
+    part(new CylinderGeometry(0.055, 0.06, 0.18, 16), metal, 0, 0.07, 0.07, Math.PI / 2).name = 'Body';
+    const barrels = new Group();
+    barrels.name = 'Barrels';
+    barrels.position.set(0, 0.07, 0.17);
+    for (let i = 0; i < 6; i += 1) {
+      const a = (i / 6) * Math.PI * 2;
+      const barrel = new Mesh(new CylinderGeometry(0.009, 0.009, 0.36, 8), metal);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(Math.cos(a) * 0.026, Math.sin(a) * 0.026, 0.18);
+      barrels.add(barrel);
+    }
+    for (const z of [0.06, 0.3]) {
+      const clamp = new Mesh(new CylinderGeometry(0.04, 0.04, 0.02, 16), metal);
+      clamp.rotation.x = Math.PI / 2;
+      clamp.position.z = z;
+      barrels.add(clamp);
+    }
+    const coil = new Mesh(new TorusGeometry(0.045, 0.006, 6, 24), energy);
+    coil.position.z = 0.02;
+    barrels.add(coil);
+    root.add(barrels);
+    part(new CylinderGeometry(0.06, 0.06, 0.06, 18), polymer, -0.075, 0.05, 0.04).rotation.z = Math.PI / 2;
+    part(new TorusGeometry(0.06, 0.005, 6, 24), energy, -0.105, 0.05, 0.04).rotation.y = Math.PI / 2;
+    part(new BoxGeometry(0.02, 0.05, 0.12), polymer, 0, 0.14, 0.06);
+    muzzle.position.set(0, 0.07, 0.53);
+  }
+  root.add(muzzle);
+  return root;
+}

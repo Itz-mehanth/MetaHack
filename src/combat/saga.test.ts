@@ -54,3 +54,22 @@ describe('twists', () => {
     }
   });
 });
+
+describe('arsenal', () => {
+  it('gates weapons by story progress and coins, then equips them', async () => {
+    const { buyWeapon, equippedWeapon, weaponsFor } = await import('./arsenal.js');
+    const { defaultProfile, STAGES } = await import('./progression.js');
+    const p = defaultProfile();
+    p.coins = 5000;
+    expect(equippedWeapon(p, 'havoc').id).toBe('havoc-pistol');
+    expect(buyWeapon(p, 'havoc-smg')).toBe(false);
+    p.stars[STAGES.find((s) => s.world.id === 'scrap-wastes')!.id] = 1;
+    expect(buyWeapon(p, 'havoc-smg')).toBe(true);
+    expect(p.coins).toBe(4500);
+    expect(equippedWeapon(p, 'havoc').id).toBe('havoc-smg');
+    for (const hero of ['arc', 'talon', 'tempest', 'orion', 'weaver', 'havoc', 'ronin', 'psion'] as const) {
+      expect(weaponsFor(hero)[0].price).toBe(0);
+      expect(weaponsFor(hero).length).toBeGreaterThan(1);
+    }
+  });
+});
