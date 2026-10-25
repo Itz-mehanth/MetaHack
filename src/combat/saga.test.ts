@@ -73,3 +73,15 @@ describe('arsenal', () => {
     }
   });
 });
+
+describe('champions', () => {
+  it('ends every non-boss level with a named champion', async () => {
+    const { STAGES } = await import('./progression.js');
+    const { CHAMPIONS } = await import('./twists.js');
+    for (const stage of STAGES.filter((s) => s.number < 3)) {
+      const last = stage.waves[stage.waves.length - 1];
+      expect(last.champion).toBeDefined();
+      expect(CHAMPIONS[stage.id]).toBeTruthy();
+    }
+  });
+});

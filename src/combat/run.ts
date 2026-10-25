@@ -20,6 +20,8 @@ export const BURST_GAP = 0.18;
 export interface SpawnOrder {
   kind: EnemyKind;
   speed: number;
+  /** A level's champion (boss-like elite). */
+  champion?: boolean;
 }
 
 export interface RunOptions {
@@ -115,12 +117,13 @@ export class Run {
     } else if (this.phase === 'cleared' && this.phaseTime >= CLEARED_SECONDS) {
       this.wave += 1;
       this.enter('intro');
-    } else if (this.phase === 'fighting' && this.waveDef.boss && !this.bossSpawned) {
-      // The boss arrives first and counts as alive, but not toward the wave count.
+    } else if (this.phase === 'fighting' && (this.waveDef.boss || this.waveDef.champion) && !this.bossSpawned) {
+      // The boss (or champion) arrives first and counts as alive, but not toward the wave count.
       this.bossSpawned = true;
       this.alive += 1;
       this.spawnTimer = 3;
-      return { kind: 'boss', speed: 0 };
+      if (this.waveDef.boss) return { kind: 'boss', speed: 0 };
+      return { kind: this.waveDef.champion!, speed: this.waveDef.speed * this.speedScale * 0.8, champion: true };
     } else if (this.phase === 'fighting' && this.spawned < this.waveDef.count) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {

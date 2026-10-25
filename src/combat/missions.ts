@@ -99,4 +99,6 @@ export interface WaveDef {
   readonly burst?: number;
   /** The region's boss joins this wave; it must fall before the wave ends. */
   readonly boss?: boolean;
+  /** A giant elite of this kind closes the level (non-boss levels). */
+  readonly champion?: EnemyKind;
 }

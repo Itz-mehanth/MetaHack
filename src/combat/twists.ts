@@ -48,3 +48,28 @@ export const TWISTS: Readonly<Record<string, TwistId>> = {
 export function twistFor(stageId: string): TwistId {
   return TWISTS[stageId] ?? 'none';
 }
+
+/**
+ * Every non-boss level ends with a champion: a giant elite who arrives
+ * after a warning, with a health bar and a name.
+ */
+export const CHAMPIONS: Readonly<Record<string, string>> = {
+  'neon-grid-1': 'CIRCUIT BRUTE',
+  'neon-grid-2': 'NULL WARDEN',
+  'ember-foundry-1': 'SLAG HOUND',
+  'ember-foundry-2': 'FURNACE KING',
+  'storm-peak-1': 'THUNDERHIDE',
+  'storm-peak-2': 'GALE REAPER',
+  'frost-spire-1': 'RIME STALKER',
+  'frost-spire-2': 'GLACIER LORD',
+  'void-rift-1': 'HOLLOW SPAWN',
+  'void-rift-2': 'RIFT TYRANT',
+  'scrap-wastes-1': 'RUST GOLIATH',
+  'scrap-wastes-2': 'JUNK TITAN',
+  'moon-temple-1': 'SHADOW BLADE',
+  'moon-temple-2': 'MOON DUELIST',
+  'sky-ruins-1': 'DRIFT GIANT',
+  'sky-ruins-2': 'GRAVITON',
+  'iron-bastion-1': 'WALL BREAKER',
+  'iron-bastion-2': 'SHELL SHOCK',
+};

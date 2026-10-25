@@ -1,3 +1,5 @@
+import type { TransitStyle } from './transit.js';
+
 /**
  * Every level is a different world: its own sky, nebula, planet or moon,
  * ring, stars and how far it tears into the player's room in MR. Pure data,
@@ -82,4 +84,25 @@ export const WORLD_LOOKS: Readonly<Record<string, WorldLook>> = {
 
 export function lookFor(stageId: string, worldId: string): WorldLook {
   return WORLD_LOOKS[stageId] ?? WORLD_LOOKS[`${worldId}-1`] ?? WORLD_LOOKS.oblivion;
+}
+
+/** How the player travels to each region's levels (level 2 takes a wormhole). */
+const TRANSIT: Readonly<Record<string, TransitStyle>> = {
+  'neon-grid': 'warp',
+  'ember-foundry': 'fire',
+  'storm-peak': 'sky',
+  'frost-spire': 'sky',
+  'void-rift': 'blackhole',
+  'scrap-wastes': 'warp',
+  'moon-temple': 'wormhole',
+  'sky-ruins': 'sky',
+  'iron-bastion': 'sky',
+  oblivion: 'blackhole',
+};
+
+export function transitFor(worldId: string, level: number): TransitStyle {
+  const style = TRANSIT[worldId] ?? 'warp';
+  if (level === 2) return style === 'wormhole' ? 'warp' : 'wormhole';
+  if (level === 3 && style !== 'blackhole') return style === 'sky' ? 'blackhole' : style;
+  return style;
 }

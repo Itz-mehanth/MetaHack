@@ -168,6 +168,37 @@ export class Sfx {
     this.tone('sawtooth', 600, 120, 0.12, 0.15);
   }
 
+  /** The jump between worlds: a long rising whoosh, then a boom. */
+  warp(): void {
+    if (this.ctx == null || this.master == null || this.noise == null) return;
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.value = 2;
+    filter.frequency.setValueAtTime(200, t);
+    filter.frequency.exponentialRampToValueAtTime(3500, t + 3.8);
+    const amp = this.ctx.createGain();
+    amp.gain.setValueAtTime(0.001, t);
+    amp.gain.exponentialRampToValueAtTime(0.5, t + 3.6);
+    amp.gain.exponentialRampToValueAtTime(0.001, t + 4.3);
+    src.connect(filter).connect(amp).connect(this.master);
+    src.start(t);
+    src.stop(t + 4.4);
+    this.tone('sine', 60, 240, 3.8, 0.15);
+    this.tone('sine', 90, 30, 0.9, 0.5, 4.1);
+  }
+
+  /** Boss warning: a two-tone siren. */
+  klaxon(): void {
+    for (let i = 0; i < 4; i += 1) {
+      this.tone('square', 660, 660, 0.28, 0.08, i * 0.6);
+      this.tone('square', 440, 440, 0.28, 0.08, i * 0.6 + 0.3);
+    }
+  }
+
   /** Laser beam burning a target. */
   laser(): void {
     this.tone('sawtooth', 180, 160, 0.09, 0.05);

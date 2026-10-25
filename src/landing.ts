@@ -94,7 +94,7 @@ const HTML = () => `
   <div class="kicker">
     <span class="badge">HAND TRACKING ONLY</span>
     <span class="badge alt">MIXED REALITY</span>
-    <span class="badge alt2">9 HEROES &middot; 27 MISSIONS &middot; 9 BOSSES</span>
+    <span class="badge alt2">9 HEROES &middot; 27 MISSIONS &middot; 27 BOSSES</span>
   </div>
   <div class="burst"><h1>SURGE</h1></div>
   <div class="sub">HANDS OF HEROES</div>

@@ -67,6 +67,7 @@ function buildWaves(world: World, worldIndex: number, stage: number): WaveDef[] 
       kinds,
       burst: swarm ? 3 + Math.min(2, Math.floor(w / 2)) : undefined,
       boss: stage === 2 && last ? true : undefined,
+      champion: stage < 2 && last ? (world.enemies[0] === 'blade' ? 'blade' : world.enemies.includes('titan') ? 'titan' : 'armored') : undefined,
     });
   }
   return waves;

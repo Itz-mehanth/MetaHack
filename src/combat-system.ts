@@ -32,8 +32,9 @@ import { PsiLink } from './combat/telekinesis.js';
 import { CLAP_TIP, Coach, HERO_TIPS, type Tip } from './combat/coach.js';
 import { BloodPools, BloodScreen, captureParts, Gibs, type Part, type PartName, restorePart } from './combat/bodies.js';
 import { Galaxy } from './combat/galaxy.js';
-import { lookFor, WORLD_LOOKS } from './combat/worlds.js';
-import { TWIST_INFO, type TwistId, twistFor } from './combat/twists.js';
+import { lookFor, transitFor, WORLD_LOOKS } from './combat/worlds.js';
+import { CHAMPIONS, TWIST_INFO, type TwistId, twistFor } from './combat/twists.js';
+import { Transit } from './combat/transit.js';
 import { ARSENAL, equippedWeapon, type WeaponDef } from './combat/arsenal.js';
 import { Erasure } from './combat/erasure.js';
 import {
@@ -86,7 +87,7 @@ import { chapterFor, chapterForWorld, type Line, type LevelStory, levelStory } f
 import { createCocoon, WebStrand } from './combat/web.js';
 import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
-import { type Phase, Run } from './combat/run.js';
+import { type Phase, Run, type SpawnOrder } from './combat/run.js';
 import { Sfx } from './combat/sfx.js';
 import { createGlowSprite, Flashes, getGlowTexture, Particles } from './combat/vfx.js';
 
@@ -334,6 +335,9 @@ interface Drone {
   dashCool: number;
   /** Dead body skewered on hand `heldBy`'s blade (-1: none). */
   heldBy: number;
+  /** A level champion: scale and name. */
+  size: number;
+  champion: string;
   /** Burning / electrocuted seconds left, and the damage-tick timer. */
   burn: number;
   shock: number;
@@ -512,6 +516,9 @@ export class CombatSystem extends createSystem({
   private gunSpin = 0;
   private gunShots = 0;
   private hammerPainted = false;
+  private transit = new Transit();
+  /** A boss or champion announced by the siren, arriving shortly. */
+  private pending: (SpawnOrder & { t: number }) | null = null;
   /** VANGUARD's shield: worn on the off-hand forearm, thrown, or flying home. */
   private shield: Object3D | null = null;
   private shieldState: 'worn' | 'flying' | 'returning' = 'worn';
@@ -871,7 +878,7 @@ export class CombatSystem extends createSystem({
       this.root.add(rock, marker);
       this.meteors.push({ rock, marker, markerMaterial, target: new Vector3(), t: 0, state: 'off' as const });
     }
-    this.root.add(this.gore.points, this.galaxy.group);
+    this.root.add(this.gore.points, this.galaxy.group, this.transit.mesh);
 
     const xr = this.world.renderer.xr;
     const onSessionStart = () => {
@@ -964,6 +971,8 @@ export class CombatSystem extends createSystem({
           dash: 0,
           dashCool: 0,
           heldBy: -1,
+          size: 1,
+          champion: '',
           burn: 0,
           shock: 0,
           dotTimer: 0,
@@ -1038,6 +1047,8 @@ export class CombatSystem extends createSystem({
         dash: 0,
         dashCool: 0,
         heldBy: -1,
+        size: 1,
+        champion: '',
         burn: 0,
         shock: 0,
         dotTimer: 0,
@@ -1222,6 +1233,7 @@ export class CombatSystem extends createSystem({
       if (boss) boss.hp = boss.maxHp * f;
     };
     (window as unknown as { __surgeSkip: () => void }).__surgeSkip = () => this.endTransmission();
+    (window as unknown as { __surgeChampion: () => void }).__surgeChampion = () => this.queueSpawn({ kind: 'titan', speed: 0.8, champion: true });
     (window as unknown as { __surgeClear: () => void }).__surgeClear = () => {
       let k = 0;
       for (const drone of this.drones) {
@@ -1317,7 +1329,8 @@ export class CombatSystem extends createSystem({
 
     if (!this.paused) {
       const order = this.run.update(dt);
-      if (order) this.spawnDrone(order.kind, order.speed);
+      if (order) this.queueSpawn(order);
+      this.updatePending(dt);
       this.updateDrones(dt, time);
       this.updateBlobs();
       this.updateBolts(dt);
@@ -1359,6 +1372,7 @@ export class CombatSystem extends createSystem({
       this.damage.visible = this.damageMaterial.opacity > 0;
     }
     this.blood.update(realDt, this.run.phase === 'fighting' && this.run.health <= 1 ? 1 : this.run.phase === 'fighting' && this.run.health <= 2 ? 0.4 : 0);
+    this.transit.update(realDt, this.head);
     this.updateHud(realDt);
   }
 
@@ -1524,8 +1538,24 @@ export class CombatSystem extends createSystem({
       const chapter = chapterForWorld(stage.world.id);
       if (chapter) intro = [chapterCall(chapter.region, HEROES.find((h) => h.id === hero)!.name), ...intro];
     }
-    if (intro.length > 0) this.beginTransmission(intro, () => this.launchStage(hero, stage));
-    else this.launchStage(hero, stage);
+    const go = () => this.travel(stage, () => this.launchStage(hero, stage));
+    if (intro.length > 0) this.beginTransmission(intro, go);
+    else go();
+  }
+
+  /** The jump to `stage`'s world: a few seconds in the travel tunnel. */
+  private travel(stage: Stage, done: () => void): void {
+    const saga = isSagaStage(stage);
+    const look = saga ? WORLD_LOOKS.oblivion : lookFor(stage.id, stage.world.id);
+    const style = saga ? 'blackhole' : transitFor(stage.world.id, stage.number);
+    this.panel.hide();
+    this.syncCarousel();
+    this.syncMap();
+    this.syncArmory();
+    this.syncGalaxy();
+    this.world.camera.getWorldDirection(this.forward);
+    this.transit.start(style, style === 'sky' ? look.horizon : look.accent, style === 'sky' ? look.top : look.horizon, this.forward, done);
+    this.sfx.warp();
   }
 
   /** Starts `stage` with `hero`, applying difficulty, upgrades and skin. */
@@ -1560,6 +1590,7 @@ export class CombatSystem extends createSystem({
     for (const pickup of this.pickups) this.retirePickup(pickup);
     this.xCooldown = 0;
     this.resetScript();
+    this.pending = null;
     this.equipHero(hero);
     // Each level is its own world, tearing through the room in MR.
     const look = isSagaStage(stage) ? WORLD_LOOKS.oblivion : lookFor(stage.id, stage.world.id);
@@ -3051,6 +3082,54 @@ export class CombatSystem extends createSystem({
     if (quiet) return;
     this.flashes.spawn(origin, this.accent, 0.05, 0.35, 0.18);
     this.sfx.crescent();
+  }
+
+  // ---------------------------------------------------------------- arrivals
+
+  /** Bosses and champions are announced: siren, warning, then the arrival. */
+  private queueSpawn(order: SpawnOrder): void {
+    if (order.kind !== 'boss' && !order.champion) {
+      this.spawnDrone(order.kind, order.speed);
+      return;
+    }
+    this.pending = { ...order, t: 0 };
+    this.sfx.klaxon();
+    this.riftLevel = Math.min(0.6, this.riftLevel + 0.1);
+    this.v1.copy(this.head).addScaledVector(this.forward, 1.6);
+    this.comic.pop('WARNING!', this.v1, MAGENTA, 1.0);
+  }
+
+  private updatePending(dt: number): void {
+    const pending = this.pending;
+    if (pending == null) return;
+    pending.t += dt;
+    // Red alarm pulses at the edge of the view.
+    if (Math.floor(pending.t / 0.6) !== Math.floor((pending.t - dt) / 0.6)) {
+      this.damageMaterial.opacity = 0.22;
+      this.damage.visible = true;
+    }
+    if (pending.t < 2.6) return;
+    this.pending = null;
+    if (pending.kind === 'boss') {
+      this.spawnBoss();
+      this.slowmo = Math.max(this.slowmo, 0.6);
+      return;
+    }
+    const drone = this.spawnDrone(pending.kind, pending.speed);
+    if (drone == null) return;
+    // A champion: bigger, much tougher, named, with a burning portal.
+    const def = ENEMIES[drone.kind];
+    drone.size = drone.kind === 'titan' ? 1.25 : 1.5;
+    drone.champion = CHAMPIONS[this.run.stage.id] ?? 'CHAMPION';
+    drone.maxHp = def.hp * 6 + 8;
+    drone.hp = drone.maxHp;
+    drone.spawn.y = def.ground!.chest * drone.size;
+    drone.portal.scale.setScalar(0.01);
+    this.flashes.spawn(drone.spawn, ENEMY_COLOR.boss, 0.4, 3, 0.8);
+    this.particles.burst(drone.spawn, ENEMY_COLOR.boss, 120, 3, 0.8, this.v2);
+    this.sfx.thunder();
+    this.comic.pop(drone.champion, this.v1.copy(drone.spawn).setY(drone.spawn.y + 1.2), ENEMY_COLOR.boss, 0.8);
+    this.taunt = `${drone.champion} has arrived!`;
   }
 
   // ---------------------------------------------------------------- arsenal
@@ -4941,7 +5020,7 @@ export class CombatSystem extends createSystem({
       }
       if (drone.state === 'emerging') {
         const p = Math.min(1, drone.t / EMERGE_TIME);
-        object.scale.setScalar(p);
+        object.scale.setScalar(p * drone.size);
         object.position.copy(drone.spawn).addScaledVector(drone.normal, 0.35 * p);
         if (ENEMIES[drone.kind].ground) this.faceHead(object);
         else object.lookAt(this.head);
@@ -5043,6 +5122,7 @@ export class CombatSystem extends createSystem({
   private updateWalker(drone: Drone, dt: number, time: number): void {
     const def = ENEMIES[drone.kind];
     const ground = def.ground!;
+    const chest = ground.chest * drone.size;
     const object = drone.object;
     const rig = drone.rig;
     this.v1.set(this.head.x - object.position.x, 0, this.head.z - object.position.z);
@@ -5057,21 +5137,21 @@ export class CombatSystem extends createSystem({
       drone.cocoon.position.copy(object.position);
       drone.cocoon.scale.setScalar(def.radius * 1.35 * (1 + Math.sin(time * 6) * 0.04));
       drone.cocoon.rotation.y += dt * 0.8;
-      object.position.y = ground.chest;
+      object.position.y = chest;
       return;
     }
     if (drone.dropY > 0) {
       // Falling from the ceiling; a heavy landing.
       drone.dropV += 9.8 * this.gravityScale * dt;
       drone.dropY -= drone.dropV * dt;
-      object.position.y = Math.max(ground.chest, drone.dropY);
+      object.position.y = Math.max(chest, drone.dropY);
       if (rig) {
         rig.legL.rotation.x = -0.4;
         rig.legR.rotation.x = 0.3;
         rig.armL.rotation.x = rig.armLRest - 1.2;
         rig.armR.rotation.x = rig.armRRest - 1.2;
       }
-      if (drone.dropY <= ground.chest) {
+      if (drone.dropY <= chest) {
         drone.dropY = 0;
         drone.stagger = 0.35;
         drone.knock.set(0, 0, 0);
@@ -5086,14 +5166,14 @@ export class CombatSystem extends createSystem({
       const k = drone.stagger / 0.35;
       drone.stagger -= dt;
       object.position.addScaledVector(drone.knock, dt * 1.4 * k);
-      object.position.y = ground.chest;
+      object.position.y = chest;
       if (rig) rig.upper.rotation.x = rig.upperRest - 0.45 * k;
       return;
     }
     if (drone.stun > 0) {
       // Parried: reeling, wide open.
       drone.stun -= dt;
-      object.position.y = ground.chest - 0.04;
+      object.position.y = chest - 0.04;
       object.rotation.z = Math.sin(time * 9) * 0.06;
       if (rig) {
         rig.upper.rotation.x = rig.upperRest - 0.35;
@@ -5158,7 +5238,7 @@ export class CombatSystem extends createSystem({
       }
       this.updateMelee(drone, dt);
     }
-    object.position.y = ground.chest;
+    object.position.y = chest;
     if (rig == null) return;
     // Walk cycle.
     const cadence = drone.kind === 'swarmer' ? 9 : drone.kind === 'titan' ? 4.5 : 6.5;
@@ -5180,7 +5260,7 @@ export class CombatSystem extends createSystem({
       rig.upper.rotation.y = s * amp * 0.25;
     }
     object.rotation.z = Math.sin(p) * amp * 0.06;
-    object.position.y = ground.chest + Math.abs(Math.cos(p)) * (moving ? (this.gravityScale < 1 ? 0.12 : 0.03) : 0.004) - (moving ? 0.015 : 0);
+    object.position.y = chest + Math.abs(Math.cos(p)) * (moving ? (this.gravityScale < 1 ? 0.12 : 0.03) : 0.004) - (moving ? 0.015 : 0);
   }
 
   /** Telegraphed strike: wind up, swing (dodge by stepping back), recover. */
@@ -5495,8 +5575,8 @@ export class CombatSystem extends createSystem({
     const def = ENEMIES[drone.kind];
     const object = drone.object;
     const rig = drone.rig;
-    const chest = def.ground!.chest;
-    const fall = drone.kind === 'titan' ? DEATH_FALL * 1.5 : DEATH_FALL;
+    const chest = def.ground!.chest * drone.size;
+    const fall = drone.kind === 'titan' || drone.size > 1 ? DEATH_FALL * 1.5 : DEATH_FALL;
     const before = drone.dying;
     drone.dying += dt;
     const p = Math.min(1, drone.dying / fall);
@@ -5533,6 +5613,9 @@ export class CombatSystem extends createSystem({
   /** Death over: hide the body and reassemble it for the next spawn. */
   private endDeath(drone: Drone): void {
     for (const hand of this.hands) if (hand.skewer === drone) hand.skewer = null;
+    drone.size = 1;
+    drone.champion = '';
+    drone.object.scale.setScalar(1);
     drone.heldBy = -1;
     drone.flying = false;
     drone.dying = -1;
@@ -5630,10 +5713,16 @@ export class CombatSystem extends createSystem({
       this.explodeDrone(drone, false);
       return;
     }
-    this.chargeOverdrive(0.1);
+    this.chargeOverdrive(drone.champion ? 0.5 : 0.1);
     this.dropPickup(drone.object.position);
     const last = this.run.kill(drone.kind);
-    const big = last || drone.kind === 'titan';
+    const big = last || drone.kind === 'titan' || drone.champion !== '';
+    if (drone.champion) {
+      this.comic.pop('CHAMPION DOWN!', this.v1.copy(drone.object.position).setY(drone.object.position.y + 1), GOLD, 0.9);
+      this.flashes.spawn(drone.object.position, GOLD, 0.3, 3, 0.8);
+      this.run.coins += 60;
+      this.slowmo = 1.2;
+    }
     // Comic word for the kill, rate-limited so swarms don't flood the view.
     if (big || this.comicCooldown <= 0) {
       this.comicCooldown = 0.35;
@@ -5684,6 +5773,8 @@ export class CombatSystem extends createSystem({
   /** Removes an enemy silently (restart or quit). */
   private retireDrone(drone: Drone): void {
     if (drone.dying >= 0) this.endDeath(drone);
+    drone.size = 1;
+    drone.champion = '';
     drone.state = 'off';
     drone.object.visible = false;
     drone.portal.visible = false;
@@ -5754,10 +5845,16 @@ export class CombatSystem extends createSystem({
         message = 'BREACHED';
         break;
     }
+    if (this.pending) {
+      message = '!! WARNING !!';
+      hint = this.pending.champion ? `CHAMPION INCOMING: ${CHAMPIONS[run.stage.id] ?? 'ELITE'}` : 'BOSS INCOMING';
+    }
     if (this.paused) message = 'PAUSED';
     this.hud.mesh.visible = run.phase !== 'title' && !(this.panel.visible && !this.paused);
-    const boss = this.drones.find((d) => d.kind === 'boss' && (d.state === 'boss' || d.state === 'emerging'));
-    this.hud.extras.boss = boss ? { name: chapterForWorld(boss.world)?.villain.name ?? 'BOSS', fraction: boss.hp / boss.maxHp } : null;
+    const boss = this.drones.find((d) => (d.kind === 'boss' || d.champion !== '') && d.state !== 'off' && d.state !== 'hold');
+    this.hud.extras.boss = boss
+      ? { name: boss.champion || (boss.world === 'oblivion' ? OBLIVAX.name : chapterForWorld(boss.world)?.villain.name ?? 'BOSS'), fraction: Math.max(0, boss.hp / boss.maxHp) }
+      : null;
     // Threats out of view: count hostiles beyond ~55 degrees to each side.
     let left = 0;
     let right = 0;

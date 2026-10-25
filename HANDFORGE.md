@@ -49,6 +49,14 @@ throughout (no Marvel or other third-party names/designs).
   TEMPEST thunder/inferno/godbreaker; ORION longbow/volley/blast/storm;
   WEAVER silk/electro/burst; RONIN katana/flame/void; PSION mind/inferno.
   Burn and shock damage-over-time; explosions; quake rings.
+- Heroes also include VANGUARD (energy shield: worn on the off-hand,
+  blocks blades, deflects shots, swing + open hand throws it to ricochet).
+- Travel: before every level a 4 s jump tunnel (transit.ts: hyperspace
+  warp, wormhole, black hole, jet flight through clouds, fire) in the
+  destination world's colours; fully covers the room in MR.
+- Every level has a boss: levels 1-2 end with a named CHAMPION (giant
+  elite, health bar), level 3 the region boss. Both are announced by a
+  siren, WARNING banner and red pulses before they arrive.
 - Twists (twists.ts): each level adds a rule: METEOR RAIN / LIGHTNING
   STORM (warning circles, impacts hurt aliens and the player), LOW GRAVITY
   (bodies and gibs float), BLACKOUT (lights + HDRI dimmed, palm light only),

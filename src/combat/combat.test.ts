@@ -85,7 +85,8 @@ function playWave(run: Run): number {
   let spawned = 0;
   for (let i = 0; i < 2000 && run.phase !== 'fighting'; i += 1) run.update(0.1);
   for (let i = 0; i < 2000 && spawned < run.waveDef.count; i += 1) {
-    if (run.update(0.1)) spawned += 1;
+    const order = run.update(0.1);
+    if (order && !order.champion && order.kind !== 'boss') spawned += 1;
   }
   return spawned;
 }
@@ -157,6 +158,8 @@ describe('Run', () => {
     for (let w = 0; w < WAVES.length; w += 1) {
       playWave(run);
       for (let i = 0; i < WAVES[w].count; i += 1) run.kill('drone');
+      // The last wave's champion (or boss) must fall too.
+      if (WAVES[w].champion || WAVES[w].boss) run.kill('titan');
       for (let i = 0; i < 40 && run.phase === 'cleared'; i += 1) run.update(0.1);
     }
     expect(run.phase).toBe('victory');
