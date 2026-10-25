@@ -120,7 +120,7 @@ describe('Run', () => {
     run.kill('drone');
     expect(run.score).toBe(100 + 200);
     run.kill('armored');
-    expect(run.score).toBe(100 + 200 + 600);
+    expect(run.score).toBe(100 + 200 + 750);
     expect(run.coins).toBe(5 + 5 + 10);
     expect(run.bestCombo).toBe(3);
     for (let i = 0; i < 30; i += 1) run.update(0.1);
