@@ -2,6 +2,9 @@ import {
   AdditiveBlending,
   Color,
   createSystem,
+  IcosahedronGeometry,
+  type Light,
+  PointLight,
   CylinderGeometry,
   DoubleSide,
   Euler,
@@ -30,6 +33,7 @@ import { CLAP_TIP, Coach, HERO_TIPS, type Tip } from './combat/coach.js';
 import { BloodPools, BloodScreen, captureParts, Gibs, type Part, type PartName, restorePart } from './combat/bodies.js';
 import { Galaxy } from './combat/galaxy.js';
 import { lookFor, WORLD_LOOKS } from './combat/worlds.js';
+import { TWIST_INFO, type TwistId, twistFor } from './combat/twists.js';
 import { Erasure } from './combat/erasure.js';
 import {
   anchorLine,
@@ -224,6 +228,16 @@ interface HandState {
   release: number;
 }
 
+/** A meteor or lightning strike: warning circle, then impact. */
+interface Meteor {
+  rock: Mesh;
+  marker: Mesh;
+  markerMaterial: MeshBasicMaterial;
+  target: Vector3;
+  t: number;
+  state: 'off' | 'warn';
+}
+
 /** Something PSION can lift: a floor prop, or a slot carrying a lifted alien. */
 interface Throwable {
   object: Object3D;
@@ -317,6 +331,9 @@ interface Drone {
   dashCool: number;
   /** Dead body skewered on hand `heldBy`'s blade (-1: none). */
   heldBy: number;
+  /** Dropping from the ceiling: height of the chest and fall speed (0: grounded). */
+  dropY: number;
+  dropV: number;
   /** Dead body flung through the air. */
   flying: boolean;
   fly: Vector3;
@@ -463,6 +480,15 @@ export class CombatSystem extends createSystem({
   private galaxyPokeCooldown = 0;
   /** How far the level's world tears into the room in MR (VR shows it all). */
   private riftLevel = 0;
+  /** The current level's twist and its state. */
+  private twist: TwistId = 'none';
+  private gravityScale = 1;
+  private twistTimer = 0;
+  private meteors: Meteor[] = [];
+  private lights: { light: Light; base: number }[] = [];
+  private handLight = new PointLight('#FFFFFF', 0, 5, 2);
+  private sky = new Vector3();
+  private envBase = -1;
   /** How the next damageDrone call landed: drives flinch, fall and cuts. */
   private hitStyle: 'blast' | 'slice' | 'impale' = 'blast';
   private hitPoint = new Vector3();
@@ -791,6 +817,19 @@ export class CombatSystem extends createSystem({
     this.world.camera.add(this.blood.mesh);
     this.gibs = new Gibs(this.root);
     this.pools = new BloodPools(this.root);
+    this.root.add(this.handLight);
+    const rockGeometry = new IcosahedronGeometry(0.16, 1);
+    const markerGeometry = new RingGeometry(0.6, 0.75, 40);
+    markerGeometry.rotateX(-Math.PI / 2);
+    for (let i = 0; i < 6; i += 1) {
+      const rock = new Mesh(rockGeometry, new MeshBasicMaterial({ color: '#FF7A1A', toneMapped: false }));
+      rock.visible = false;
+      const markerMaterial = new MeshBasicMaterial({ color: '#FF2A2A', transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false, side: DoubleSide });
+      const marker = new Mesh(markerGeometry, markerMaterial);
+      marker.visible = false;
+      this.root.add(rock, marker);
+      this.meteors.push({ rock, marker, markerMaterial, target: new Vector3(), t: 0, state: 'off' as const });
+    }
     this.root.add(this.gore.points, this.galaxy.group);
 
     const xr = this.world.renderer.xr;
@@ -884,6 +923,8 @@ export class CombatSystem extends createSystem({
           dash: 0,
           dashCool: 0,
           heldBy: -1,
+          dropY: 0,
+          dropV: 0,
           flying: false,
           fly: new Vector3(),
           bowlAt: -10,
@@ -953,6 +994,8 @@ export class CombatSystem extends createSystem({
         dash: 0,
         dashCool: 0,
         heldBy: -1,
+        dropY: 0,
+        dropV: 0,
         flying: false,
         fly: new Vector3(),
         bowlAt: -10,
@@ -1200,6 +1243,7 @@ export class CombatSystem extends createSystem({
     this.updateSwords(realDt, time);
     this.updatePsion(realDt, dt, time);
     this.updateScript(realDt, time);
+    if (!this.paused) this.updateTwist(dt, time);
     this.coach.update(realDt, this.head, this.forward);
     this.erasure.update(realDt, time, this.head, this.eraseTarget, this.veilTarget);
     this.updateHammer(realDt, time);
@@ -1430,9 +1474,11 @@ export class CombatSystem extends createSystem({
     this.syncArmory();
     this.setTheme(stage.world.id);
     this.music.play(stage.world.id);
+    const frenzy = !isSagaStage(stage) && twistFor(stage.id) === 'frenzy';
     this.run.start(stage, {
       maxHealth: maxHealth(this.profile),
-      speedScale: DIFFICULTY[this.profile.settings.difficulty].speed,
+      speedScale: DIFFICULTY[this.profile.settings.difficulty].speed * (frenzy ? 1.3 : 1),
+      spawnScale: frenzy ? 0.55 : 1,
     });
     this.lastPhase = 'intro';
     this.sfx.wave();
@@ -1448,6 +1494,7 @@ export class CombatSystem extends createSystem({
     this.erasure.setLook(look);
     this.riftLevel = look.rift;
     this.pools.clear();
+    this.setTwist(isSagaStage(stage) ? 'none' : twistFor(stage.id));
     this.spawnPods(this.story?.hostages ?? 0);
   }
 
@@ -2892,6 +2939,151 @@ export class CombatSystem extends createSystem({
     this.sfx.crescent();
   }
 
+  // ---------------------------------------------------------------- twists
+
+  private setTwist(twist: TwistId): void {
+    this.twist = twist;
+    this.twistTimer = 2.5;
+    this.gravityScale = twist === 'lowgrav' ? 0.3 : 1;
+    this.gibs.gravity = 9.8 * this.gravityScale;
+    for (const m of this.meteors) this.retireMeteor(m);
+    this.applyDarkness(twist === 'blackout');
+    this.handLight.intensity = 0;
+  }
+
+  /**
+   * Dims (or restores) the scene lights and the HDRI environment. Reapplied
+   * every blackout frame, since the environment may finish loading later.
+   */
+  private applyDarkness(dark: boolean): void {
+    if (this.lights.length === 0) {
+      this.world.scene.traverse((o) => {
+        const light = o as Light;
+        if (light.isLight && light !== this.handLight) this.lights.push({ light, base: light.intensity });
+      });
+    }
+    for (const { light, base } of this.lights) light.intensity = dark ? base * 0.12 : base;
+    const scene = this.world.scene as unknown as { environmentIntensity?: number };
+    if (this.envBase < 0) this.envBase = scene.environmentIntensity ?? 1;
+    scene.environmentIntensity = dark ? this.envBase * 0.08 : this.envBase;
+    this.erasure.dim = dark ? 0.75 : 0;
+  }
+
+  /** Runs the level's twist: meteors, lightning, blackout light, floaty motes. */
+  private updateTwist(dt: number, time: number): void {
+    const fighting = this.run.phase === 'fighting' && this.script == null;
+    if (this.twist === 'blackout') {
+      this.applyDarkness(this.run.phase !== 'title');
+      // The only light is the player's hands.
+      const hand = this.hands[1].tracked ? this.hands[1] : this.hands[0];
+      const on = this.run.phase !== 'title' && hand.tracked;
+      this.handLight.intensity = on ? 3.2 : 0;
+      this.handLight.color.copy(this.accent).lerp(WHITE, 0.5);
+      if (on) this.handLight.position.copy(hand.gauntlet.palmPoint).addScaledVector(hand.gauntlet.palmNormal, 0.1);
+      this.veilTarget = this.run.phase === 'title' ? 0 : this.isPassthrough() ? 0.55 : 0;
+    } else if (this.twist === 'lowgrav' && fighting && Math.random() < dt * 6) {
+      // Pebbles drifting upward.
+      this.v1.set(this.head.x + (Math.random() - 0.5) * 6, 0.05, this.head.z + (Math.random() - 0.5) * 6);
+      this.v2.set(0, 0.2 + Math.random() * 0.2, 0);
+      this.particles.emit(this.v1, this.v2, DUST, 6, 0, -0.02);
+    }
+    const falling = this.twist === 'meteors' || this.twist === 'lightning';
+    if (falling && fighting) {
+      this.twistTimer -= dt;
+      if (this.twistTimer <= 0) {
+        this.twistTimer = 1.8 + Math.random() * 1.6;
+        this.spawnMeteor();
+      }
+    }
+    for (const m of this.meteors) this.updateMeteor(m, dt, time);
+  }
+
+  /** Marks a strike point: often near an alien, sometimes right by the player. */
+  private spawnMeteor(): void {
+    const m = this.meteors.find((x) => x.state === 'off');
+    if (m == null) return;
+    const near = Math.random() < 0.35;
+    let target: Drone | null = null;
+    if (!near) {
+      for (const drone of this.drones) {
+        if (drone.state !== 'off' && ENEMIES[drone.kind].ground && drone.state !== 'emerging' && Math.random() < 0.5) {
+          target = drone;
+          break;
+        }
+      }
+    }
+    if (target) m.target.set(target.object.position.x, 0, target.object.position.z);
+    else {
+      const a = Math.random() * Math.PI * 2;
+      const r = near ? 0.3 + Math.random() * 0.5 : 1.2 + Math.random() * 2.5;
+      m.target.set(this.head.x + Math.cos(a) * r, 0, this.head.z + Math.sin(a) * r);
+    }
+    m.state = 'warn';
+    m.t = 0;
+    m.marker.position.set(m.target.x, 0.01, m.target.z);
+    m.marker.visible = true;
+    const lightning = this.twist === 'lightning';
+    m.markerMaterial.color.set(lightning ? '#B6A6FF' : '#FF2A2A');
+    (m.rock.material as MeshBasicMaterial).color.set(lightning ? '#FFFFFF' : '#FF7A1A');
+  }
+
+  private updateMeteor(m: Meteor, dt: number, time: number): void {
+    if (m.state === 'off') return;
+    m.t += dt;
+    const WARN = 1.4;
+    const FALL = 0.35;
+    if (m.state === 'warn') {
+      const p = Math.min(1, m.t / WARN);
+      m.marker.scale.setScalar(0.4 + p * 0.6);
+      m.markerMaterial.opacity = 0.35 + 0.45 * Math.abs(Math.sin(time * (6 + p * 14)));
+      if (this.twist === 'meteors' && m.t > WARN - FALL) {
+        // The rock streaks in from the sky.
+        const f = (m.t - (WARN - FALL)) / FALL;
+        this.sky.set(m.target.x + 3, 9, m.target.z - 2);
+        m.rock.visible = true;
+        m.rock.position.copy(this.sky).lerp(m.target, f);
+        m.rock.rotation.x += dt * 9;
+        this.v2.set(0, 0, 0);
+        this.particles.emit(m.rock.position, this.v2, ORANGE, 0.5, 0, -0.2);
+      }
+      if (m.t >= WARN) this.impactMeteor(m);
+    }
+  }
+
+  private impactMeteor(m: Meteor): void {
+    const lightning = this.twist === 'lightning';
+    const at = this.v3.set(m.target.x, 0.2, m.target.z);
+    if (lightning) {
+      this.sky.set(m.target.x, 9, m.target.z);
+      this.lightningFx.strike(this.sky, at, VIOLET, 0.35);
+      this.lightning = 1;
+      this.sfx.thunderHit();
+    } else this.sfx.explode(true);
+    const color = lightning ? VIOLET : ORANGE;
+    this.flashes.spawn(at, color, 0.3, 2.2, 0.5);
+    this.flashes.spawn(at, WHITE, 0.1, 0.9, 0.2);
+    this.particles.burst(at, color, 60, 4, 0.6, this.v2);
+    this.particles.burst(at, DUST, 30, 2, 0.8, this.v2);
+    // Crushes aliens in the circle...
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'boss') continue;
+      this.v4.set(drone.object.position.x - at.x, 0, drone.object.position.z - at.z);
+      if (this.v4.length() > 0.9 + ENEMIES[drone.kind].radius) continue;
+      this.markHit('blast', drone.object.position, this.v4.setY(0.5));
+      this.damageDrone(drone, 3);
+    }
+    // ...and the player, if they stayed in it.
+    this.v4.set(this.head.x - at.x, 0, this.head.z - at.z);
+    if (this.v4.length() < 0.75) this.hurtPlayer(1, false, at);
+    this.retireMeteor(m);
+  }
+
+  private retireMeteor(m: Meteor): void {
+    m.state = 'off';
+    m.rock.visible = false;
+    m.marker.visible = false;
+  }
+
   // ---------------------------------------------------------------- saga
 
   private resetScript(): void {
@@ -2908,6 +3100,7 @@ export class CombatSystem extends createSystem({
 
   /** Leaves any saga mission: back to the player's own hero, world restored. */
   private endScript(): void {
+    if (this.twist !== 'none') this.setTwist('none');
     if (this.script != null) {
       this.script = null;
       this.hero = this.menus.hero;
@@ -3575,7 +3768,7 @@ export class CombatSystem extends createSystem({
     item.t += dt;
     const position = item.object.position;
     item.previous.copy(position);
-    item.velocity.y -= (item.thrown ? PSI_GRAVITY : 9.8) * dt;
+    item.velocity.y -= (item.thrown ? PSI_GRAVITY : 9.8) * this.gravityScale * dt;
     position.addScaledVector(item.velocity, dt);
     if (item.thrown) {
       item.object.rotation.x += item.spin.x * dt;
@@ -3707,7 +3900,7 @@ export class CombatSystem extends createSystem({
         continue;
       }
       this.steer(bolt, Math.min(1, dt * HOMING_RATE));
-      if (bolt.gravity > 0) bolt.velocity.y -= bolt.gravity * dt;
+      if (bolt.gravity > 0) bolt.velocity.y -= bolt.gravity * this.gravityScale * dt;
       bolt.previous.copy(bolt.position);
       bolt.position.addScaledVector(bolt.velocity, dt);
       bolt.object.position.copy(bolt.position);
@@ -3782,6 +3975,16 @@ export class CombatSystem extends createSystem({
       drone.dash = 0;
       drone.dashCool = 1 + Math.random() * 2;
       drone.object.rotation.x = 0;
+      drone.dropY = 0;
+      drone.dropV = 0;
+      if (this.twist === 'ceiling' && Math.random() < 0.7) {
+        // Through the ceiling, close by: a portal overhead, then a drop.
+        const a = Math.random() * Math.PI * 2;
+        const r = 1.8 + Math.random() * 1.4;
+        drone.spawn.set(this.head.x + Math.cos(a) * r, 3.1, this.head.z + Math.sin(a) * r);
+        drone.normal.set(0, -1, 0);
+        drone.dropY = 3.1;
+      }
     }
     drone.hp = ENEMIES[kind].hp;
     drone.state = 'emerging';
@@ -4291,6 +4494,27 @@ export class CombatSystem extends createSystem({
       object.position.y = ground.chest;
       return;
     }
+    if (drone.dropY > 0) {
+      // Falling from the ceiling; a heavy landing.
+      drone.dropV += 9.8 * this.gravityScale * dt;
+      drone.dropY -= drone.dropV * dt;
+      object.position.y = Math.max(ground.chest, drone.dropY);
+      if (rig) {
+        rig.legL.rotation.x = -0.4;
+        rig.legR.rotation.x = 0.3;
+        rig.armL.rotation.x = rig.armLRest - 1.2;
+        rig.armR.rotation.x = rig.armRRest - 1.2;
+      }
+      if (drone.dropY <= ground.chest) {
+        drone.dropY = 0;
+        drone.stagger = 0.35;
+        drone.knock.set(0, 0, 0);
+        this.v2.set(object.position.x, 0.02, object.position.z);
+        this.particles.burst(this.v2, DUST, 24, 1.5, 0.5, this.v4);
+        this.sfx.catchHammer();
+      }
+      return;
+    }
     if (drone.stagger > 0) {
       // Knocked back a step, upper body thrown back.
       const k = drone.stagger / 0.35;
@@ -4390,7 +4614,7 @@ export class CombatSystem extends createSystem({
       rig.upper.rotation.y = s * amp * 0.25;
     }
     object.rotation.z = Math.sin(p) * amp * 0.06;
-    object.position.y = ground.chest + Math.abs(Math.cos(p)) * (moving ? 0.03 : 0.004) - (moving ? 0.015 : 0);
+    object.position.y = ground.chest + Math.abs(Math.cos(p)) * (moving ? (this.gravityScale < 1 ? 0.12 : 0.03) : 0.004) - (moving ? 0.015 : 0);
   }
 
   /** Telegraphed strike: wind up, swing (dodge by stepping back), recover. */
@@ -4636,7 +4860,7 @@ export class CombatSystem extends createSystem({
   private updateAirborne(drone: Drone, dt: number): void {
     const object = drone.object;
     const chest = ENEMIES[drone.kind].ground!.chest;
-    drone.fly.y -= 9.8 * dt;
+    drone.fly.y -= 9.8 * this.gravityScale * dt;
     object.position.addScaledVector(drone.fly, dt);
     object.rotation.x -= dt * (2 + drone.fly.length() * 0.5);
     if (Math.random() < 0.6) this.gore.emit(object.position, this.v2.set(0, 0, 0), ICHOR, 0.6, 0.5, 6);
@@ -4931,7 +5155,7 @@ export class CombatSystem extends createSystem({
       case 'intro':
         if (run.wave === 0 && run.elapsedInPhase < 1) {
           message = this.story ? this.story.location : `${run.stage.world.name} ${run.stage.number}`;
-          hint = `${run.stage.name}  |  ${run.stage.objective}`;
+          hint = TWIST_INFO[this.twist].name ? `TWIST: ${TWIST_INFO[this.twist].name}  |  ${TWIST_INFO[this.twist].hint}` : `${run.stage.name}  |  ${run.stage.objective}`;
         } else if (run.wave === 0) {
           message = String(Math.max(1, 3 - Math.floor(run.elapsedInPhase - 1)));
           hint = 'Get ready  |  left wrist = pause';

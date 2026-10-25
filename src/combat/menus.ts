@@ -23,6 +23,7 @@ import {
 } from './progression.js';
 import { chapterFor, type Speaker } from './story.js';
 import { ANCHORS_TO_FINALE, anchorsRecovered, finaleUnlocked, PROLOGUE_DONE } from './saga.js';
+import { TWIST_INFO, twistFor } from './twists.js';
 
 export type Screen = 'main' | 'galaxy' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
 
@@ -432,7 +433,7 @@ export class GameMenus {
         y: 600,
         w: 1440,
         h: 150,
-        label: `Hostages: ${story.hostages}   |   ${stage.objective}\nReward: ${story.reward.name}${unlocked ? ' (earned)' : ''} - ${story.reward.description}`,
+        label: `${TWIST_INFO[twistFor(stage.id)].name ? `TWIST: ${TWIST_INFO[twistFor(stage.id)].name}   |   ` : ''}Hostages: ${story.hostages}   |   ${stage.objective}\nReward: ${story.reward.name}${unlocked ? ' (earned)' : ''} - ${story.reward.description}`,
         size: 32,
         color: accent,
       },

@@ -42,6 +42,11 @@ throughout (no Marvel or other third-party names/designs).
 - Worlds: every level has its own sky (worlds.ts: palette, nebula, planet
   or black hole, rings, stars). VR shows it as the whole sky; MR tears it
   into the room (rift grows at the boss, closes on victory).
+- Twists (twists.ts): each level adds a rule: METEOR RAIN / LIGHTNING
+  STORM (warning circles, impacts hurt aliens and the player), LOW GRAVITY
+  (bodies and gibs float), BLACKOUT (lights + HDRI dimmed, palm light only),
+  FROM ABOVE (aliens drop through ceiling portals), FRENZY (faster, denser
+  spawns). Every boss level has one; shown on the map brief and level intro.
 - Galaxy map (PLAY): 8 hero planets around OBLIVAX's core, level moons,
   Anchor gems and beams; poke a planet to deploy/unlock, core = finale.
 - Gloves: per-hero gauntlet style (finish, trim, extras; HAVOC fingerless).

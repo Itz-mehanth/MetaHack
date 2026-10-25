@@ -13,6 +13,8 @@ export class Erasure {
   /** 0 = intact, ~0.6 = most of the room gone, 1 = the whole sky. */
   progress = 0;
   veil = 0;
+  /** 0..1 darkening of everything, sky included (blackout). */
+  dim = 0;
   private readonly material: ShaderMaterial;
 
   constructor(color: string) {
@@ -20,6 +22,7 @@ export class Erasure {
       uniforms: {
         uProgress: { value: 0 },
         uVeil: { value: 0 },
+        uDim: { value: 0 },
         uTime: { value: 0 },
         uColor: { value: new Color(color) },
         uTop: { value: new Color('#000000') },
@@ -42,6 +45,7 @@ export class Erasure {
       fragmentShader: /* glsl */ `
         uniform float uProgress;
         uniform float uVeil;
+        uniform float uDim;
         uniform float uTime;
         uniform vec3 uColor;
         uniform vec3 uTop;
@@ -104,7 +108,7 @@ export class Erasure {
           float edge = uProgress >= 0.999 ? 0.0 : (1.0 - smoothstep(0.0, 0.06, abs(n - uProgress))) * step(0.001, uProgress);
           vec3 color = mix(vec3(0.05), sky(d), erased) + uColor * edge * 1.8;
           float alpha = max(max(erased, edge * 0.9), uVeil);
-          gl_FragColor = vec4(color, alpha);
+          gl_FragColor = vec4(color * (1.0 - uDim), alpha);
         }
       `,
       transparent: true,
@@ -147,6 +151,7 @@ export class Erasure {
     const u = this.material.uniforms;
     u.uProgress.value = this.progress;
     u.uVeil.value = this.veil;
+    u.uDim.value = this.dim;
     u.uTime.value = time;
   }
 }

@@ -42,3 +42,15 @@ describe('saga', () => {
     expect(anchorLine('MOONFALL', ANCHORS_TO_FINALE).text).toContain('CONVERGENCE');
   });
 });
+
+describe('twists', () => {
+  it('gives every stage a twist entry and every boss level a real twist', async () => {
+    const { STAGES } = await import('./progression.js');
+    const { TWISTS, TWIST_INFO } = await import('./twists.js');
+    for (const stage of STAGES) {
+      expect(TWISTS[stage.id]).toBeDefined();
+      if (stage.number === 3) expect(TWISTS[stage.id]).not.toBe('none');
+      expect(TWIST_INFO[TWISTS[stage.id]]).toBeDefined();
+    }
+  });
+});

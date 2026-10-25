@@ -76,6 +76,8 @@ export type BleedFn = (at: Vector3, velocity: Vector3, heavy: boolean) => void;
  * bouncing on the floor, then resting until their owner's death ends.
  */
 export class Gibs {
+  /** m/s^2; lowered by the low-gravity twist. */
+  gravity = 9.8;
   private readonly pool: Gib[] = [];
   private readonly world = new Vector3();
   private readonly v = new Vector3();
@@ -111,7 +113,7 @@ export class Gibs {
       gib.life += dt;
       if (gib.resting) continue;
       const object = part.object;
-      gib.velocity.y -= 9.8 * dt;
+      gib.velocity.y -= this.gravity * dt;
       object.position.addScaledVector(gib.velocity, dt);
       object.rotation.x += gib.spin.x * dt;
       object.rotation.y += gib.spin.y * dt;

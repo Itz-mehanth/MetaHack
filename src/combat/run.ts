@@ -26,6 +26,8 @@ export interface RunOptions {
   maxHealth: number;
   /** Multiplies every wave's enemy speed (difficulty). */
   speedScale: number;
+  /** Multiplies the gap between spawns (below 1 = faster). */
+  spawnScale?: number;
 }
 
 export class Run {
@@ -40,6 +42,7 @@ export class Run {
   kills = 0;
   coins = 0;
   private speedScale = 1;
+  private spawnScale = 1;
   private phaseTime = 0;
   private spawned = 0;
   private alive = 0;
@@ -77,6 +80,7 @@ export class Run {
     this.stage = stage;
     this.maxHealth = options.maxHealth;
     this.speedScale = options.speedScale;
+    this.spawnScale = options.spawnScale ?? 1;
     this.wave = 0;
     this.health = this.maxHealth;
     this.score = 0;
@@ -123,7 +127,7 @@ export class Run {
         const def = this.waveDef;
         if (this.burstLeft <= 0) this.burstLeft = def.burst ?? 1;
         this.burstLeft -= 1;
-        this.spawnTimer = this.burstLeft > 0 ? BURST_GAP : def.interval;
+        this.spawnTimer = this.burstLeft > 0 ? BURST_GAP : def.interval * this.spawnScale;
         this.spawned += 1;
         this.alive += 1;
         const kind = def.kinds[Math.min(def.kinds.length - 1, Math.floor(this.random() * def.kinds.length))];
