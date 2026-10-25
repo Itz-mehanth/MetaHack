@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { type HandJoints, isBlastPose, isFist, isOpenPalm, palmNormal } from './gestures.js';
-import { MISSIONS } from './missions.js';
-import { MAX_HEALTH, Run } from './run.js';
+import { STAGES } from './progression.js';
+import { Run } from './run.js';
 
-const WAVES = MISSIONS[0].waves;
+const STAGE = STAGES[0];
+const WAVES = STAGE.waves;
+const OPTS = { maxHealth: 5, speedScale: 1 };
 
 /** Right hand, fingers up, palm facing -Z (away from a head at the origin). */
 function rightHand(curl: boolean, z = -0.4): HandJoints {
@@ -78,69 +80,82 @@ describe('Run', () => {
   it('starts on the title and begins with an intro', () => {
     const run = new Run(() => 0.99);
     expect(run.phase).toBe('title');
-    run.start();
+    run.start(STAGE, OPTS);
     expect(run.phase).toBe('intro');
-    expect(run.health).toBe(MAX_HEALTH);
+    expect(run.health).toBe(5);
+    expect(run.introLength).toBe(4);
   });
 
   it('spawns the wave count, clears on the last kill, and advances', () => {
     const run = new Run(() => 0.99);
-    run.start();
+    run.start(STAGE, OPTS);
     expect(playWave(run)).toBe(WAVES[0].count);
-    for (let i = 0; i < WAVES[0].count - 1; i += 1) expect(run.kill()).toBe(false);
-    expect(run.kill()).toBe(true);
+    for (let i = 0; i < WAVES[0].count - 1; i += 1) expect(run.kill('drone')).toBe(false);
+    expect(run.kill('drone')).toBe(true);
     expect(run.phase).toBe('cleared');
     for (let i = 0; i < 40; i += 1) run.update(0.1);
     expect(run.wave).toBe(1);
     expect(run.phase).toBe('intro');
   });
 
-  it('scores with a capped combo that resets after the window', () => {
+  it('scores with a capped combo and collects coins', () => {
     const run = new Run(() => 0.99);
-    run.start();
+    run.start(STAGE, OPTS);
     playWave(run);
-    run.kill();
-    run.kill();
+    run.kill('drone');
+    run.kill('drone');
     expect(run.score).toBe(100 + 200);
-    expect(run.kill('armored')).toBe(false);
+    run.kill('armored');
     expect(run.score).toBe(100 + 200 + 600);
+    expect(run.coins).toBe(5 + 5 + 10);
+    expect(run.bestCombo).toBe(3);
     for (let i = 0; i < 30; i += 1) run.update(0.1);
     expect(run.combo).toBe(0);
   });
 
-  it('loses health on hits and ends in defeat', () => {
+  it('applies difficulty: health and enemy speed', () => {
+    const run = new Run(() => 0);
+    run.start(STAGE, { maxHealth: 3, speedScale: 2 });
+    expect(run.health).toBe(3);
+    let order = null;
+    for (let i = 0; i < 100 && order == null; i += 1) order = run.update(0.1);
+    expect(order?.speed).toBeCloseTo(WAVES[0].speed * 2);
+  });
+
+  it('loses health on hits and ends in defeat, staying there for the menu', () => {
     const run = new Run(() => 0.99);
-    run.start();
+    run.start(STAGE, OPTS);
     for (let i = 0; i < 400; i += 1) run.update(0.1);
     run.hit();
-    expect(run.health).toBe(MAX_HEALTH - 1);
+    expect(run.health).toBe(4);
     for (let i = 0; i < 5000 && run.phase !== 'defeat'; i += 1) {
       if (run.phase === 'fighting' && run.aliveCount > 0) run.hit();
       else run.update(0.1);
     }
     expect(run.phase).toBe('defeat');
-    expect(run.health).toBe(0);
+    for (let i = 0; i < 100; i += 1) run.update(0.1);
+    expect(run.phase).toBe('defeat');
   });
 
   it('reaches victory after the last wave', () => {
     const run = new Run(() => 0.99);
-    run.start();
+    run.start(STAGE, OPTS);
     for (let w = 0; w < WAVES.length; w += 1) {
       playWave(run);
-      for (let i = 0; i < WAVES[w].count; i += 1) run.kill();
+      for (let i = 0; i < WAVES[w].count; i += 1) run.kill('drone');
       for (let i = 0; i < 40 && run.phase === 'cleared'; i += 1) run.update(0.1);
     }
     expect(run.phase).toBe('victory');
   });
 
-  it('spawns swarm waves in bursts and returns to the title after a result', () => {
-    const talon = MISSIONS[1];
+  it('spawns swarm waves in bursts', () => {
+    const swarmStage = STAGES.find((s) => s.world.id === 'ember-foundry')!;
     const run = new Run(() => 0);
-    run.start(talon);
-    for (let i = 0; i < 40 && run.phase !== 'fighting'; i += 1) run.update(0.1);
+    run.start(swarmStage, OPTS);
+    for (let i = 0; i < 60 && run.phase !== 'fighting'; i += 1) run.update(0.1);
     const times: number[] = [];
     let t = 0;
-    for (let i = 0; i < 200 && times.length < 6; i += 1) {
+    for (let i = 0; i < 400 && times.length < 6; i += 1) {
       t += 0.05;
       const order = run.update(0.05);
       if (order) {
@@ -148,29 +163,14 @@ describe('Run', () => {
         times.push(t);
       }
     }
-    // Three quick spawns, then a long gap before the next pack.
     expect(times[1] - times[0]).toBeLessThan(0.3);
     expect(times[3] - times[2]).toBeGreaterThan(1.5);
-    run.toTitle();
-    expect(run.phase).toBe('title');
-  });
-
-  it('ends on the title screen a few seconds after defeat', () => {
-    const run = new Run(() => 0.99);
-    run.start();
-    for (let i = 0; i < 5000 && run.phase !== 'defeat'; i += 1) {
-      if (run.phase === 'fighting' && run.aliveCount > 0) run.hit(2);
-      else run.update(0.1);
-    }
-    expect(run.phase).toBe('defeat');
-    for (let i = 0; i < 60; i += 1) run.update(0.1);
-    expect(run.phase).toBe('title');
   });
 
   it('ignores kills and hits outside the fighting phase', () => {
     const run = new Run();
     expect(run.kill()).toBe(false);
     run.hit();
-    expect(run.health).toBe(MAX_HEALTH);
+    expect(run.health).toBe(5);
   });
 });

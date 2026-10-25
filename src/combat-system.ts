@@ -22,9 +22,21 @@ import { Claws } from './combat/claws.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
 import { type HandJoints, isBlastPose, isFist, isOpenPalm } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
-import { HeroHub } from './combat/hub.js';
 import { Lightning } from './combat/lightning.js';
-import { ENEMIES, type EnemyKind, missionFor } from './combat/missions.js';
+import { GameMenus } from './combat/menus.js';
+import { ENEMIES, type EnemyKind } from './combat/missions.js';
+import { Music } from './combat/music.js';
+import { Panel } from './combat/panel-ui.js';
+import {
+  DIFFICULTY,
+  equippedColor,
+  maxHealth,
+  type Profile,
+  recordResult,
+  type Stage,
+  upgradeLevel,
+} from './combat/progression.js';
+import { loadProfile, resetProfile, saveProfile } from './combat/save.js';
 import { applyTheme, setFlash, type Theme, THEMES } from './combat/themes.js';
 import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
@@ -192,7 +204,14 @@ export class CombatSystem extends createSystem({
   private jointQuat = new Quaternion();
   private drones: Drone[] = [];
   private bolts: Bolt[] = [];
-  private hub!: HeroHub;
+  private profile: Profile = loadProfile();
+  private panel!: Panel;
+  private menus!: GameMenus;
+  private music!: Music;
+  private paused = false;
+  private resultTimer = -1;
+  private lastCount = -1;
+  private accent = new Color('#3DF5FF');
   private lightningFx!: Lightning;
   private hammer: Object3D | null = null;
   private hammerHead: Object3D | null = null;
@@ -221,6 +240,9 @@ export class CombatSystem extends createSystem({
   private elapsed = 0;
   private hudPlaced = false;
   private ready = false;
+  private powersLive = false;
+  /** Elapsed time at which to re-place the menu once XR head tracking settles. */
+  private replaceMenuAt = -1;
 
   private head = new Vector3();
   private headTriple: Triple = [0, 0, 0];
@@ -243,9 +265,26 @@ export class CombatSystem extends createSystem({
     this.wrist = new WristButton();
     this.root.add(this.wrist.group);
     this.wrist.setHero('ARC', CYAN);
-    this.hub = new HeroHub();
     this.lightningFx = new Lightning(this.root);
-    this.root.add(this.hub.group);
+    this.panel = new Panel();
+    this.root.add(this.panel.group);
+    this.music = new Music(this.sfx);
+    this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
+    this.menus = new GameMenus(this.profile, {
+      play: (hero, stage) => this.startStage(hero, stage),
+      resume: () => this.resumeStage(),
+      restart: () => this.startStage(this.hero, this.run.stage),
+      quit: () => this.quitToMenu(),
+      changed: () => this.profileChanged(),
+      preview: (worldId) => this.setTheme(worldId),
+      denied: () => this.sfx.denied(),
+      bought: () => this.sfx.coin(),
+      resetProgress: () => {
+        this.profile = resetProfile();
+        this.menus.setProfile(this.profile);
+        this.profileChanged();
+      },
+    });
 
     // Unit-length beam along +Z, starting at its origin.
     const beamGeometry = new CylinderGeometry(0.0025, 0.0012, 1, 6, 1, true);
@@ -360,7 +399,8 @@ export class CombatSystem extends createSystem({
     const onSessionStart = () => {
       this.sfx.unlock();
       this.hudPlaced = false;
-      if (this.run.phase === 'title') this.showHub();
+      if (this.panel.visible) this.replaceMenuAt = this.elapsed + 0.6;
+      this.music.play(this.run.phase === 'title' ? 'menu' : this.run.stage.world.id);
     };
     xr.addEventListener('sessionstart', onSessionStart);
     const canvas = this.world.renderer.domElement;
@@ -424,7 +464,7 @@ export class CombatSystem extends createSystem({
     this.hammer.visible = false;
     this.root.add(this.hammer);
     this.hammerHead = this.hammer.getObjectByName('Head') ?? this.hammer;
-    this.showHub();
+    this.showMenu('main');
     this.ready = true;
   }
 
@@ -445,10 +485,7 @@ export class CombatSystem extends createSystem({
 
     this.readHands();
     for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
-    if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.openMenu();
-    this.updateHands(realDt);
-    this.updateClaws(realDt);
-    this.updateHammer(realDt, time);
+    if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.wristPressed();
 
     this.tips.length = 0;
     for (const hand of this.hands) {
@@ -457,19 +494,37 @@ export class CombatSystem extends createSystem({
       const tip = hand.indexTip;
       this.tips.push(hand.pose.position(9, tip));
     }
-    const picked = this.hub.update(realDt, time, this.tips);
-    if (picked >= 0) this.selectHero(picked);
+    if (this.replaceMenuAt > 0 && time > this.replaceMenuAt) {
+      this.replaceMenuAt = -1;
+      if (this.panel.visible) this.panel.place(this.head, this.forward);
+    }
+    const event = this.panel.update(realDt, this.tips);
+    if (event) this.onPanelEvent(event.point, () => this.menus.handle(event));
 
-    const order = this.run.update(dt);
-    if (order) this.spawnDrone(order.kind, order.speed);
-    this.updateDrones(dt, time);
-    this.updateBolts(dt);
-    this.onPhaseChange();
+    // Powers work during a stage (including intros, for warm-up) but not in
+    // menus or while paused.
+    const live = !this.paused && !this.panel.visible && this.run.phase !== 'title';
+    this.powersLive = live;
+    this.updateHands(realDt);
+    this.updateClaws(realDt);
+    this.updateHammer(realDt, time);
+
+    if (!this.paused) {
+      const order = this.run.update(dt);
+      if (order) this.spawnDrone(order.kind, order.speed);
+      this.updateDrones(dt, time);
+      this.updateBolts(dt);
+      this.onPhaseChange();
+      this.updateCountdown();
+      this.updateResults(realDt);
+    }
     this.updateAmbient(realDt, time);
 
-    this.particles.update(dt);
-    this.flashes.update(dt);
-    this.lightningFx.update(dt);
+    if (!this.paused) {
+      this.particles.update(dt);
+      this.flashes.update(dt);
+      this.lightningFx.update(dt);
+    }
     if (this.damageMaterial.opacity > 0) {
       this.damageMaterial.opacity = Math.max(0, this.damageMaterial.opacity - realDt * 1.2);
       this.damage.visible = this.damageMaterial.opacity > 0;
@@ -540,7 +595,7 @@ export class CombatSystem extends createSystem({
   private updateHands(dt: number): void {
     for (const hand of this.hands) {
       hand.cooldown -= dt;
-      const posed = this.hero === 'arc' && hand.tracked && isBlastPose(hand.joints, hand.handedness, this.headTriple);
+      const posed = this.powersLive && this.hero === 'arc' && hand.tracked && isBlastPose(hand.joints, hand.handedness, this.headTriple);
       if (!posed) {
         hand.armTime = 0;
         hand.glow.material.opacity = Math.max(0, hand.glow.material.opacity - dt * 6);
@@ -568,8 +623,16 @@ export class CombatSystem extends createSystem({
       hand.glow.material.opacity = 0.35 + 0.5 * ready;
       hand.glow.scale.setScalar(0.06 + 0.05 * ready + Math.max(0, hand.cooldown) * 0.3);
       if (hand.armTime >= ARM_TIME && hand.cooldown <= 0) {
-        hand.cooldown = FIRE_COOLDOWN;
+        hand.cooldown = FIRE_COOLDOWN * (1 - 0.1 * this.level('arc-rate'));
         this.fire(hand.palm, hand.normal);
+        // Split beam: extra bolts fanned a few degrees either side.
+        const extra = Math.ceil(this.level('arc-split') / 2);
+        for (let k = 1; k <= extra; k += 1) {
+          const side = k % 2 === 1 ? 1 : -1;
+          this.v3.set(0, 1, 0).cross(hand.normal).normalize();
+          this.v4.copy(hand.normal).addScaledVector(this.v3, side * 0.1 * Math.ceil(k / 2)).normalize();
+          this.fire(hand.palm, this.v4, true);
+        }
       }
     }
   }
@@ -583,6 +646,12 @@ export class CombatSystem extends createSystem({
       .unproject(this.world.camera);
     this.world.camera.getWorldPosition(this.v4);
     this.v3.sub(this.v4).normalize();
+    const panelEvent = this.panel.click(this.v4, this.v3);
+    if (panelEvent) {
+      this.onPanelEvent(panelEvent.point, () => this.menus.handle(panelEvent));
+      return;
+    }
+    if (this.panel.visible || this.paused || this.run.phase === 'title') return;
     this.v4.addScaledVector(this.v3, 0.3);
     this.fire(this.v4, this.v3);
   }
@@ -590,39 +659,144 @@ export class CombatSystem extends createSystem({
 
   // ---------------------------------------------------------------- heroes
 
-  /** Picks a hero from the hub and starts their mission. */
-  private selectHero(index: number): void {
-    const hero = HEROES[index];
-    if (hero == null || this.run.phase !== 'title') return;
-    this.hero = hero.id;
-    const color = new Color(hero.color);
-    for (const hand of this.hands) hand.gauntlet.setAccent(color);
-    this.wrist.setHero(`${hero.name} | MENU`, color);
-    const card = this.hub.cards[index];
-    this.flashes.spawn(card.center, color, 0.1, 1.2, 0.5);
-    this.particles.burst(card.center, color, 120, 3, 0.8, this.v2);
-    this.particles.burst(card.center, WHITE, 40, 5, 0.4, this.v2);
-    this.sfx.explode(true);
-    this.sfx.swap();
-    this.hub.hide();
-    const mission = missionFor(hero.id);
-    this.setTheme(mission.id);
-    this.run.start(mission);
-    if (hero.id === 'tempest') this.summonHammer();
+  /** Upgrade level for `id` from the saved profile. */
+  private level(id: string): number {
+    return upgradeLevel(this.profile, id);
   }
 
-  /** Wrist button: abandon the mission and return to hero select. */
-  private openMenu(): void {
-    this.sfx.swap();
+  /** Starts `stage` with `hero`, applying difficulty, upgrades and skin. */
+  private startStage(hero: HeroId, stage: Stage): void {
+    this.hero = hero;
+    this.menus.hero = hero;
+    this.applySkin();
+    const def = HEROES.find((h) => h.id === hero)!;
+    this.wrist.setHero(`${def.name} | PAUSE`, this.accent);
+    this.panel.hide();
+    this.paused = false;
+    this.resultTimer = -1;
+    this.lastCount = -1;
+    for (const drone of this.drones) {
+      if (drone.state !== 'off') this.retireDrone(drone);
+    }
+    for (const bolt of this.bolts) if (bolt.active) this.retireBolt(bolt);
+    this.setTheme(stage.world.id);
+    this.music.play(stage.world.id);
+    this.run.start(stage, {
+      maxHealth: maxHealth(this.profile),
+      speedScale: DIFFICULTY[this.profile.settings.difficulty].speed,
+    });
+    this.lastPhase = 'intro';
+    this.sfx.wave();
+    if (hero === 'tempest') this.summonHammer();
+  }
+
+  private applySkin(): void {
+    this.accent.set(equippedColor(this.profile, this.hero));
+    for (const hand of this.hands) {
+      hand.gauntlet.setAccent(this.accent);
+      hand.claws.setColor(this.accent);
+      hand.beamMaterial.color.copy(this.accent);
+      hand.glow.material.color.copy(this.accent);
+    }
+  }
+
+  /** Left wrist: pause during a stage, resume when paused, else go back. */
+  private wristPressed(): void {
     this.flashes.spawn(this.wrist.center, WHITE, 0.05, 0.3, 0.25);
-    if (this.run.phase !== 'title') this.run.toTitle();
+    if (this.paused) {
+      this.resumeStage();
+      return;
+    }
+    if (!this.panel.visible && this.run.phase !== 'title') {
+      this.paused = true;
+      this.sfx.click();
+      this.showMenu('pause');
+      return;
+    }
+    if (this.panel.visible && this.menus.screen !== 'main' && this.menus.screen !== 'results') {
+      this.sfx.click();
+      this.showMenu('main');
+    }
   }
 
-  private showHub(): void {
+  private resumeStage(): void {
+    this.paused = false;
+    this.panel.hide();
+    this.sfx.click();
+  }
+
+  private quitToMenu(): void {
+    this.paused = false;
+    this.resultTimer = -1;
+    this.run.toTitle();
+    for (const drone of this.drones) {
+      if (drone.state !== 'off') this.retireDrone(drone);
+    }
+    this.showMenu('main');
+  }
+
+  private showMenu(screen: Parameters<GameMenus['open']>[0]): void {
     this.world.camera.getWorldPosition(this.head);
     this.world.camera.getWorldDirection(this.forward);
-    this.setTheme('neon-grid');
-    this.hub.show(this.head, this.forward);
+    this.menus.open(screen);
+    this.panel.setContent(this.menus.content());
+    this.panel.place(this.head, this.forward);
+    this.panel.show();
+    if (screen !== 'pause') this.music.play('menu');
+  }
+
+  /** Touch feedback for a panel press, then the menu action and a redraw. */
+  private onPanelEvent(point: Vector3, handle: () => void): void {
+    this.flashes.spawn(point, this.accent, 0.02, 0.14, 0.2);
+    this.particles.burst(point, this.accent, 10, 0.4, 0.2, this.v2);
+    this.sfx.click();
+    handle();
+    if (this.panel.visible) this.panel.setContent(this.menus.content());
+  }
+
+  private profileChanged(): void {
+    saveProfile(this.profile);
+    this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
+    this.applySkin();
+  }
+
+  /** Big 3-2-1 beeps during the first intro, then FIGHT. */
+  private updateCountdown(): void {
+    const run = this.run;
+    let count = -1;
+    if (run.phase === 'intro' && run.wave === 0 && run.elapsedInPhase >= 1) {
+      count = Math.max(1, 3 - Math.floor(run.elapsedInPhase - 1));
+    } else if (run.phase === 'fighting' && run.wave === 0 && run.elapsedInPhase < 0.1) {
+      count = 0;
+    }
+    if (count === this.lastCount || count < 0) return;
+    this.lastCount = count;
+    this.sfx.beep(count === 0);
+  }
+
+  /** Shows the results panel a moment after a stage ends. */
+  private updateResults(dt: number): void {
+    if (this.resultTimer < 0) return;
+    this.resultTimer += dt;
+    if (this.resultTimer < 2.2) return;
+    this.resultTimer = -1;
+    const run = this.run;
+    const won = run.phase === 'victory';
+    const reward = recordResult(this.profile, run.stage, {
+      won,
+      health: run.health,
+      maxHealth: run.maxHealth,
+      killCoins: run.coins,
+    });
+    saveProfile(this.profile);
+    if (reward.coins > 0) this.sfx.coin();
+    this.menus.showResults({ won, stage: run.stage, reward, score: run.score, kills: run.kills, bestCombo: run.bestCombo });
+    this.panel.setContent(this.menus.content());
+    this.world.camera.getWorldPosition(this.head);
+    this.world.camera.getWorldDirection(this.forward);
+    this.panel.place(this.head, this.forward);
+    this.panel.show();
+    this.music.play('menu');
   }
 
   private setTheme(id: string): void {
@@ -736,7 +910,7 @@ export class CombatSystem extends createSystem({
   private updateHammer(dt: number, time: number): void {
     const hammer = this.hammer;
     if (hammer == null || this.hammerHead == null) return;
-    hammer.visible = this.hero === 'tempest';
+    hammer.visible = this.hero === 'tempest' && this.powersLive;
     if (!hammer.visible || dt <= 0) return;
     this.hammerTime += dt;
     this.hammerPrev.copy(hammer.position);
@@ -819,7 +993,8 @@ export class CombatSystem extends createSystem({
         this.v3.copy(hand.gauntlet.palmPoint).addScaledVector(hand.gauntlet.palmNormal, 0.07);
         this.v4.subVectors(this.v3, hammer.position);
         const distance = this.v4.length();
-        const step = HAMMER_RETURN_SPEED * dt;
+        const returnSpeed = HAMMER_RETURN_SPEED * (1 + 0.15 * this.level('tempest-recall'));
+        const step = returnSpeed * dt;
         if (distance <= Math.max(0.1, step)) {
           hammer.position.copy(this.v3);
           this.hammerState = 'docked';
@@ -829,7 +1004,7 @@ export class CombatSystem extends createSystem({
           this.sfx.catchHammer();
           break;
         }
-        this.hammerVelocity.copy(this.v4).setLength(HAMMER_RETURN_SPEED);
+        this.hammerVelocity.copy(this.v4).setLength(returnSpeed);
         hammer.position.addScaledVector(this.v4.normalize(), step);
         hammer.rotateX(-dt * 22);
         break;
@@ -847,11 +1022,6 @@ export class CombatSystem extends createSystem({
         this.v1.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.5).add(this.hammerHeadPos);
         this.lightningFx.strike(this.hammerHeadPos, this.v1, VIOLET, 0.12);
       }
-      const card = this.hub.hitBySegment(this.hammerHeadPrev, this.hammerHeadPos, this.v3, this.v4);
-      if (card >= 0) {
-        this.selectHero(card);
-        return;
-      }
       for (const drone of this.drones) {
         if (drone.state === 'off' || drone.state === 'emerging') continue;
         if (this.elapsed - drone.hammerHitAt < 0.35) continue;
@@ -861,7 +1031,7 @@ export class CombatSystem extends createSystem({
         this.v1.copy(drone.object.position);
         this.sfx.thunderHit();
         this.flashes.spawn(this.v1, WHITE, 0.1, 0.7, 0.2);
-        this.damageDrone(drone, this.hammerState === 'flying' ? 3 : 2);
+        this.damageDrone(drone, (this.hammerState === 'flying' ? 3 : 2) + Math.floor(this.level('tempest-impact') / 2));
         this.chainLightning(this.v1, drone);
         if (this.hammerState === 'flying') this.hammerVelocity.multiplyScalar(0.8);
       }
@@ -896,10 +1066,11 @@ export class CombatSystem extends createSystem({
   /** Arcs lightning from `from` to up to three nearby enemies for 1 damage each. */
   private chainLightning(from: Vector3, skip: Drone): void {
     let jumps = 0;
+    const chain = this.level('tempest-chain');
     for (const drone of this.drones) {
-      if (jumps >= 3) break;
+      if (jumps >= 3 + chain) break;
       if (drone === skip || drone.state === 'off' || drone.state === 'emerging') continue;
-      if (drone.object.position.distanceTo(from) > 3) continue;
+      if (drone.object.position.distanceTo(from) > 3 + chain * 0.5) continue;
       jumps += 1;
       this.lightningFx.strike(from, drone.object.position, VIOLET, 0.3);
       this.particles.burst(drone.object.position, VIOLET, 16, 1.5, 0.3, this.v2);
@@ -911,8 +1082,9 @@ export class CombatSystem extends createSystem({
   private updateClaws(dt: number): void {
     for (const hand of this.hands) {
       const claws = hand.claws;
-      const out = this.hero === 'talon' && hand.tracked && isFist(hand.joints);
+      const out = this.powersLive && this.hero === 'talon' && hand.tracked && isFist(hand.joints);
       const wasOut = claws.extension > 0.5;
+      claws.lengthScale = 1 + 0.12 * this.level('talon-reach');
       claws.update(hand.pose, out, dt, this.elapsed);
       hand.slashCooldown -= dt;
       if (out && !wasOut && claws.extension > 0.5) this.sfx.shing();
@@ -927,11 +1099,7 @@ export class CombatSystem extends createSystem({
       }
       const speed = this.v3.subVectors(claws.tip, hand.prevTip).length() / dt;
 
-      const card = this.hub.hitBySegment(claws.base, claws.tip, this.v3, this.v4);
-      if (card >= 0) {
-        this.selectHero(card);
-        continue;
-      }
+
       for (const drone of this.drones) {
         if (drone.state === 'off' || drone.state === 'emerging') continue;
         const radius = ENEMIES[drone.kind].radius + 0.03;
@@ -943,7 +1111,7 @@ export class CombatSystem extends createSystem({
       }
 
       if (speed > CRESCENT_MIN_SWING && hand.slashCooldown <= 0) {
-        hand.slashCooldown = CRESCENT_COOLDOWN;
+        hand.slashCooldown = CRESCENT_COOLDOWN * (1 - 0.12 * this.level('talon-tempo'));
         this.v4.subVectors(claws.tip, hand.prevTip).normalize();
         this.fireCrescent(claws.tip, this.v4, claws.direction);
       }
@@ -955,8 +1123,8 @@ export class CombatSystem extends createSystem({
     const bolt = this.bolts.find((b) => !b.active);
     if (bolt == null) return;
     bolt.kind = 'crescent';
-    bolt.radius = 0.24;
-    bolt.damage = 2;
+    bolt.radius = 0.24 + 0.03 * this.level('talon-wave');
+    bolt.damage = 2 + Math.floor(this.level('talon-wave') / 2);
     bolt.speed = CRESCENT_SPEED;
     bolt.target = null;
     bolt.bolt.visible = false;
@@ -975,17 +1143,17 @@ export class CombatSystem extends createSystem({
     this.v1.copy(origin).add(direction);
     bolt.object.lookAt(this.v1);
     bolt.object.visible = true;
-    this.flashes.spawn(origin, PINK, 0.05, 0.35, 0.18);
+    this.flashes.spawn(origin, this.accent, 0.05, 0.35, 0.18);
     this.sfx.crescent();
   }
 
   // ---------------------------------------------------------------- bolts
 
-  private fire(origin: Vector3, direction: Vector3): void {
+  private fire(origin: Vector3, direction: Vector3, quiet = false): void {
     const bolt = this.bolts.find((b) => !b.active);
     if (bolt == null) return;
     bolt.target = null;
-    let best = AIM_ASSIST_COS;
+    let best = this.profile.settings.aimAssist ? AIM_ASSIST_COS : 2;
     for (const drone of this.drones) {
       if (drone.state === 'off') continue;
       const cos = this.v2.subVectors(drone.object.position, origin).normalize().dot(direction);
@@ -996,7 +1164,7 @@ export class CombatSystem extends createSystem({
     }
     bolt.kind = 'bolt';
     bolt.radius = 0.06;
-    bolt.damage = 1;
+    bolt.damage = 1 + Math.floor(this.level('arc-power') / 2);
     bolt.speed = BOLT_SPEED;
     bolt.bolt.visible = true;
     bolt.crescent.visible = false;
@@ -1008,7 +1176,8 @@ export class CombatSystem extends createSystem({
     bolt.object.up.set(0, 1, 0);
     bolt.object.visible = true;
     bolt.object.position.copy(origin);
-    this.flashes.spawn(origin, CYAN, 0.05, 0.25, 0.15);
+    if (quiet) return;
+    this.flashes.spawn(origin, this.accent, 0.05, 0.25, 0.15);
     this.sfx.blast();
   }
 
@@ -1044,12 +1213,7 @@ export class CombatSystem extends createSystem({
       this.particles.emit(bolt.previous, this.v2, crescent ? PINK : CYAN, crescent ? 0.3 : 0.18, 0);
       if (crescent) bolt.crescent.scale.setScalar(1 + (BOLT_LIFE - bolt.life) * 1.2);
 
-      const card = this.hub.hitBySegment(bolt.previous, bolt.position, this.v3, this.v4);
-      if (card >= 0) {
-        this.retireBolt(bolt);
-        this.selectHero(card);
-        continue;
-      }
+
       for (const drone of this.drones) {
         if (drone.state === 'off') continue;
         const radius = ENEMIES[drone.kind].radius + bolt.radius;
@@ -1232,6 +1396,14 @@ export class CombatSystem extends createSystem({
     drone.eye.scale.setScalar(1);
   }
 
+  /** Removes an enemy silently (restart or quit). */
+  private retireDrone(drone: Drone): void {
+    drone.state = 'off';
+    drone.object.visible = false;
+    drone.portal.visible = false;
+    drone.eye.scale.setScalar(1);
+  }
+
   // ---------------------------------------------------------------- phases
 
   private onPhaseChange(): void {
@@ -1239,13 +1411,8 @@ export class CombatSystem extends createSystem({
     if (phase === this.lastPhase) return;
     this.lastPhase = phase;
     if (phase === 'intro') this.sfx.wave();
-    if (phase === 'title') {
-      for (const drone of this.drones) {
-        if (drone.state !== 'off') this.explodeDrone(drone, false);
-      }
-      this.showHub();
-    }
     if (phase === 'victory' || phase === 'defeat') {
+      this.resultTimer = 0;
       for (const drone of this.drones) {
         if (drone.state !== 'off') this.explodeDrone(drone, false);
       }
@@ -1266,25 +1433,33 @@ export class CombatSystem extends createSystem({
     let hint = '';
     switch (run.phase) {
       case 'title':
-        message = 'CHOOSE HERO';
-        hint = 'Poke a card with your fingertip';
         break;
       case 'intro':
-        message = run.wave === 0 ? run.mission.world : `WAVE ${run.wave + 1}`;
-        hint = run.wave === 0 ? `${run.mission.objective}  |  left wrist = menu` : '';
+        if (run.wave === 0 && run.elapsedInPhase < 1) {
+          message = `${run.stage.world.name} ${run.stage.number}`;
+          hint = `${run.stage.name}  |  ${run.stage.objective}`;
+        } else if (run.wave === 0) {
+          message = String(Math.max(1, 3 - Math.floor(run.elapsedInPhase - 1)));
+          hint = 'Get ready  |  left wrist = pause';
+        } else {
+          message = `WAVE ${run.wave + 1}`;
+        }
+        break;
+      case 'fighting':
+        if (run.wave === 0 && run.elapsedInPhase < 0.8) message = 'FIGHT!';
         break;
       case 'cleared':
         message = 'CLEARED';
         break;
       case 'victory':
         message = 'VICTORY';
-        hint = `Score ${run.score}  -  back to hero select`;
         break;
       case 'defeat':
         message = 'BREACHED';
-        hint = `Score ${run.score}  -  back to hero select`;
         break;
     }
+    if (this.paused) message = 'PAUSED';
+    this.hud.mesh.visible = run.phase !== 'title' && !(this.panel.visible && !this.paused);
     this.hud.update(run, message, hint);
 
     // Float above and ahead of the player's gaze, catching up lazily.

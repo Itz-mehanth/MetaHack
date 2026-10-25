@@ -36,6 +36,8 @@ export class Claws {
   readonly tip = new Vector3();
   readonly direction = new Vector3(0, 0, -1);
   extension = 0;
+  /** Upgrade multiplier on blade length. */
+  lengthScale = 1;
 
   private readonly blades: Group[] = [];
   private readonly sheath: MeshBasicMaterial;
@@ -95,7 +97,7 @@ export class Claws {
     this.side.crossVectors(this.up, this.direction).negate();
     this.basis.makeBasis(this.side, this.up, this.back.copy(this.direction).negate());
     this.q.setFromRotationMatrix(this.basis);
-    const length = BLADE_LENGTH * this.extension;
+    const length = BLADE_LENGTH * this.extension * this.lengthScale;
     const flicker = 1 + Math.sin(time * 40) * 0.04;
     for (let i = 0; i < this.blades.length; i += 1) {
       const blade = this.blades[i];

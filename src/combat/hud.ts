@@ -1,5 +1,5 @@
 import { CanvasTexture, Mesh, MeshBasicMaterial, PlaneGeometry, SRGBColorSpace } from '@iwsdk/core';
-import { MAX_HEALTH, type Run } from './run.js';
+import type { Run } from './run.js';
 
 const WIDTH = 1024;
 const HEIGHT = 512;
@@ -41,7 +41,7 @@ export class Hud {
   }
 
   update(run: Run, message: string, hint: string): void {
-    const key = `${run.phase}|${run.wave}|${run.health}|${run.score}|${run.combo}|${message}|${hint}`;
+    const key = `${run.phase}|${run.wave}|${run.health}|${run.maxHealth}|${run.score}|${run.coins}|${run.combo}|${message}|${hint}`;
     if (key === this.lastKey) return;
     this.lastKey = key;
     const c = this.ctx;
@@ -82,15 +82,16 @@ export class Hud {
     c.fillText(`${Math.min(run.wave + 1, run.totalWaves)}/${run.totalWaves}`, 56, 94);
 
     // Health: segmented bar in the middle.
-    const segW = 58;
-    const gap = 10;
-    const total = MAX_HEALTH * segW + (MAX_HEALTH - 1) * gap;
+    const segments = run.maxHealth;
+    const gap = 8;
+    const segW = Math.min(58, (360 - (segments - 1) * gap) / segments);
+    const total = segments * segW + (segments - 1) * gap;
     const x0 = (WIDTH - total) / 2;
     c.fillStyle = '#FF7AC6';
     c.font = `700 22px ${FONT}`;
     c.textAlign = 'center';
     c.fillText('SHIELD', WIDTH / 2, 50);
-    for (let i = 0; i < MAX_HEALTH; i += 1) {
+    for (let i = 0; i < segments; i += 1) {
       const alive = i < run.health;
       c.save();
       c.beginPath();
@@ -111,6 +112,9 @@ export class Hud {
     c.fillStyle = '#FFFFFF';
     c.font = `900 46px ${FONT}`;
     c.fillText(run.score.toLocaleString('en-US'), WIDTH - 56, 94);
+    c.fillStyle = '#FFD23F';
+    c.font = `700 24px ${FONT}`;
+    c.fillText(`+${run.coins} C`, WIDTH - 210, 54);
 
     if (run.combo > 1) {
       this.glass(WIDTH - 260, 138, 212, 64, 20, 'rgba(255, 210, 63, 0.9)');

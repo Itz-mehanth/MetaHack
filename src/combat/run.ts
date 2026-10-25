@@ -1,16 +1,18 @@
-import { ENEMIES, type EnemyKind, type Mission, MISSIONS, type WaveDef } from './missions.js';
+import { ENEMIES, type EnemyKind, type WaveDef } from './missions.js';
+import { ENEMY_COINS, STAGES, type Stage } from './progression.js';
 
 /**
- * Pure run state for one mission: phases, waves, health, score, combo.
- * Times are seconds of game time supplied by the caller.
+ * Pure run state for one stage: phases, waves, health, score, combo and the
+ * coins collected from kills. Times are seconds of game time supplied by the
+ * caller. Menus decide what happens after victory or defeat.
  */
 
 export type Phase = 'title' | 'intro' | 'fighting' | 'cleared' | 'victory' | 'defeat';
 
-export const MAX_HEALTH = 5;
-export const INTRO_SECONDS = 3;
+/** First wave: stage name, then a 3-2-1 countdown. */
+export const FIRST_INTRO_SECONDS = 4;
+export const INTRO_SECONDS = 2.5;
 export const CLEARED_SECONDS = 2.5;
-export const RESULT_SECONDS = 5;
 export const COMBO_WINDOW = 2.5;
 /** Gap between enemies inside one spawn group. */
 export const BURST_GAP = 0.18;
@@ -20,14 +22,24 @@ export interface SpawnOrder {
   speed: number;
 }
 
+export interface RunOptions {
+  maxHealth: number;
+  /** Multiplies every wave's enemy speed (difficulty). */
+  speedScale: number;
+}
+
 export class Run {
   phase: Phase = 'title';
-  mission: Mission = MISSIONS[0];
+  stage: Stage = STAGES[0];
   wave = 0;
-  health = MAX_HEALTH;
+  maxHealth = 5;
+  health = 5;
   score = 0;
   combo = 0;
+  bestCombo = 0;
   kills = 0;
+  coins = 0;
+  private speedScale = 1;
   private phaseTime = 0;
   private spawned = 0;
   private alive = 0;
@@ -38,12 +50,12 @@ export class Run {
   constructor(private readonly random: () => number = Math.random) {}
 
   get waveDef(): WaveDef {
-    const waves = this.mission.waves;
+    const waves = this.stage.waves;
     return waves[Math.min(this.wave, waves.length - 1)];
   }
 
   get totalWaves(): number {
-    return this.mission.waves.length;
+    return this.stage.waves.length;
   }
 
   get aliveCount(): number {
@@ -55,19 +67,27 @@ export class Run {
     return this.phaseTime;
   }
 
-  /** Starts a fresh run of `mission` (defaults to the current one). */
-  start(mission: Mission = this.mission): void {
-    this.mission = mission;
+  get introLength(): number {
+    return this.wave === 0 ? FIRST_INTRO_SECONDS : INTRO_SECONDS;
+  }
+
+  /** Starts a fresh run of `stage` (defaults to the current one). */
+  start(stage: Stage = this.stage, options: RunOptions = { maxHealth: this.maxHealth, speedScale: this.speedScale }): void {
+    this.stage = stage;
+    this.maxHealth = options.maxHealth;
+    this.speedScale = options.speedScale;
     this.wave = 0;
-    this.health = MAX_HEALTH;
+    this.health = this.maxHealth;
     this.score = 0;
     this.combo = 0;
+    this.bestCombo = 0;
     this.kills = 0;
+    this.coins = 0;
     this.alive = 0;
     this.enter('intro');
   }
 
-  /** Abandons any run and returns to hero select. */
+  /** Abandons any run and returns to the menus. */
   toTitle(): void {
     this.alive = 0;
     this.combo = 0;
@@ -81,7 +101,7 @@ export class Run {
       this.comboTimer -= dt;
       if (this.comboTimer <= 0) this.combo = 0;
     }
-    if (this.phase === 'intro' && this.phaseTime >= INTRO_SECONDS) {
+    if (this.phase === 'intro' && this.phaseTime >= this.introLength) {
       this.spawned = 0;
       this.spawnTimer = 0;
       this.burstLeft = 0;
@@ -89,8 +109,6 @@ export class Run {
     } else if (this.phase === 'cleared' && this.phaseTime >= CLEARED_SECONDS) {
       this.wave += 1;
       this.enter('intro');
-    } else if ((this.phase === 'victory' || this.phase === 'defeat') && this.phaseTime >= RESULT_SECONDS) {
-      this.toTitle();
     } else if (this.phase === 'fighting' && this.spawned < this.waveDef.count) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
@@ -101,7 +119,7 @@ export class Run {
         this.spawned += 1;
         this.alive += 1;
         const kind = def.kinds[Math.min(def.kinds.length - 1, Math.floor(this.random() * def.kinds.length))];
-        return { kind, speed: def.speed };
+        return { kind, speed: def.speed * this.speedScale };
       }
     }
     return null;
@@ -113,8 +131,10 @@ export class Run {
     this.alive = Math.max(0, this.alive - 1);
     this.kills += 1;
     this.combo += 1;
+    this.bestCombo = Math.max(this.bestCombo, this.combo);
     this.comboTimer = COMBO_WINDOW;
     this.score += ENEMIES[kind].score * Math.min(this.combo, 8);
+    this.coins += ENEMY_COINS[kind];
     return this.checkWaveEnd();
   }
 

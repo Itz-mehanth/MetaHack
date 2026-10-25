@@ -6,21 +6,77 @@ export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
+  /** Music bus, created with the context; see Music. */
+  musicOut: GainNode | null = null;
+  private sfxVolume = 0.8;
+  private musicVolume = 0.6;
+  private readonly listeners: Array<(ctx: AudioContext) => void> = [];
 
   unlock(): void {
     if (this.ctx == null) {
       const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (Ctor == null) return;
       this.ctx = new Ctor();
+      const limiter = this.ctx.createDynamicsCompressor();
+      limiter.threshold.value = -10;
+      limiter.ratio.value = 8;
+      limiter.connect(this.ctx.destination);
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.5;
-      this.master.connect(this.ctx.destination);
+      this.master.gain.value = 0.5 * this.sfxVolume;
+      this.master.connect(limiter);
+      this.musicOut = this.ctx.createGain();
+      this.musicOut.gain.value = 0.35 * this.musicVolume;
+      this.musicOut.connect(limiter);
       const length = this.ctx.sampleRate;
       this.noise = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
       const data = this.noise.getChannelData(0);
       for (let i = 0; i < length; i += 1) data[i] = Math.random() * 2 - 1;
+      for (const listener of this.listeners) listener(this.ctx);
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /** Runs `listener` once the audio context exists (immediately if it does). */
+  onReady(listener: (ctx: AudioContext) => void): void {
+    if (this.ctx) listener(this.ctx);
+    else this.listeners.push(listener);
+  }
+
+  get noiseBuffer(): AudioBuffer | null {
+    return this.noise;
+  }
+
+  setVolumes(sfx: number, music: number): void {
+    this.sfxVolume = sfx;
+    this.musicVolume = music;
+    if (this.master) this.master.gain.value = 0.5 * sfx;
+    if (this.musicOut) this.musicOut.gain.value = 0.35 * music;
+  }
+
+  /** UI press. */
+  click(): void {
+    this.tone('square', 1800, 1200, 0.05, 0.12);
+    this.tone('sine', 600, 400, 0.06, 0.15);
+  }
+
+  /** Refused: locked or not enough coins. */
+  denied(): void {
+    this.tone('square', 220, 160, 0.12, 0.15);
+    this.tone('square', 180, 120, 0.14, 0.12, 0.1);
+  }
+
+  /** Purchase or reward. */
+  coin(): void {
+    this.tone('square', 988, 988, 0.08, 0.12);
+    this.tone('square', 1319, 1319, 0.25, 0.12, 0.08);
+  }
+
+  /** Countdown tick; `go` for the final FIGHT. */
+  beep(go = false): void {
+    if (go) {
+      this.tone('sawtooth', 440, 880, 0.35, 0.2);
+      this.tone('square', 880, 880, 0.4, 0.1);
+    } else this.tone('square', 660, 660, 0.12, 0.15);
   }
 
   private tone(type: OscillatorType, from: number, to: number, duration: number, gain: number, delay = 0): void {
