@@ -13,6 +13,7 @@ import {
   DoubleSide,
 } from '@iwsdk/core';
 import { createBlaster, createHammer } from './combat.scene-asset.js';
+import { createKatana } from './weapons.scene-asset.js';
 
 /**
  * Stylized hero statues for the hero-select carousel: about 1 m tall,
@@ -21,7 +22,7 @@ import { createBlaster, createHammer } from './combat.scene-asset.js';
  * All designs are original.
  */
 
-type HeroId = 'arc' | 'talon' | 'tempest' | 'orion' | 'weaver' | 'havoc';
+type HeroId = 'arc' | 'talon' | 'tempest' | 'orion' | 'weaver' | 'havoc' | 'ronin' | 'psion';
 
 const DEFAULT_ACCENT: Record<HeroId, string> = {
   arc: '#3DF5FF',
@@ -30,6 +31,8 @@ const DEFAULT_ACCENT: Record<HeroId, string> = {
   orion: '#5DFFB0',
   weaver: '#FF3D5A',
   havoc: '#FFB01F',
+  ronin: '#4DA6FF',
+  psion: '#E05CFF',
 };
 
 const SUIT: Record<HeroId, string> = {
@@ -39,6 +42,8 @@ const SUIT: Record<HeroId, string> = {
   orion: '#1B2A22',
   weaver: '#14182A',
   havoc: '#2A2018',
+  ronin: '#17171F',
+  psion: '#1E1428',
 };
 
 function accentMaterial(color: string): MeshStandardMaterial {
@@ -182,6 +187,58 @@ export function createHeroFigure(hero: HeroId): Group {
       if (mesh.isMesh && (mesh.material as MeshStandardMaterial).emissiveIntensity >= 2) mesh.material = accent;
     });
     root.add(pistol);
+  } else if (hero === 'ronin') {
+    // Crested helm, layered shoulder plates, sash, and a katana in each hand.
+    // Crescent-moon helmet crest, horns up.
+    const crest = part(new TorusGeometry(0.065, 0.007, 6, 24, Math.PI), accent, 0, 0.99, 0.065);
+    crest.rotation.x = -0.25;
+    root.add(crest);
+    for (const side of [-1, 1]) {
+      for (let k = 0; k < 3; k += 1) {
+        const plate = part(new BoxGeometry(0.1, 0.012, 0.11), trim, side * (0.17 + k * 0.01), 0.81 - k * 0.035);
+        plate.rotation.z = side * -(0.35 + k * 0.08);
+        root.add(plate);
+      }
+      const katana = createKatana(DEFAULT_ACCENT.ronin, 0.36);
+      katana.traverse((o) => {
+        const mesh = o as Mesh;
+        if (mesh.isMesh && (mesh.material as MeshStandardMaterial).emissiveIntensity >= 2) mesh.material = accent;
+      });
+      katana.position.set(side * 0.14, 0.53, 0.03);
+      katana.rotation.set(0.5, 0, side * -2.4);
+      root.add(katana);
+    }
+    const sash = part(new BoxGeometry(0.2, 0.05, 0.115), new MeshStandardMaterial({ color: '#5A1420', roughness: 0.8 }), 0, 0.52);
+    sash.rotation.z = 0.15;
+    root.add(sash);
+    const tail = part(new PlaneGeometry(0.06, 0.22), new MeshStandardMaterial({ color: '#5A1420', side: DoubleSide, roughness: 0.8 }), 0.07, 0.4, -0.06);
+    tail.rotation.z = 0.1;
+    root.add(tail);
+  } else if (hero === 'psion') {
+    // Hooded mystic: a halo of floating shards and a rock held aloft by the mind.
+    const hood = part(new SphereGeometry(0.09, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), suit, 0, 0.95, -0.01);
+    root.add(hood);
+    const robe = part(new CylinderGeometry(0.12, 0.24, 0.48, 16, 1, true), new MeshStandardMaterial({ color: '#2B1A3A', side: DoubleSide, roughness: 0.85 }), 0, 0.42);
+    robe.scale.z = 0.75;
+    root.add(robe);
+    root.add(part(new SphereGeometry(0.018, 10, 8), accent, 0, 0.98, 0.075));
+    const halo = part(new TorusGeometry(0.13, 0.004, 6, 40), accent, 0, 1.08, -0.02);
+    halo.rotation.x = Math.PI / 2 - 0.25;
+    root.add(halo);
+    const stone = new MeshStandardMaterial({ color: '#5B5248', roughness: 0.95, flatShading: true });
+    for (let k = 0; k < 5; k += 1) {
+      const a = (k / 5) * Math.PI * 2;
+      const shard = part(new ConeGeometry(0.018, 0.05, 5), stone, Math.cos(a) * 0.13, 1.08 + Math.sin(a * 3) * 0.02, Math.sin(a) * 0.13 - 0.02);
+      shard.rotation.set(a, 0, 0.5);
+      root.add(shard);
+    }
+    const rock = part(new SphereGeometry(0.07, 7, 5), stone, 0.27, 1.12, 0.05);
+    rock.scale.set(1.1, 0.8, 0.9);
+    root.add(rock, part(new SphereGeometry(0.03, 10, 8), accent, 0.2, 0.9, 0.05));
+    // Raised casting arm under the rock.
+    const raised = part(new CapsuleGeometry(0.03, 0.15, 4, 10), suit, 0.2, 0.86, 0.02);
+    raised.rotation.z = -0.5;
+    root.add(raised);
   } else {
     // Big white eye lenses and web-line rings across the suit.
     for (const side of [-1, 1]) {

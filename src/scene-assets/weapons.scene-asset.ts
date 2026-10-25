@@ -113,3 +113,57 @@ export function createWebShooterDisplay(): Group {
   }
   return root;
 }
+
+/** One katana along +Y, guard at the origin: wrapped hilt, gold guard, glowing blade. */
+export function createKatana(color: string, blade = 0.62): Group {
+  const root = new Group();
+  root.name = 'Katana';
+  const wrap = new MeshStandardMaterial({ color: '#15151C', roughness: 0.85, metalness: 0.1 });
+  const gold = new MeshStandardMaterial({ color: '#C9973A', roughness: 0.3, metalness: 1 });
+  const hilt = new Mesh(new CylinderGeometry(0.014, 0.016, 0.22, 10), wrap);
+  hilt.position.y = -0.11;
+  const guard = new Mesh(new CylinderGeometry(0.04, 0.04, 0.01, 18), gold);
+  guard.scale.z = 0.75;
+  const edge = new Mesh(new BoxGeometry(0.006, blade, 0.03), glow(color));
+  edge.position.y = blade / 2 + 0.005;
+  edge.rotation.x = -0.04;
+  const point = new Mesh(new ConeGeometry(0.021, 0.06, 4), glow(color));
+  point.scale.x = 0.2;
+  point.position.set(0, blade + 0.035, -0.012);
+  root.add(hilt, guard, edge, point);
+  return root;
+}
+
+/** RONIN: twin energy katanas crossed in an X. */
+export function createKatanaDisplay(): Group {
+  const root = new Group();
+  root.name = 'Weapon-ronin';
+  for (const side of [-1, 1]) {
+    const katana = createKatana('#4DA6FF');
+    katana.rotation.z = side * 0.7;
+    katana.position.set(side * 0.16, -0.2, side * 0.02);
+    root.add(katana);
+  }
+  return root;
+}
+
+/** PSION: a psychic core with shards of rock held in orbit around it. */
+export function createPsiDisplay(): Group {
+  const root = new Group();
+  root.name = 'Weapon-psion';
+  const core = new Mesh(new SphereGeometry(0.06, 20, 14), glow('#E05CFF'));
+  const shell = new Mesh(new TorusGeometry(0.11, 0.006, 6, 40), glow('#E05CFF'));
+  shell.rotation.x = 1.1;
+  const shell2 = new Mesh(new TorusGeometry(0.14, 0.004, 6, 40), glow('#FFFFFF'));
+  shell2.rotation.set(0.4, 0.9, 0);
+  root.add(core, shell, shell2);
+  const stone = new MeshStandardMaterial({ color: '#5B5248', roughness: 0.95, flatShading: true });
+  for (let i = 0; i < 6; i += 1) {
+    const a = (i / 6) * Math.PI * 2;
+    const shard = new Mesh(new ConeGeometry(0.03, 0.08, 5), stone);
+    shard.position.set(Math.cos(a) * 0.22, Math.sin(a * 2) * 0.05, Math.sin(a) * 0.22);
+    shard.rotation.set(a, a * 0.5, 0.6);
+    root.add(shard);
+  }
+  return root;
+}

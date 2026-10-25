@@ -24,6 +24,8 @@ import { Armory, TierAura } from './combat/armory.js';
 import { HeroCarousel } from './combat/carousel.js';
 import { applyRealism, loadSurfaceMaps } from './combat/materials.js';
 import { Claws } from './combat/claws.js';
+import { segmentDistance, Sword } from './combat/sword.js';
+import { PsiLink } from './combat/telekinesis.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
 import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose } from './combat/gestures.js';
@@ -92,6 +94,16 @@ const AIM_SMOOTHING = 0.45;
 const EMERGE_TIME = 0.9;
 const SLOWMO_SECONDS = 0.8;
 const SLOWMO_SCALE = 0.25;
+const SWORD_WAVE_SPEED = 3.4;
+const SWORD_WAVE_COOLDOWN = 0.45;
+const X_STRIKE_COOLDOWN = 2.5;
+/** Mean finger extension: open to aim, curled to grab, opened again to throw. */
+const PSI_OPEN = 1.6;
+const PSI_GRAB = 1.5;
+const PSI_RELEASE = 1.62;
+const PSI_LOCK_GRACE = 0.45;
+const PSI_THROW_MIN = 1.5;
+const PSI_GRAVITY = 3;
 
 const CYAN = new Color('#3DF5FF');
 const WHITE = new Color('#FFFFFF');
@@ -102,6 +114,9 @@ const PINK = new Color('#FF2D9A');
 const EMBER = new Color('#FF6A1A');
 const VIOLET = new Color('#9D8CFF');
 const GREEN = new Color('#39FF88');
+const BLOSSOM = new Color('#FF9AD5');
+const PSI = new Color('#E05CFF');
+const MINT = new Color('#3DFFC8');
 
 const ENEMY_ASSET: Readonly<Record<EnemyKind, string>> = {
   drone: 'alien-grunt',
@@ -125,7 +140,7 @@ const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   orb: ORANGE,
   pod: GOLD,
 };
-const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes'];
+const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins'];
 type PickupKind = 'heal' | 'rapid' | 'power';
 const BUFF_SECONDS = 8;
 
@@ -155,6 +170,31 @@ interface HandState {
   prevTip: Vector3;
   hasPrevTip: boolean;
   slashCooldown: number;
+  sword: Sword;
+  /** Seconds the sword stays lit after the fist last read as closed. */
+  swordHold: number;
+  psi: PsiLink;
+  held: Throwable | null;
+  aimObject: Throwable | null;
+  aimDrone: Drone | null;
+  aimTime: number;
+  release: number;
+}
+
+/** Something PSION can lift: a floor prop, or a slot carrying a lifted alien. */
+interface Throwable {
+  object: Object3D;
+  drone: Drone | null;
+  radius: number;
+  state: 'off' | 'spawn' | 'rest' | 'held' | 'flying';
+  /** Flung (hits and blasts on impact) rather than dropped. */
+  thrown: boolean;
+  velocity: Vector3;
+  previous: Vector3;
+  spin: Vector3;
+  home: Vector3;
+  t: number;
+  bashAt: number;
 }
 
 type DroneState = 'off' | 'emerging' | 'approach' | 'charge' | 'boss' | 'fly' | 'hold' | 'aim' | 'shot';
@@ -203,6 +243,9 @@ interface Drone {
   stride: number;
   /** Soft contact shadow on the floor (walkers only). */
   blob: Mesh | null;
+  /** Held or thrown by PSION: the walker AI is suspended. */
+  lifted: boolean;
+  bladeHitAt: number;
 }
 
 interface Pickup {
@@ -229,6 +272,8 @@ interface Bolt {
   previous: Vector3;
   velocity: Vector3;
   target: Drone | null;
+  /** Base size multiplier (crescents). */
+  scale: number;
 }
 
 function triple(): Triple {
@@ -322,6 +367,17 @@ export class CombatSystem extends createSystem({
   private weaponTierNow = 0;
   private holomap = new HoloMap();
   private markers = new Map<string, Object3D>();
+  private debris: Throwable[] = [];
+  private liftSlots: Throwable[] = [];
+  private xCooldown = 0;
+  private bladesCrossed = false;
+  private swordGrip = new Vector3();
+  private crossPoint = new Vector3();
+  private xDir = new Vector3();
+  private xRight = new Vector3();
+  private xUp = new Vector3();
+  private xDiag = new Vector3();
+  private impactPoint = new Vector3();
   private mapPokeCooldown = 0;
   private story: LevelStory | null = null;
   private taunt = '';
@@ -467,6 +523,10 @@ export class CombatSystem extends createSystem({
       const claws = new Claws(handedness, PINK);
       this.root.add(claws.group);
       const web = new WebStrand(this.root, PINK);
+      const sword = new Sword(handedness, CYAN);
+      this.root.add(sword.group, sword.trail);
+      const psi = new PsiLink(CYAN);
+      this.root.add(psi.group);
       const beamMaterial = new MeshBasicMaterial({
         color: CYAN,
         transparent: true,
@@ -504,6 +564,14 @@ export class CombatSystem extends createSystem({
         prevTip: new Vector3(),
         hasPrevTip: false,
         slashCooldown: 0,
+        sword,
+        swordHold: 0,
+        psi,
+        held: null,
+        aimObject: null,
+        aimDrone: null,
+        aimTime: -10,
+        release: 0,
       });
       this.handSlots.push(jointSlots(joints));
     }
@@ -572,6 +640,7 @@ export class CombatSystem extends createSystem({
         previous: new Vector3(),
         velocity: new Vector3(),
         target: null,
+        scale: 1,
       });
     }
 
@@ -664,6 +733,8 @@ export class CombatSystem extends createSystem({
           rig: this.findRig(object),
           stride: 0,
           blob: ENEMIES[kind].ground ? this.makeBlob() : null,
+          lifted: false,
+          bladeHitAt: -10,
         });
       }
     }
@@ -713,6 +784,8 @@ export class CombatSystem extends createSystem({
         rig: null,
         stride: 0,
         blob: null,
+        lifted: false,
+        bladeHitAt: -10,
       });
     }
     for (const kind of ['heal', 'rapid', 'power'] as const) {
@@ -758,6 +831,15 @@ export class CombatSystem extends createSystem({
       const display = { tempest: 'hammer', havoc: 'blaster' }[hero.id as string] ?? `weapon-${hero.id}`;
       this.weaponDisplays.set(hero.id, await this.world.assets.instantiate(display));
     }
+    // PSION's props, plus slots that carry lifted aliens.
+    for (const kind of ['crate', 'barrel', 'boulder', 'girder', 'crate', 'boulder'] as const) {
+      const object = await this.world.assets.instantiate(`debris-${kind}`);
+      addOutline(object, 0.03);
+      object.visible = false;
+      this.root.add(object);
+      this.debris.push(this.makeThrowable(object, (object.userData.radius as number | undefined) ?? 0.3));
+    }
+    for (let k = 0; k < 4; k += 1) this.liftSlots.push(this.makeThrowable(new Group(), 0.3));
     this.showMenu('main');
     this.ready = true;
     this.installDebugHooks();
@@ -885,6 +967,8 @@ export class CombatSystem extends createSystem({
     this.powersLive = live;
     this.updateHands(realDt);
     this.updateClaws(realDt);
+    this.updateSwords(realDt, time);
+    this.updatePsion(realDt, dt, time);
     this.updateHammer(realDt, time);
     this.updateBow(realDt);
     this.updateGun(realDt);
@@ -915,7 +999,7 @@ export class CombatSystem extends createSystem({
     this.carousel.update(realDt, time, this.head);
     this.armory.update(time);
     for (const aura of [this.hammerAura, this.gunAura, this.bowAura]) aura?.update(time);
-    if (this.weaponTierNow > 0 && this.powersLive && (this.hero === 'arc' || this.hero === 'talon' || this.hero === 'weaver')) {
+    if (this.weaponTierNow > 0 && this.powersLive && (this.hero === 'arc' || this.hero === 'talon' || this.hero === 'weaver' || this.hero === 'psion')) {
       // Worn powers: tier sparks swirl around the hands.
       for (const hand of this.hands) {
         if (!hand.tracked || Math.random() > this.weaponTierNow * 0.08) continue;
@@ -1116,6 +1200,9 @@ export class CombatSystem extends createSystem({
     this.overdrive = 0;
     this.applyWeaponTier();
     for (const pickup of this.pickups) this.retirePickup(pickup);
+    this.hideDebris();
+    if (hero === 'psion') this.placeDebris();
+    this.xCooldown = 0;
     this.spawnPods(this.story?.hostages ?? 0);
   }
 
@@ -1126,6 +1213,8 @@ export class CombatSystem extends createSystem({
       hand.gauntlet.setAccent(this.accent);
       hand.claws.setColor(this.accent);
       hand.web.setColor(this.accent);
+      hand.sword.setColor(this.accent);
+      hand.psi.setColor(this.accent);
       hand.beamMaterial.color.copy(this.accent);
       hand.glow.material.color.copy(this.accent);
     }
@@ -1170,6 +1259,7 @@ export class CombatSystem extends createSystem({
       if (drone.state !== 'off') this.retireDrone(drone);
     }
     this.tx = null;
+    this.hideDebris();
     this.showMenu('map');
   }
 
@@ -1600,6 +1690,16 @@ export class CombatSystem extends createSystem({
         // Glitch motes rising toward the rift.
         this.v2.set((Math.random() - 0.5) * 0.4, 0.4 + Math.random() * 0.6, (Math.random() - 0.5) * 0.4);
         this.particles.emit(this.v1, this.v2, Math.random() < 0.5 ? VIOLET : GREEN, 3, 0, 0);
+      } else if (ambient === 'petals') {
+        // Blossom petals drifting down through the moonlight.
+        this.v1.y = 2.2 + Math.random() * 1.2;
+        this.v2.set(0.4 + Math.random() * 0.3, -0.3 - Math.random() * 0.2, (Math.random() - 0.5) * 0.3);
+        this.particles.emit(this.v1, this.v2, Math.random() < 0.75 ? BLOSSOM : WHITE, 7, 0, 0);
+      } else if (ambient === 'motes') {
+        // Pebbles and psychic motes floating up into the sky.
+        this.v1.y = Math.random() * 0.8;
+        this.v2.set((Math.random() - 0.5) * 0.1, 0.12 + Math.random() * 0.15, (Math.random() - 0.5) * 0.1);
+        this.particles.emit(this.v1, this.v2, Math.random() < 0.5 ? PSI : MINT, 9, 0, 0);
       } else if (ambient === 'dust') {
         // Low, wind-blown dust.
         this.v1.y = Math.random() * 1.2;
@@ -2356,12 +2456,14 @@ export class CombatSystem extends createSystem({
     }
   }
 
-  private fireCrescent(origin: Vector3, direction: Vector3, bladeDirection: Vector3): void {
+  /** Slash wave; radius/damage/scale default to TALON's (with upgrades). */
+  private fireCrescent(origin: Vector3, direction: Vector3, bladeDirection: Vector3, radius?: number, damage?: number, scale = 1, quiet = false): void {
     const bolt = this.bolts.find((b) => !b.active);
     if (bolt == null) return;
     bolt.kind = 'crescent';
-    bolt.radius = 0.24 + 0.03 * this.level('talon-wave');
-    bolt.damage = 2 + Math.floor(this.level('talon-wave') / 2);
+    bolt.radius = radius ?? 0.24 + 0.03 * this.level('talon-wave');
+    bolt.damage = damage ?? 2 + Math.floor(this.level('talon-wave') / 2);
+    bolt.scale = scale;
     bolt.speed = CRESCENT_SPEED;
     bolt.target = null;
     bolt.bolt.visible = false;
@@ -2369,7 +2471,7 @@ export class CombatSystem extends createSystem({
     bolt.arrow.visible = false;
     bolt.pierceLeft = 99;
     bolt.gravity = 0;
-    bolt.crescent.scale.setScalar(1);
+    bolt.crescent.scale.setScalar(scale);
     bolt.active = true;
     bolt.life = BOLT_LIFE;
     bolt.position.copy(origin);
@@ -2383,8 +2485,496 @@ export class CombatSystem extends createSystem({
     this.v1.copy(origin).add(direction);
     bolt.object.lookAt(this.v1);
     bolt.object.visible = true;
+    if (quiet) return;
     this.flashes.spawn(origin, this.accent, 0.05, 0.35, 0.18);
     this.sfx.crescent();
+  }
+
+  // ---------------------------------------------------------------- RONIN
+
+  /**
+   * RONIN: a fist ignites a katana in that hand. Blades cut on contact,
+   * fast swings throw slash waves, and crossing both blades fires an
+   * X-strike.
+   */
+  private updateSwords(dt: number, time: number): void {
+    const active = this.powersLive && this.hero === 'ronin';
+    this.xCooldown -= dt;
+    for (let i = 0; i < this.hands.length; i += 1) {
+      const hand = this.hands[i];
+      const sword = hand.sword;
+      // A fist can read as open for a frame mid-swing; keep the blade lit.
+      if (active && hand.tracked && isFist(hand.joints)) hand.swordHold = 0.25;
+      else hand.swordHold -= dt;
+      const lit = active && hand.tracked && hand.swordHold > 0;
+      const was = sword.extension > 0.5;
+      sword.lengthScale = 1 + 0.08 * this.level('ronin-edge');
+      if (hand.tracked) this.gripPoint(i, this.swordGrip);
+      sword.update(hand.pose, this.swordGrip, lit, dt, time);
+      if (lit && !was && sword.extension > 0.5) {
+        this.sfx.shing();
+        this.particles.burst(sword.base, this.accent, 16, 1.2, 0.25, this.v2);
+      }
+      if (sword.extension < 0.9 || dt <= 0) {
+        hand.hasPrevTip = false;
+        continue;
+      }
+      if (!hand.hasPrevTip) {
+        hand.prevTip.copy(sword.tip);
+        hand.hasPrevTip = true;
+        continue;
+      }
+      const damage = 2 + Math.floor(this.level('ronin-edge') / 2);
+      for (const drone of this.drones) {
+        if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < 0.3) continue;
+        const radius = ENEMIES[drone.kind].radius + 0.04;
+        const at = drone.object.position;
+        if (this.segmentHits(sword.base, sword.tip, at, radius) || this.segmentHits(hand.prevTip, sword.tip, at, radius)) {
+          drone.bladeHitAt = this.elapsed;
+          this.sfx.slash();
+          this.particles.burst(at, WHITE, 18, 2.5, 0.25, this.v2);
+          this.damageDrone(drone, damage);
+        }
+      }
+      hand.slashCooldown -= dt;
+      if (sword.speed > SWORD_WAVE_SPEED && hand.slashCooldown <= 0) {
+        hand.slashCooldown = SWORD_WAVE_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
+        const wave = this.level('ronin-wave');
+        this.v4.subVectors(sword.tip, hand.prevTip).normalize();
+        this.fireCrescent(sword.tip, this.v4, sword.direction, 0.3 + 0.04 * wave, 2 + Math.ceil(wave / 2), 1.5 + 0.12 * wave);
+      }
+      // Weapon tier: flames lick up the blade.
+      if (this.weaponTierNow > 0 && Math.random() < this.weaponTierNow * 0.15) {
+        this.v1.copy(sword.base).lerp(sword.tip, Math.random());
+        this.v2.set((Math.random() - 0.5) * 0.1, 0.3 + Math.random() * 0.3, (Math.random() - 0.5) * 0.1);
+        this.particles.emit(this.v1, this.v2, Math.random() < 0.3 ? WHITE : this.accent, 0.35, 0.5, -0.4);
+      }
+      hand.prevTip.copy(sword.tip);
+    }
+    // Cross both blades for an X-strike.
+    const left = this.hands[0].sword;
+    const right = this.hands[1].sword;
+    if (!active || left.extension < 0.9 || right.extension < 0.9) {
+      this.bladesCrossed = false;
+      return;
+    }
+    const gap = segmentDistance(left.base, left.tip, right.base, right.tip, this.crossPoint, this.v2, this.v3, this.v4);
+    if (gap < 0.05 && !this.bladesCrossed) {
+      this.bladesCrossed = true;
+      this.sfx.clang();
+      this.flashes.spawn(this.crossPoint, WHITE, 0.05, 0.4, 0.15);
+      this.particles.burst(this.crossPoint, GOLD, 30, 2.5, 0.3, this.v2);
+      if (this.xCooldown <= 0) this.xStrike();
+    } else if (gap > 0.12) this.bladesCrossed = false;
+  }
+
+  /** Two huge crescents in an X from where the blades crossed. */
+  private xStrike(): void {
+    this.xCooldown = X_STRIKE_COOLDOWN * (1 - 0.12 * this.level('ronin-cross'));
+    const at = this.crossPoint;
+    // Along the gaze, snapped to the most centred enemy.
+    this.xDir.copy(this.forward);
+    let best = 0.88;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.state === 'shot' || drone.kind === 'pod') continue;
+      const cos = this.v2.subVectors(drone.object.position, at).normalize().dot(this.forward);
+      if (cos > best) {
+        best = cos;
+        this.xDir.copy(this.v2);
+      }
+    }
+    this.xRight.set(0, 1, 0).cross(this.xDir).normalize();
+    this.xUp.crossVectors(this.xDir, this.xRight).normalize();
+    const damage = 5 + this.level('ronin-cross');
+    for (let k = 0; k < 2; k += 1) {
+      this.xDiag.copy(this.xRight).multiplyScalar(k === 0 ? 1 : -1).add(this.xUp).normalize();
+      this.fireCrescent(at, this.xDir, this.xDiag, 0.55, damage, 2.6, true);
+    }
+    this.flashes.spawn(at, this.accent, 0.2, 1.6, 0.45);
+    this.particles.burst(at, this.accent, 70, 4, 0.5, this.v2);
+    this.v1.copy(at).addScaledVector(this.xDir, 0.6);
+    this.comic.pop('X-STRIKE!', this.v1, this.accent, 0.8);
+    this.sfx.thunderHit();
+    this.sfx.crescent();
+  }
+
+  // ---------------------------------------------------------------- PSION
+
+  private makeThrowable(object: Object3D, radius: number): Throwable {
+    return {
+      object,
+      drone: null,
+      radius,
+      state: 'off',
+      thrown: false,
+      velocity: new Vector3(),
+      previous: new Vector3(),
+      spin: new Vector3(),
+      home: new Vector3(),
+      t: 0,
+      bashAt: -10,
+    };
+  }
+
+  /** Scatters PSION's props across the floor in a front arc. */
+  private placeDebris(): void {
+    this.v3.set(this.forward.x, 0, this.forward.z);
+    if (this.v3.lengthSq() < 1e-4) this.v3.set(0, 0, -1);
+    this.v3.normalize();
+    const count = this.debris.length;
+    this.debris.forEach((item, i) => {
+      const angle = (i / Math.max(1, count - 1) - 0.5) * 2.4;
+      const distance = 1.4 + (i % 2) * 0.9;
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      item.home.set(this.v3.x * c - this.v3.z * s, 0, this.v3.x * s + this.v3.z * c);
+      item.home.multiplyScalar(distance).add(this.head);
+      item.home.y = item.radius * 0.8;
+      this.spawnDebris(item);
+    });
+  }
+
+  private spawnDebris(item: Throwable): void {
+    item.state = 'spawn';
+    item.thrown = false;
+    item.t = 0;
+    item.velocity.set(0, 0, 0);
+    item.object.position.copy(item.home);
+    item.object.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    item.object.scale.setScalar(0.01);
+    item.object.visible = true;
+    this.flashes.spawn(item.home, this.accent, 0.1, 0.9, 0.4);
+  }
+
+  private hideDebris(): void {
+    for (const hand of this.hands) {
+      hand.held = null;
+      hand.psi.hide();
+    }
+    for (const item of this.debris) {
+      item.state = 'off';
+      item.object.visible = false;
+    }
+    for (const slot of this.liftSlots) this.freeSlot(slot);
+  }
+
+  private freeSlot(slot: Throwable): void {
+    if (slot.drone) slot.drone.lifted = false;
+    slot.drone = null;
+    slot.state = 'off';
+  }
+
+  /** Walkers can be lifted; a Colossus only with IRON WILL level 3. */
+  private liftable(drone: Drone): boolean {
+    if (drone.lifted || !ENEMIES[drone.kind].ground) return false;
+    if (drone.state !== 'approach' && drone.state !== 'aim' && drone.state !== 'charge') return false;
+    return drone.kind !== 'titan' || this.level('psion-grip') >= 3;
+  }
+
+  /**
+   * PSION: point an open palm at a prop or an alien to lock on, close the
+   * hand to lift it, move the hand to steer it (amplified like a long
+   * lever), then fling and open the hand to throw.
+   */
+  private updatePsion(realDt: number, dt: number, time: number): void {
+    const active = this.powersLive && this.hero === 'psion';
+    for (const item of this.debris) {
+      if (item.state !== 'spawn') continue;
+      item.t += realDt;
+      item.object.scale.setScalar(Math.min(1, item.t / 0.5));
+      if (item.t >= 0.5) item.state = 'rest';
+    }
+    for (let i = 0; i < this.hands.length; i += 1) {
+      const hand = this.hands[i];
+      const psi = hand.psi;
+      if (!active || !hand.tracked) {
+        if (hand.held) this.releaseHeld(i, false);
+        hand.aimObject = null;
+        hand.aimDrone = null;
+        psi.hide();
+        continue;
+      }
+      const e = fingerExtension(hand.joints);
+      const curl = (e[0] + e[1] + e[2] + e[3]) / 4;
+      if (hand.held == null) {
+        if (curl > PSI_OPEN) this.psiAim(i);
+        else if (this.elapsed - hand.aimTime > PSI_LOCK_GRACE) {
+          hand.aimObject = null;
+          hand.aimDrone = null;
+        }
+        const aimed = hand.aimObject?.object.position ?? hand.aimDrone?.object.position ?? null;
+        const radius = hand.aimObject?.radius ?? (hand.aimDrone ? ENEMIES[hand.aimDrone.kind].radius : 0.3);
+        psi.aim(aimed, radius, this.head, time);
+        psi.link(hand.gauntlet.palmPoint, hand.gauntlet.palmNormal, null, 0, time);
+        if (aimed && curl < PSI_GRAB && this.elapsed - hand.aimTime < PSI_LOCK_GRACE) this.psiGrab(i);
+        continue;
+      }
+      psi.aim(null, 0, this.head, time);
+      if (curl > PSI_RELEASE) hand.release += realDt;
+      else hand.release = 0;
+      if (hand.release > 0.05) {
+        this.releaseHeld(i, true);
+        psi.hide();
+        continue;
+      }
+      const item = hand.held;
+      if (item.drone && (item.drone.state === 'off' || !item.drone.lifted)) {
+        // Destroyed while held.
+        this.freeSlot(item);
+        hand.held = null;
+        psi.hide();
+        continue;
+      }
+      this.holdThrowable(i, item, realDt, time);
+      psi.link(hand.gauntlet.palmPoint, hand.gauntlet.palmNormal, item.object.position, item.radius, time);
+    }
+    for (const item of this.debris) if (item.state === 'flying') this.updateThrowable(item, dt);
+    for (const slot of this.liftSlots) if (slot.state === 'flying') this.updateThrowable(slot, dt);
+  }
+
+  /** Locks hand `i` onto the prop or alien nearest its palm direction. */
+  private psiAim(i: number): void {
+    const hand = this.hands[i];
+    const origin = hand.gauntlet.palmPoint;
+    const direction = hand.gauntlet.palmNormal;
+    const reach = 9 + 1.5 * this.level('psion-grip');
+    let best = this.profile.settings.aimAssist ? 0.9 : 0.94;
+    let object: Throwable | null = null;
+    let enemy: Drone | null = null;
+    for (const item of this.debris) {
+      if (item.state !== 'rest') continue;
+      this.v1.subVectors(item.object.position, origin);
+      const distance = this.v1.length();
+      if (distance > reach) continue;
+      const cos = this.v1.divideScalar(Math.max(1e-4, distance)).dot(direction);
+      if (cos > best) {
+        best = cos;
+        object = item;
+      }
+    }
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || !this.liftable(drone)) continue;
+      this.v1.subVectors(drone.object.position, origin);
+      const distance = this.v1.length();
+      if (distance > reach) continue;
+      const cos = this.v1.divideScalar(Math.max(1e-4, distance)).dot(direction);
+      if (cos > best) {
+        best = cos;
+        object = null;
+        enemy = drone;
+      }
+    }
+    if (object || enemy) {
+      if (object !== hand.aimObject || enemy !== hand.aimDrone) this.sfx.ping();
+      hand.aimObject = object;
+      hand.aimDrone = enemy;
+      hand.aimTime = this.elapsed;
+    } else if (this.elapsed - hand.aimTime > PSI_LOCK_GRACE) {
+      hand.aimObject = null;
+      hand.aimDrone = null;
+    }
+  }
+
+  private psiGrab(i: number): void {
+    const hand = this.hands[i];
+    let item = hand.aimObject;
+    const drone = hand.aimDrone;
+    hand.aimObject = null;
+    hand.aimDrone = null;
+    if (item == null && drone != null) {
+      if (!this.liftable(drone)) return;
+      item = this.liftSlots.find((s) => s.state === 'off') ?? null;
+      if (item == null) return;
+      item.object = drone.object;
+      item.drone = drone;
+      item.radius = ENEMIES[drone.kind].radius;
+      drone.lifted = true;
+    }
+    if (item == null || (item.drone == null && item.state !== 'rest')) return;
+    item.state = 'held';
+    item.thrown = false;
+    item.previous.copy(item.object.position);
+    item.velocity.set(0, 0, 0);
+    hand.held = item;
+    hand.release = 0;
+    const at = item.object.position;
+    this.sfx.lift();
+    this.flashes.spawn(at, this.accent, 0.1, 0.8, 0.3);
+    this.particles.burst(at, this.accent, 26, 1.4, 0.4, this.v2);
+    if (drone && this.comicCooldown <= 0) {
+      this.comicCooldown = 0.5;
+      this.v1.copy(at).setY(at.y + 0.4);
+      this.comic.pop('LIFT!', this.v1, this.accent, 0.4);
+    }
+  }
+
+  /** Steers a held object: the hand's offset from the chest on a long lever. */
+  private holdThrowable(i: number, item: Throwable, dt: number, time: number): void {
+    const hand = this.hands[i];
+    this.v1.copy(this.head);
+    this.v1.y -= 0.3;
+    this.v2.subVectors(hand.gauntlet.palmPoint, this.v1);
+    const reach = this.v2.length();
+    this.v2.divideScalar(Math.max(1e-4, reach));
+    const distance = Math.min(3.2, Math.max(0.8, 1.1 + (reach - 0.3) * 5));
+    this.v3.copy(this.v1).addScaledVector(this.v2, distance);
+    this.v3.y = Math.max(this.v3.y, item.radius + (item.drone ? 0.6 : 0.15));
+    const position = item.object.position;
+    item.previous.copy(position);
+    position.lerp(this.v3, Math.min(1, dt * 9));
+    position.y += Math.sin(time * 3 + i * 2) * 0.002;
+    if (dt > 0) {
+      this.v4.subVectors(position, item.previous).divideScalar(dt);
+      item.velocity.lerp(this.v4, 0.45);
+    }
+    const drone = item.drone;
+    if (drone) {
+      // A lifted alien struggles helplessly.
+      this.faceHead(drone.object);
+      drone.object.rotation.x = Math.sin(time * 9 + i) * 0.25;
+      const rig = drone.rig;
+      if (rig) {
+        const kick = Math.sin(time * 14 + i) * 0.7;
+        rig.legL.rotation.x = kick;
+        rig.legR.rotation.x = -kick;
+        rig.armL.rotation.x = rig.armLRest - kick * 0.8;
+        rig.armR.rotation.x = rig.armRRest + kick * 0.8;
+      }
+    } else {
+      item.object.rotation.x += dt * 0.5;
+      item.object.rotation.y += dt * 0.8;
+    }
+    if (Math.random() < 0.3) {
+      this.v1.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(item.radius * 2).add(position);
+      this.v2.set(0, 0.3, 0);
+      this.particles.emit(this.v1, this.v2, this.accent, 0.5, 0.5, -0.2);
+    }
+    // Bash: swing a held object through enemies.
+    if (item.velocity.lengthSq() > 9 && this.elapsed - item.bashAt > 0.35) {
+      for (const target of this.drones) {
+        if (target.state === 'off' || target.state === 'emerging' || target === drone) continue;
+        if (position.distanceTo(target.object.position) > item.radius + ENEMIES[target.kind].radius) continue;
+        item.bashAt = this.elapsed;
+        this.flashes.spawn(target.object.position, WHITE, 0.1, 0.6, 0.15);
+        this.sfx.catchHammer();
+        this.damageDrone(target, 2);
+        break;
+      }
+    }
+  }
+
+  /** Lets go of hand `i`'s object: thrown if flung fast, else it drops. */
+  private releaseHeld(i: number, flung: boolean): void {
+    const hand = this.hands[i];
+    const item = hand.held;
+    hand.held = null;
+    hand.release = 0;
+    if (item == null) return;
+    item.state = 'flying';
+    item.t = 0;
+    item.thrown = false;
+    const speed = item.velocity.length();
+    if (!flung || speed < PSI_THROW_MIN) return;
+    // Aim assist: snap to the enemy nearest the throw line.
+    const position = item.object.position;
+    this.v1.copy(item.velocity).divideScalar(speed);
+    let best = this.profile.settings.aimAssist ? 0.8 : 0.95;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.state === 'shot' || drone === item.drone) continue;
+      if (drone.kind === 'pod' || drone.kind === 'orb') continue;
+      const cos = this.v2.subVectors(drone.object.position, position).normalize().dot(this.v1);
+      if (cos > best) {
+        best = cos;
+        this.v3.copy(this.v2);
+      }
+    }
+    if (best > (this.profile.settings.aimAssist ? 0.8 : 0.95)) this.v1.copy(this.v3);
+    item.velocity.copy(this.v1).multiplyScalar(Math.min(20, Math.max(9, speed * 1.6)));
+    item.spin.set(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5);
+    item.thrown = true;
+    this.flashes.spawn(position, this.accent, 0.1, 0.7, 0.2);
+    this.sfx.crescent();
+  }
+
+  private updateThrowable(item: Throwable, dt: number): void {
+    if (dt <= 0) return;
+    const drone = item.drone;
+    if (drone && (drone.state === 'off' || !drone.lifted)) {
+      this.freeSlot(item);
+      return;
+    }
+    item.t += dt;
+    const position = item.object.position;
+    item.previous.copy(position);
+    item.velocity.y -= (item.thrown ? PSI_GRAVITY : 9.8) * dt;
+    position.addScaledVector(item.velocity, dt);
+    if (item.thrown) {
+      item.object.rotation.x += item.spin.x * dt;
+      item.object.rotation.y += item.spin.y * dt;
+      item.object.rotation.z += item.spin.z * dt;
+      this.v2.set(0, 0, 0);
+      this.particles.emit(item.previous, this.v2, this.accent, 0.3, 0);
+    }
+    let hit: Drone | null = null;
+    if (item.thrown) {
+      for (const target of this.drones) {
+        if (target.state === 'off' || target.state === 'emerging' || target === drone) continue;
+        if (this.segmentHits(item.previous, position, target.object.position, ENEMIES[target.kind].radius + item.radius)) {
+          hit = target;
+          break;
+        }
+      }
+    }
+    const floor = drone ? ENEMIES[drone.kind].ground!.chest : this.surfaceBelow(position) + item.radius * 0.8;
+    if (hit == null && position.y > floor && item.t < 4) return;
+    if (item.thrown) this.psiImpact(position, hit, drone);
+    if (drone) {
+      position.y = floor;
+      this.freeSlot(item);
+      drone.object.rotation.set(0, drone.object.rotation.y, 0);
+      if (item.thrown) this.damageDrone(drone, 3 + this.level('psion-mass'));
+      return;
+    }
+    if (hit) {
+      // Bounce off whatever it hit, then fall.
+      item.velocity.multiplyScalar(-0.25);
+      item.velocity.y = 2;
+      item.thrown = false;
+      return;
+    }
+    if (position.distanceTo(this.head) > 6 || item.t >= 4) {
+      this.spawnDebris(item);
+      return;
+    }
+    position.y = floor;
+    item.object.rotation.set(0, item.object.rotation.y, 0);
+    item.velocity.set(0, 0, 0);
+    item.state = 'rest';
+    this.particles.burst(position, WHITE, 12, 0.8, 0.3, this.v2);
+    this.sfx.catchHammer();
+  }
+
+  /** A thrown object lands: blast damage around it, extra on a direct hit. */
+  private psiImpact(at: Vector3, hit: Drone | null, thrown: Drone | null): void {
+    const radius = 1 + 0.2 * this.level('psion-quake');
+    const damage = 3 + Math.ceil(this.level('psion-mass') / 2);
+    this.impactPoint.copy(at);
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone === thrown) continue;
+      if (drone.object.position.distanceTo(this.impactPoint) > radius + ENEMIES[drone.kind].radius) continue;
+      this.damageDrone(drone, drone === hit ? damage + 2 : damage);
+    }
+    const p = this.impactPoint;
+    this.flashes.spawn(p, this.accent, 0.2, 1.4 + radius * 0.3, 0.45);
+    this.flashes.spawn(p, WHITE, 0.1, 0.6, 0.15);
+    this.particles.burst(p, this.accent, 60, 4, 0.5, this.v2);
+    this.particles.burst(p, GOLD, 25, 3, 0.4, this.v2);
+    this.sfx.thunderHit();
+    if (this.comicCooldown <= 0) {
+      this.comicCooldown = 0.35;
+      this.v1.copy(p).setY(p.y + 0.4);
+      this.comic.random('psion', this.v1, this.accent, 0.5);
+    }
   }
 
   // ---------------------------------------------------------------- bolts
@@ -2457,7 +3047,7 @@ export class CombatSystem extends createSystem({
       this.v2.set(0, 0, 0);
       const crescent = bolt.kind === 'crescent';
       this.particles.emit(bolt.previous, this.v2, bolt.kind === 'bolt' ? CYAN : this.accent, crescent ? 0.3 : 0.18, 0);
-      if (crescent) bolt.crescent.scale.setScalar(1 + (BOLT_LIFE - bolt.life) * 1.2);
+      if (crescent) bolt.crescent.scale.setScalar(bolt.scale * (1 + (BOLT_LIFE - bolt.life) * 1.2));
 
 
       for (const drone of this.drones) {
@@ -2544,7 +3134,7 @@ export class CombatSystem extends createSystem({
       this.run.kill('boss');
       return null;
     }
-    const scale = 1 + REGIONS.indexOf(region) * 0.2;
+    const scale = 1 + Math.min(5, REGIONS.indexOf(region)) * 0.2;
     boss.counted = true;
     boss.maxHp = ENEMIES.boss.hp * scale;
     boss.hp = boss.maxHp;
@@ -2854,6 +3444,7 @@ export class CombatSystem extends createSystem({
         this.updateBoss(drone, dt, time);
         continue;
       }
+      if (drone.lifted) continue;
       if (drone.state === 'hold') {
         // Hostage pod: hover, spin the bars, wave for help.
         drone.object.position.copy(drone.spawn);
@@ -3125,6 +3716,8 @@ export class CombatSystem extends createSystem({
     drone.eye.scale.setScalar(1);
     drone.snare = 0;
     drone.cocoon.visible = false;
+    drone.lifted = false;
+    drone.object.rotation.x = 0;
   }
 
   /** Removes an enemy silently (restart or quit). */
@@ -3135,6 +3728,8 @@ export class CombatSystem extends createSystem({
     drone.eye.scale.setScalar(1);
     drone.snare = 0;
     drone.cocoon.visible = false;
+    drone.lifted = false;
+    drone.object.rotation.x = 0;
   }
 
   // ---------------------------------------------------------------- phases

@@ -384,15 +384,17 @@ export class GameMenus {
     const accent = equippedColor(p, hero);
     const widgets: Widget[] = [BACK];
     const owned = HEROES.filter((h) => p.heroes.includes(h.id) && PLAYABLE.includes(h.id));
+    // One row of hero tabs, sized to fit however many are owned.
+    const tab = Math.min(270, (1472 - (owned.length - 1) * 12) / Math.max(1, owned.length));
     owned.forEach((h, i) => {
       widgets.push({
         id: `garage-hero:${h.id}`,
-        x: 64 + i * 290,
+        x: 64 + i * (tab + 12),
         y: 230,
-        w: 270,
+        w: tab,
         h: 76,
         label: h.name,
-        size: 30,
+        size: tab < 200 ? 26 : 30,
         color: equippedColor(p, h.id),
         selected: h.id === hero,
       });

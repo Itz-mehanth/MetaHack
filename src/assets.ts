@@ -13,11 +13,14 @@ import {
   createSwarmer,
   createTitan,
 } from './scene-assets/combat.scene-asset.js';
+import { createDebris } from './scene-assets/props.scene-asset.js';
 import { createHeroFigure, createPedestal } from './scene-assets/heroes.scene-asset.js';
 import {
   createBowDisplay,
   createClawDisplay,
   createGauntletDisplay,
+  createKatanaDisplay,
+  createPsiDisplay,
   createWebShooterDisplay,
 } from './scene-assets/weapons.scene-asset.js';
 import {
@@ -52,6 +55,12 @@ export default defineAssets({
   'weapon-talon': createClawDisplay(),
   'weapon-orion': createBowDisplay(),
   'weapon-weaver': createWebShooterDisplay(),
+  'weapon-ronin': createKatanaDisplay(),
+  'weapon-psion': createPsiDisplay(),
+  'debris-crate': createDebris('crate'),
+  'debris-barrel': createDebris('barrel'),
+  'debris-boulder': createDebris('boulder'),
+  'debris-girder': createDebris('girder'),
   'alien-grunt': createAlien('grunt'),
   'alien-brute': createAlien('brute'),
   'alien-stalker': createAlien('stalker'),
@@ -62,6 +71,8 @@ export default defineAssets({
   'boss-frost-spire': createBoss('#9FE8FF'),
   'boss-void-rift': createBoss('#C04DFF'),
   'boss-scrap-wastes': createBoss('#FF5A1F'),
+  'boss-moon-temple': createBoss('#FF3355'),
+  'boss-sky-ruins': createBoss('#E05CFF'),
   orb: createOrb(),
   pod: createPod(),
   'pickup-heal': createPickup('heal'),
@@ -73,6 +84,8 @@ export default defineAssets({
   'hero-orion': createHeroFigure('orion'),
   'hero-weaver': createHeroFigure('weaver'),
   'hero-havoc': createHeroFigure('havoc'),
+  'hero-ronin': createHeroFigure('ronin'),
+  'hero-psion': createHeroFigure('psion'),
   pedestal: createPedestal(),
   core: createCore(),
   'work-table': createWorkTable(),

@@ -1,6 +1,6 @@
 import type { Color, Mesh, MeshBasicMaterial, Object3D, ShaderMaterial } from '@iwsdk/core';
 
-export type Ambient = 'data' | 'embers' | 'storm' | 'snow' | 'void' | 'dust';
+export type Ambient = 'data' | 'embers' | 'storm' | 'snow' | 'void' | 'dust' | 'petals' | 'motes';
 
 export interface Theme {
   readonly top: string;
@@ -88,6 +88,30 @@ export const THEMES: Readonly<Record<string, Theme>> = {
     bandA: '#FF5A1F',
     bandB: '#3DE0C8',
     ambient: 'dust',
+  },
+  'moon-temple': {
+    top: '#01030C',
+    mid: '#0B1838',
+    horizon: '#E8EEFF',
+    accent: '#FF3355',
+    gridMinor: '#2E5CA8',
+    gridMajor: '#4DA6FF',
+    ring: '#4DA6FF',
+    bandA: '#4DA6FF',
+    bandB: '#FF3355',
+    ambient: 'petals',
+  },
+  'sky-ruins': {
+    top: '#0A0418',
+    mid: '#2A1450',
+    horizon: '#FFB0F0',
+    accent: '#3DFFC8',
+    gridMinor: '#8A3DC8',
+    gridMajor: '#E05CFF',
+    ring: '#E05CFF',
+    bandA: '#E05CFF',
+    bandB: '#3DFFC8',
+    ambient: 'motes',
   },
 };
 

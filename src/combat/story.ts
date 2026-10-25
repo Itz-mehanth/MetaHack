@@ -380,6 +380,112 @@ export const CHAPTERS: readonly Chapter[] = [
       },
     ],
   },
+  {
+    hero: 'ronin',
+    worldId: 'moon-temple',
+    region: 'MOONFALL',
+    villain: { name: 'IRON ONI', title: 'Blade Warlord', color: '#FF3355' },
+    levels: [
+      {
+        location: 'TEMPLE STEPS',
+        blurb: 'Legion stalkers swarm the mountain temple. Monks are caged on the steps.',
+        hostages: 3,
+        intro: [
+          { speaker: 'villain', text: 'Two swords. One heartbeat. Let us see how long it lasts.' },
+          { speaker: 'hero', text: 'Long enough to cut through all of you.' },
+        ],
+        outro: [
+          { speaker: 'civilian', text: 'The steps are free! The bell can ring again!' },
+          { speaker: 'villain', text: 'A good first cut. The bamboo sea will swallow you.' },
+        ],
+        taunts: ['Surround the swordsman!', 'Strike from the shadows!'],
+        reward: overdrive('ronin'),
+        map: [-0.6, 0.35],
+      },
+      {
+        location: 'BAMBOO SEA',
+        blurb: 'A moonlit forest crawling with Legion hunters. Villagers are hidden in cages.',
+        hostages: 4,
+        intro: [
+          { speaker: 'villain', text: 'My hunters move faster than your blades.' },
+          { speaker: 'hero', text: 'Then I will cross them.' },
+        ],
+        outro: [{ speaker: 'villain', text: 'Come to the moon gate, RONIN. Duel me.' }],
+        taunts: ['Faster! FASTER!', 'Cut the hero down!'],
+        reward: core('ronin'),
+        map: [0.0, 0.0],
+      },
+      {
+        location: 'MOON GATE',
+        blurb: 'Boss: IRON ONI, in a war-mech forged from a thousand broken swords.',
+        hostages: 3,
+        intro: [
+          { speaker: 'villain', text: 'Every blade I broke is part of me now.' },
+          { speaker: 'hero', text: 'Then mine will be the last.' },
+        ],
+        outro: [
+          { speaker: 'villain', text: 'Cut... clean...' },
+          { speaker: 'vex', text: 'The temple falls? Then I will bring the sky down on them.' },
+        ],
+        taunts: ['I am the edge!', 'Kneel to iron!', 'Your blades will snap!'],
+        reward: legend('ronin'),
+        map: [0.6, -0.5],
+      },
+    ],
+  },
+  {
+    hero: 'psion',
+    worldId: 'sky-ruins',
+    region: 'DRIFTHOLM',
+    villain: { name: 'MONOLITH', title: 'Gravity Tyrant', color: '#E05CFF' },
+    levels: [
+      {
+        location: 'FLOATING DOCKS',
+        blurb: 'Islands hang in the sky. Legion brutes hold the docks and the people on them.',
+        hostages: 3,
+        intro: [
+          { speaker: 'villain', text: 'Gravity answers to ME up here.' },
+          { speaker: 'hero', text: 'Funny. Everything else answers to me.' },
+        ],
+        outro: [
+          { speaker: 'civilian', text: 'A whole crate flew at them! We are saved!' },
+          { speaker: 'villain', text: 'Parlour tricks. The sky bridge will bury you.' },
+        ],
+        taunts: ['Crush the mind-witch!', 'Do not let it see you!'],
+        reward: overdrive('psion'),
+        map: [-0.55, 0.3],
+      },
+      {
+        location: 'SKY BRIDGE',
+        blurb: 'A shattered bridge of stone between islands. Colossi guard the crossing.',
+        hostages: 4,
+        intro: [
+          { speaker: 'villain', text: 'My Colossi are too heavy for any mind.' },
+          { speaker: 'hero', text: 'We will see what they weigh in the air.' },
+        ],
+        outro: [{ speaker: 'villain', text: 'Enough. Come to the gravity well and be crushed.' }],
+        taunts: ['Colossus, forward!', 'Stay on the ground!'],
+        reward: core('psion'),
+        map: [0.05, -0.05],
+      },
+      {
+        location: 'GRAVITY WELL',
+        blurb: 'Boss: MONOLITH, a floating fortress that bends the sky around it.',
+        hostages: 3,
+        intro: [
+          { speaker: 'villain', text: 'I hold up mountains. What do you hold?' },
+          { speaker: 'hero', text: 'Everything you dropped.' },
+        ],
+        outro: [
+          { speaker: 'villain', text: 'The sky... is falling...' },
+          { speaker: 'vex', text: 'Eight heroes now. It does not matter. I am still coming.' },
+        ],
+        taunts: ['FALL!', 'Be crushed!', 'I am the weight of the world!'],
+        reward: legend('psion'),
+        map: [0.6, -0.5],
+      },
+    ],
+  },
 ];
 
 export function chapterFor(hero: HeroId): Chapter {

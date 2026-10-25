@@ -28,6 +28,9 @@ interface TrackDef {
 const MINOR = [0, 2, 3, 5, 7, 8, 10];
 const PHRYGIAN = [0, 1, 3, 5, 7, 8, 10];
 const DORIAN = [0, 2, 3, 5, 7, 9, 10];
+/** Japanese-flavoured pentatonic (hirajoshi), extended to seven degrees. */
+const HIRAJOSHI = [0, 2, 3, 7, 8, 12, 14];
+const LYDIAN = [0, 2, 4, 6, 7, 9, 11];
 
 /** 16-step patterns: x = hit, o = soft hit, . = rest. */
 export const TRACKS: Readonly<Record<string, TrackDef>> = {
@@ -114,6 +117,34 @@ export const TRACKS: Readonly<Record<string, TrackDef>> = {
     bassWave: 'square',
     bassCutoff: 650,
     pad: 0.03,
+  },
+  'moon-temple': {
+    bpm: 116,
+    root: 40,
+    scale: HIRAJOSHI,
+    chords: [0, 3, 0, 4],
+    kick: 'x.....x...x.....',
+    snare: '....x.......x.x.',
+    hat: '..x...x...x...xx',
+    arp: '0.2.4.3.0.2.6.4.',
+    arpWave: 'triangle',
+    bassWave: 'sawtooth',
+    bassCutoff: 600,
+    pad: 0.04,
+  },
+  'sky-ruins': {
+    bpm: 96,
+    root: 41,
+    scale: LYDIAN,
+    chords: [0, 1, 5, 4],
+    kick: 'x.......x...x...',
+    snare: '....x.......x...',
+    hat: 'o.o.o.o.o.o.o.o.',
+    arp: '0.4.6.4.0.4.6.5.',
+    arpWave: 'sine',
+    bassWave: 'triangle',
+    bassCutoff: 500,
+    pad: 0.07,
   },
   'void-rift': {
     bpm: 120,

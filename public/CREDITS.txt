@@ -5,7 +5,8 @@ Icons from game-icons.net, licensed under Creative Commons BY 3.0
   - Lorc (http://lorcblog.blogspot.com): laser-blast, claw-slashes, high-shot,
     spider-web, checked-shield, daemon-skull, skull-crack, gears, cog,
     sunbeams, sprint, muscle-up, shining-heart, treasure-map, crossed-swords,
-    padlock, trophy, broken-shield, wingfoot, stopwatch, radar-sweep, ray-gun
+    padlock, trophy, broken-shield, wingfoot, stopwatch, radar-sweep, ray-gun,
+    crossed-sabres, psychic-waves
   - Delapouite (http://delapouite.com): thor-hammer (used as a generic hammer
     icon), two-coins, prisoner, round-star
 Icons were recoloured (background removed, tinted at runtime).

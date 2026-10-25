@@ -168,6 +168,19 @@ export class Sfx {
     this.tone('sawtooth', 600, 120, 0.12, 0.15);
   }
 
+  /** Two blades crossing: a bright metallic ring. */
+  clang(): void {
+    this.tone('triangle', 2350, 2200, 0.45, 0.12);
+    this.tone('square', 3520, 3300, 0.12, 0.04);
+    this.hissHigh(0.1, 0.4);
+  }
+
+  /** Telekinetic lift: a rising hum. */
+  lift(): void {
+    this.tone('sine', 140, 520, 0.45, 0.16);
+    this.tone('triangle', 280, 1040, 0.35, 0.05);
+  }
+
   /** Thrown shockwave. */
   crescent(): void {
     this.tone('sawtooth', 300, 1200, 0.18, 0.12);

@@ -7,13 +7,16 @@ Submission deadline: **Nov 18, 2026, 12:00 PM PST (Nov 19, 1:30 AM IST)**. Aim t
 **SURGE: Hands of Heroes** - a hands-only MR/VR hero-combat game. Original IP
 throughout (no Marvel or other third-party names/designs).
 
-- Story campaign: Warlord VEX and the Hollow Legion cage civilians; six
-  regions, one per hero, three levels each ending in a boss (18 missions).
+- Story campaign: Warlord VEX and the Hollow Legion cage civilians; eight
+  regions, one per hero, three levels each ending in a boss (24 missions).
   Typewriter "incoming transmission" dialogue (no voices).
 - Heroes: ARC palm blaster, TALON energy claws, TEMPEST storm hammer,
-  ORION light bow, WEAVER light webs, HAVOC plasma pistol. Hammer, bow and
+  ORION light bow, WEAVER light webs, HAVOC plasma pistol, RONIN, PSION. Hammer, bow and
   pistol are physical: they drop onto the floor or real tables, either hand
-  grabs or recalls them.
+  grabs or recalls them. RONIN twin katanas (fist ignites a blade per hand,
+  fast swings throw slash waves, crossing both blades fires an X-strike).
+  PSION telekinesis (open palm locks onto a prop or alien, close to lift,
+  fling and open to throw; impacts blast nearby enemies).
 - Enemies: walking humanoid aliens (Grunt, Brute, Stalker, Colossus) from
   wall portals, plasma shots you dodge or shoot; flying boss mechs.
 - Flow: landing page -> 3D hero carousel -> holographic war map -> mission

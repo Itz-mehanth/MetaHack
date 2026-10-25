@@ -49,7 +49,7 @@ const CSS = `
 #landing .note{margin-top:10px;font-size:14px;opacity:.7;min-height:1em}
 #landing h2{font-family:'Bangers',sans-serif;font-weight:400;letter-spacing:.08em;font-size:32px;margin:38px 0 14px;
   color:#fff;-webkit-text-stroke:1.5px var(--ink);paint-order:stroke fill;text-shadow:3px 3px 0 var(--pink)}
-#landing .roster{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+#landing .roster{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 #landing .hero{position:relative;background:#0D0820;border:4px solid var(--ink);border-radius:14px;padding:16px 10px 14px;
   box-shadow:5px 5px 0 var(--ink),0 0 0 2px var(--c) inset;transform:rotate(var(--r));transition:transform .15s}
 #landing .hero:hover{transform:rotate(0) scale(1.05)}
@@ -94,7 +94,7 @@ const HTML = () => `
   <div class="kicker">
     <span class="badge">HAND TRACKING ONLY</span>
     <span class="badge alt">MIXED REALITY</span>
-    <span class="badge alt2">6 HEROES &middot; 18 MISSIONS &middot; 6 BOSSES</span>
+    <span class="badge alt2">8 HEROES &middot; 24 MISSIONS &middot; 8 BOSSES</span>
   </div>
   <div class="burst"><h1>SURGE</h1></div>
   <div class="sub">HANDS OF HEROES</div>

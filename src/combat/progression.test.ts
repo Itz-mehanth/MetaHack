@@ -167,3 +167,16 @@ describe('profile', () => {
     expect(partial.heroes).toEqual(['arc']);
   });
 });
+
+describe('new heroes', () => {
+  it('gives RONIN and PSION a region, upgrades, skins and a price', () => {
+    for (const hero of ['ronin', 'psion'] as const) {
+      expect(STAGES.filter((s) => s.world.id === (hero === 'ronin' ? 'moon-temple' : 'sky-ruins'))).toHaveLength(STAGES_PER_WORLD);
+      expect(SKINS.filter((s) => s.hero === hero)).toHaveLength(3);
+      const p = defaultProfile();
+      p.coins = 100000;
+      expect(buyHero(p, hero)).toBe(true);
+      expect(upgradeCap(p, `${hero === 'ronin' ? 'ronin-edge' : 'psion-mass'}`)).toBe(1);
+    }
+  });
+});
