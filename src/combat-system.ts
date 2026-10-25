@@ -32,6 +32,7 @@ import { PsiLink } from './combat/telekinesis.js';
 import { CLAP_TIP, Coach, HERO_TIPS, type Tip } from './combat/coach.js';
 import { BloodPools, BloodScreen, captureParts, Gibs, type Part, type PartName, restorePart } from './combat/bodies.js';
 import { Galaxy } from './combat/galaxy.js';
+import { createRagdoll, RAG, Room, type Verlet } from './combat/physics.js';
 import { lookFor, transitFor, WORLD_LOOKS } from './combat/worlds.js';
 import { CHAMPIONS, TWIST_INFO, type TwistId, twistFor } from './combat/twists.js';
 import { Transit } from './combat/transit.js';
@@ -280,6 +281,11 @@ interface Rig {
   upperRest: number;
   bladeBase: Object3D | null;
   bladeTip: Object3D | null;
+  head: Object3D | null;
+  /** legL, legR, kneeL, kneeR, armL, armR, elbowL, elbowR, upper; and their rest poses. */
+  bones: Object3D[];
+  rest: Quaternion[];
+  headRest: Quaternion | null;
 }
 
 interface Drone {
@@ -343,6 +349,12 @@ interface Drone {
   burn: number;
   shock: number;
   dotTimer: number;
+  /** Ragdoll slot while the body is simulated (-1: none); posed by a ragdoll; first touchdown done. */
+  ragdoll: number;
+  posed: boolean;
+  landed: boolean;
+  /** Length of the current flinch (heavier blows stagger longer). */
+  staggerMax: number;
   /** Dropping from the ceiling: height of the chest and fall speed (0: grounded). */
   dropY: number;
   dropV: number;
@@ -386,6 +398,8 @@ interface Bolt {
   burn: number;
   /** Homing strength multiplier (rockets home hard). */
   homing: number;
+  /** Impact force: how hard a hit knocks the target back (ragdolls fly further). */
+  force: number;
 }
 
 function triple(): Triple {
@@ -540,6 +554,28 @@ export class CombatSystem extends createSystem({
   private hitDir = new Vector3();
   private cutNormal = new Vector3();
   private hitSet = false;
+  private hitForce = 1;
+  /** Seconds of hit-stop left: the world nearly freezes when a heavy blow lands. */
+  private hitStop = 0;
+  /** The player's room (MR planes) for collisions, rebuilt twice a second. */
+  private room = new Room();
+  private roomTimer = 0;
+  private ragdolls: { body: Verlet; drone: Drone | null }[] = [];
+  private ra = new Vector3();
+  private rb = new Vector3();
+  private rc = new Vector3();
+  private rd = new Vector3();
+  private re = new Vector3();
+  private rv = new Vector3();
+  private rq = new Quaternion();
+  private rq2 = new Quaternion();
+  private rqi = new Quaternion();
+  private rm = new Matrix4();
+  private readonly gibCollide = (p: Vector3, v: Vector3, r: number): number => {
+    if (!this.room.collide(p, r)) return -2;
+    this.room.bounce(v, 0.3, 0.35);
+    return this.room.normal[1];
+  };
   private bladeA = new Vector3();
   private bladeB = new Vector3();
   private camQuat = new Quaternion();
@@ -847,6 +883,7 @@ export class CombatSystem extends createSystem({
         zap: false,
         burn: 0,
         homing: 1,
+        force: 1,
       });
     }
 
@@ -866,6 +903,7 @@ export class CombatSystem extends createSystem({
     this.world.camera.add(this.blood.mesh);
     this.gibs = new Gibs(this.root);
     this.pools = new BloodPools(this.root);
+    for (let i = 0; i < 8; i += 1) this.ragdolls.push({ body: createRagdoll(), drone: null });
     this.root.add(this.handLight);
     const rockGeometry = new IcosahedronGeometry(0.16, 1);
     const markerGeometry = new RingGeometry(0.6, 0.75, 40);
@@ -972,6 +1010,10 @@ export class CombatSystem extends createSystem({
           dash: 0,
           dashCool: 0,
           heldBy: -1,
+          ragdoll: -1,
+          posed: false,
+          landed: false,
+          staggerMax: 0.35,
           size: 1,
           champion: '',
           burn: 0,
@@ -1048,6 +1090,10 @@ export class CombatSystem extends createSystem({
         dash: 0,
         dashCool: 0,
         heldBy: -1,
+        ragdoll: -1,
+        posed: false,
+        landed: false,
+        staggerMax: 0.35,
         size: 1,
         champion: '',
         burn: 0,
@@ -1206,6 +1252,10 @@ export class CombatSystem extends createSystem({
       upperRest: upper.rotation.x,
       bladeBase: get('BladeBase') ?? null,
       bladeTip: get('BladeTip') ?? null,
+      head: get('Head') ?? null,
+      bones: [legL, legR, kneeL, kneeR, armL, armR, elbowL, elbowR, upper],
+      rest: [legL, legR, kneeL, kneeR, armL, armR, elbowL, elbowR, upper].map((b) => b.quaternion.clone()),
+      headRest: get('Head')?.quaternion.clone() ?? null,
     };
   }
 
@@ -1234,6 +1284,14 @@ export class CombatSystem extends createSystem({
       if (boss) boss.hp = boss.maxHp * f;
     };
     (window as unknown as { __surgeSkip: () => void }).__surgeSkip = () => this.endTransmission();
+    (window as unknown as { __surgeBlast: (f: number) => void }).__surgeBlast = (f: number) => {
+      for (const drone of this.drones) {
+        if (drone.state === 'off' || !ENEMIES[drone.kind].ground) continue;
+        this.v1.subVectors(drone.object.position, this.head).setY(0.3);
+        this.markHit('blast', drone.object.position, this.v1, undefined, f);
+        this.damageDrone(drone, 999, true);
+      }
+    };
     (window as unknown as { __surgeChampion: () => void }).__surgeChampion = () => this.queueSpawn({ kind: 'titan', speed: 0.8, champion: true });
     (window as unknown as { __surgeClear: () => void }).__surgeClear = () => {
       let k = 0;
@@ -1283,7 +1341,12 @@ export class CombatSystem extends createSystem({
     const realDt = Math.min(delta, 0.05);
     this.elapsed = time;
     if (this.slowmo > 0) this.slowmo -= realDt;
-    const dt = this.slowmo > 0 ? realDt * SLOWMO_SCALE : realDt;
+    let dt = this.slowmo > 0 ? realDt * SLOWMO_SCALE : realDt;
+    // Hit-stop: the world nearly freezes for a blink when a heavy blow lands.
+    if (this.hitStop > 0) {
+      this.hitStop -= realDt;
+      dt *= 0.08;
+    }
 
     this.world.camera.getWorldPosition(this.head);
     this.headTriple[0] = this.head.x;
@@ -1291,6 +1354,11 @@ export class CombatSystem extends createSystem({
     this.headTriple[2] = this.head.z;
     this.world.camera.getWorldDirection(this.forward);
 
+    this.roomTimer -= realDt;
+    if (this.roomTimer <= 0) {
+      this.roomTimer = 0.5;
+      this.syncRoom();
+    }
     this.readHands();
     for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
     if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.wristPressed();
@@ -2438,6 +2506,7 @@ export class CombatSystem extends createSystem({
       const bolt = this.fire(this.v3, this.sb, true);
       if (bolt) {
         bolt.damage = damage;
+        bolt.force = type === 'havoc-shotgun' ? 2.2 : type === 'havoc-pistol' ? 1.5 : 0.8;
         bolt.pierceLeft = this.level('havoc-pierce') > 0 ? Math.ceil(this.level('havoc-pierce') / 2) : 0;
         if (spread > 0) bolt.target = null;
       }
@@ -2531,6 +2600,7 @@ export class CombatSystem extends createSystem({
       bolt.zap = this.weaponDef.id === 'orion-storm';
       bolt.burn = 0;
       bolt.homing = 1;
+      bolt.force = 1.6;
       bolt.radius = 0.05;
       bolt.damage = fullDraw ? 2 : 1;
       bolt.speed = speed;
@@ -2869,9 +2939,20 @@ export class CombatSystem extends createSystem({
         break;
       }
       case 'flying': {
-        this.hammerVelocity.y -= 2.5 * dt;
+        this.hammerVelocity.y -= 2.5 * this.gravityScale * dt;
         hammer.position.addScaledVector(this.hammerVelocity, dt);
         hammer.rotateX(-dt * 18);
+        if (this.room.collide(hammer.position, HAMMER_HEAD_RADIUS * 0.8)) {
+          if (this.room.normal[1] > 0.7) {
+            this.dropHammer(this.hammerVelocity, 0.2);
+            break;
+          }
+          // A real wall: a thunderous ricochet.
+          this.room.bounce(this.hammerVelocity, 0.5, 0.2);
+          this.sfx.thunderHit();
+          this.particles.burst(hammer.position, this.weaponColor, 30, 3, 0.4, this.v2);
+          if (this.weaponDef.id === 'tempest-godbreaker') this.quake(hammer.position);
+        }
         if (this.hammerTime > HAMMER_FLIGHT || hammer.position.distanceTo(this.head) > 14) {
           this.dropHammer(this.hammerVelocity, 0.3);
           break;
@@ -2936,6 +3017,9 @@ export class CombatSystem extends createSystem({
         this.flashes.spawn(this.v1, WHITE, 0.1, 0.7, 0.2);
         const hammerType = this.weaponDef.id;
         if (hammerType === 'tempest-inferno') drone.burn = Math.max(drone.burn, 4);
+        // Weight: a thrown hammer hits harder than a swing; the Godbreaker sends them flying.
+        this.markHit('blast', drone.object.position, this.hammerVelocity, undefined, (this.hammerState === 'flying' ? 5 : 3) * (hammerType === 'tempest-godbreaker' ? 1.6 : 1));
+        this.hitStop = Math.max(this.hitStop, 0.06);
         this.damageDrone(drone, (this.hammerState === 'flying' ? 3 : 2) + Math.floor(this.level('tempest-impact') / 2) + (hammerType === 'tempest-godbreaker' ? 1 : 0));
         if (hammerType === 'tempest-thunder') this.chainLightning(this.v1, drone);
         else if (hammerType === 'tempest-inferno') this.explodeAt(this.v1, 1.1, 1);
@@ -3044,6 +3128,7 @@ export class CombatSystem extends createSystem({
         this.markHit('slice', this.hitPoint, this.v4, this.v2);
         if (this.weaponDef.id === 'talon-molten') drone.burn = Math.max(drone.burn, 3);
         this.damageDrone(drone, 2);
+        this.hitStop = Math.max(this.hitStop, 0.045);
       }
 
       this.checkParry(claws.base, claws.tip);
@@ -3065,6 +3150,7 @@ export class CombatSystem extends createSystem({
     bolt.zap = false;
     bolt.burn = this.weaponDef.id === 'ronin-flame' || this.weaponDef.id === 'talon-molten' ? 3 : 0;
     bolt.homing = 1;
+    bolt.force = 1;
     bolt.radius = radius ?? 0.24 + 0.03 * this.level('talon-wave');
     bolt.damage = damage ?? 2 + Math.floor(this.level('talon-wave') / 2);
     bolt.scale = scale;
@@ -3092,6 +3178,213 @@ export class CombatSystem extends createSystem({
     if (quiet) return;
     this.flashes.spawn(origin, this.accent, 0.05, 0.35, 0.18);
     this.sfx.crescent();
+  }
+
+  // ---------------------------------------------------------------- physics
+
+  /** Rebuilds the room's collision surfaces from MR plane detection. */
+  private syncRoom(): void {
+    const room = this.room;
+    room.clear();
+    room.floor = 0;
+    for (const entity of this.queries.planes.entities) {
+      const plane = entity.getValue(XRPlane, '_plane') as XRPlane | undefined;
+      const object = entity.object3D;
+      if (plane == null || object == null) continue;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const corner of plane.polygon) {
+        minX = Math.min(minX, corner.x);
+        maxX = Math.max(maxX, corner.x);
+        minZ = Math.min(minZ, corner.z);
+        maxZ = Math.max(maxZ, corner.z);
+      }
+      if (!Number.isFinite(minX)) continue;
+      object.updateMatrixWorld();
+      this.ra.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+      object.localToWorld(this.ra);
+      this.rb.set(0, 1, 0).transformDirection(object.matrixWorld);
+      // The floor is the infinite floor already.
+      if (plane.orientation === 'horizontal' && this.ra.y < 0.2 && this.rb.y > 0.5) continue;
+      this.rc.subVectors(this.head, this.ra);
+      if (this.rb.dot(this.rc) < 0) this.rb.negate();
+      this.rd.set(1, 0, 0).transformDirection(object.matrixWorld);
+      this.re.set(0, 0, 1).transformDirection(object.matrixWorld);
+      room.add(this.rb, this.ra, this.rd, this.re, (maxX - minX) / 2, (maxZ - minZ) / 2);
+    }
+  }
+
+  /**
+   * Turns a dying walker into a ragdoll: points taken from its current pose,
+   * pushed by the blow that killed it (or thrown with `velocity`). Returns
+   * false when all ragdoll slots are busy (it then falls the scripted way).
+   */
+  private startRagdoll(drone: Drone, velocity: Vector3 | null): boolean {
+    const rig = drone.rig;
+    if (rig == null) return false;
+    let slot = -1;
+    for (let i = 0; i < this.ragdolls.length; i += 1) {
+      if (this.ragdolls[i].drone == null) {
+        slot = i;
+        break;
+      }
+    }
+    if (slot < 0) return false;
+    const rag = this.ragdolls[slot];
+    const body = rag.body;
+    rag.drone = drone;
+    drone.ragdoll = slot;
+    drone.posed = true;
+    drone.landed = false;
+    drone.flying = false;
+    drone.dying = 0;
+    const object = drone.object;
+    object.updateMatrixWorld(true);
+    const put = (i: number, source: Object3D, x = 0, y = 0, z = 0) => {
+      this.ra.set(x, y, z);
+      source.localToWorld(this.ra);
+      body.setPoint(i, this.ra.x, this.ra.y, this.ra.z);
+    };
+    put(RAG.chest, object);
+    put(RAG.hipL, rig.legL);
+    put(RAG.hipR, rig.legR);
+    this.ra.fromArray(body.pos, RAG.hipL * 3).add(this.rb.fromArray(body.pos, RAG.hipR * 3)).multiplyScalar(0.5);
+    body.setPoint(RAG.pelvis, this.ra.x, this.ra.y + 0.03, this.ra.z);
+    if (rig.head) put(RAG.head, rig.head, 0, 0.05, 0);
+    else put(RAG.head, object, 0, 0.45, 0);
+    put(RAG.shoulderL, rig.armL);
+    put(RAG.elbowL, rig.elbowL);
+    put(RAG.handL, rig.elbowL, 0, -0.27, 0);
+    put(RAG.shoulderR, rig.armR);
+    put(RAG.elbowR, rig.elbowR);
+    put(RAG.handR, rig.elbowR, 0, -0.27, 0);
+    put(RAG.kneeL, rig.kneeL);
+    put(RAG.footL, rig.kneeL, 0, -0.43, 0);
+    put(RAG.kneeR, rig.kneeR);
+    put(RAG.footR, rig.kneeR, 0, -0.43, 0);
+    body.relink();
+    const s = drone.size * (ENEMIES[drone.kind].ground!.chest / 1.15);
+    body.radius.fill(0.06 * s);
+    body.radius[RAG.head] = 0.09 * s;
+    body.radius[RAG.chest] = 0.12 * s;
+    body.radius[RAG.pelvis] = 0.1 * s;
+    if (velocity) {
+      for (let i = 0; i < body.count; i += 1) body.setVelocity(i, velocity.x, velocity.y, velocity.z);
+      return true;
+    }
+    // The blow: strongest at the point it landed, so the body twists as it goes.
+    const force = this.hitStyle === 'slice' ? 0.5 : Math.min(8, this.hitForce);
+    this.rc.copy(this.hitDir);
+    for (let i = 0; i < body.count; i += 1) {
+      this.ra.fromArray(body.pos, i * 3);
+      const near = Math.max(0, 1 - this.ra.distanceTo(this.hitPoint) / 0.7);
+      const k = force * 1.6 * (0.5 + 0.5 * near);
+      body.setVelocity(
+        i,
+        this.rc.x * k + (Math.random() - 0.5) * 0.3,
+        this.rc.y * k + force * 0.35 + 0.2,
+        this.rc.z * k + (Math.random() - 0.5) * 0.3,
+      );
+    }
+    return true;
+  }
+
+  /** Steps a ragdoll, poses the body from it, and freezes it once it settles. */
+  private updateRagdoll(drone: Drone, dt: number): void {
+    const rag = this.ragdolls[drone.ragdoll];
+    const body = rag.body;
+    drone.dying += dt;
+    body.step(dt, 9.8 * this.gravityScale, this.room, 4, 0.6, 0.12);
+    this.poseRagdoll(drone, body);
+    if (!drone.landed && body.contacts > 2) {
+      // First touchdown: a thud, dust and a spreading pool.
+      drone.landed = true;
+      this.ra.fromArray(body.pos, RAG.pelvis * 3);
+      this.pools.spill(this.ra.x, this.ra.z, drone.kind === 'titan' || drone.size > 1 ? 1.5 : 1);
+      this.ra.y = 0.03;
+      this.particles.burst(this.ra, DUST, 16, 1.1, 0.5, this.v2);
+      this.sfx.catchHammer();
+    }
+    const speed = body.maxSpeed();
+    if (speed > 3 && this.elapsed - drone.bowlAt > 0.3) {
+      // A body flying through the crowd knocks the living over.
+      this.ra.fromArray(body.pos, RAG.chest * 3);
+      for (const other of this.drones) {
+        if (other === drone || other.state === 'off' || other.state === 'emerging' || !ENEMIES[other.kind].ground) continue;
+        if (other.object.position.distanceTo(this.ra) > ENEMIES[other.kind].radius + 0.35) continue;
+        drone.bowlAt = this.elapsed;
+        this.rb.subVectors(other.object.position, this.ra);
+        this.markHit('blast', other.object.position, this.rb, undefined, 2);
+        this.damageDrone(other, 2);
+        this.sfx.catchHammer();
+        break;
+      }
+    }
+    if ((drone.dying > 0.8 && speed < 0.25) || drone.dying > 3.2) {
+      // Settled: free the slot, keep the pose; lie, then sink.
+      rag.drone = null;
+      drone.ragdoll = -1;
+      drone.dying = 0;
+      if (!drone.landed) {
+        this.ra.fromArray(body.pos, RAG.pelvis * 3);
+        this.pools.spill(this.ra.x, this.ra.z, 1);
+      }
+    }
+  }
+
+  /** Poses the alien's bones from its ragdoll points. */
+  private poseRagdoll(drone: Drone, body: Verlet): void {
+    const rig = drone.rig!;
+    const object = drone.object;
+    const p = body.pos;
+    // Torso frame: up along the spine, right across the shoulders.
+    const chest = this.ra.fromArray(p, RAG.chest * 3);
+    const up = this.rb.subVectors(chest, this.rc.fromArray(p, RAG.pelvis * 3)).normalize();
+    const right = this.rc.subVectors(this.rd.fromArray(p, RAG.shoulderR * 3), this.re.fromArray(p, RAG.shoulderL * 3));
+    right.addScaledVector(up, -right.dot(up));
+    if (right.lengthSq() < 1e-6) return;
+    right.normalize();
+    const forward = this.rd.crossVectors(right, up);
+    this.rm.makeBasis(right, up, forward);
+    object.quaternion.setFromRotationMatrix(this.rm);
+    object.position.copy(chest);
+    // Legs hang from the figure (no rotation of its own).
+    this.aimBone(rig.legL, object.quaternion, RAG.hipL, RAG.kneeL, body, -1);
+    this.rq.copy(object.quaternion).multiply(rig.legL.quaternion);
+    this.aimBone(rig.kneeL, this.rq, RAG.kneeL, RAG.footL, body, -1);
+    this.aimBone(rig.legR, object.quaternion, RAG.hipR, RAG.kneeR, body, -1);
+    this.rq.copy(object.quaternion).multiply(rig.legR.quaternion);
+    this.aimBone(rig.kneeR, this.rq, RAG.kneeR, RAG.footR, body, -1);
+    // Arms and head hang from the upper body, unless it was cut away.
+    const upper = drone.parts.Upper;
+    if (upper && upper.object.parent !== upper.parent) return;
+    this.rq.copy(object.quaternion).multiply(rig.upper.quaternion);
+    const armL = drone.parts.ArmL;
+    if (!armL || armL.object.parent === armL.parent) {
+      this.aimBone(rig.armL, this.rq, RAG.shoulderL, RAG.elbowL, body, -1);
+      this.rq2.copy(this.rq).multiply(rig.armL.quaternion);
+      this.aimBone(rig.elbowL, this.rq2, RAG.elbowL, RAG.handL, body, -1);
+    }
+    const armR = drone.parts.ArmR;
+    if (!armR || armR.object.parent === armR.parent) {
+      this.aimBone(rig.armR, this.rq, RAG.shoulderR, RAG.elbowR, body, -1);
+      this.rq2.copy(this.rq).multiply(rig.armR.quaternion);
+      this.aimBone(rig.elbowR, this.rq2, RAG.elbowR, RAG.handR, body, -1);
+    }
+    const head = drone.parts.Head;
+    if (rig.head && (!head || head.object.parent === head.parent)) this.aimBone(rig.head, this.rq, RAG.chest, RAG.head, body, 1);
+  }
+
+  /** Rotates `bone` so its local -Y (`sign` -1) or +Y (`sign` 1) points from point `a` to point `b`. */
+  private aimBone(bone: Object3D, parentQ: Quaternion, a: number, b: number, body: Verlet, sign: number): void {
+    const p = body.pos;
+    this.rv.set(p[b * 3] - p[a * 3], p[b * 3 + 1] - p[a * 3 + 1], p[b * 3 + 2] - p[a * 3 + 2]);
+    if (this.rv.lengthSq() < 1e-8) return;
+    this.rv.normalize().applyQuaternion(this.rqi.copy(parentQ).invert());
+    this.rv.multiplyScalar(sign);
+    bone.quaternion.setFromUnitVectors(this.yAxis, this.rv);
   }
 
   // ---------------------------------------------------------------- arrivals
@@ -3273,7 +3566,7 @@ export class CombatSystem extends createSystem({
     hand.cooldown -= dt;
     if (best && hand.cooldown <= 0) {
       hand.cooldown = 0.1;
-      this.markHit('blast', best.object.position, dir);
+      this.markHit('blast', best.object.position, dir, undefined, 0.3);
       this.damageDrone(best, 0.4 * (1 + 0.2 * this.level('arc-power')));
       this.flashes.spawn(this.v3, this.weaponColor, 0.05, 0.25, 0.1);
       this.sfx.laser();
@@ -3316,7 +3609,7 @@ export class CombatSystem extends createSystem({
       if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'orb') continue;
       if (drone.object.position.distanceTo(p) > radius + ENEMIES[drone.kind].radius) continue;
       this.v1.subVectors(drone.object.position, p);
-      this.markHit('blast', drone.object.position, this.v1);
+      this.markHit('blast', drone.object.position, this.v1.setY(Math.max(this.v1.y, 0.4)), undefined, 5);
       this.damageDrone(drone, damage);
     }
   }
@@ -3338,7 +3631,7 @@ export class CombatSystem extends createSystem({
       if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'orb' || !ENEMIES[drone.kind].ground) continue;
       this.v1.set(drone.object.position.x - at.x, 0, drone.object.position.z - at.z);
       if (this.v1.length() > 2.2) continue;
-      this.markHit('blast', drone.object.position, this.v1.setY(0.6));
+      this.markHit('blast', drone.object.position, this.v1.setY(0.6), undefined, 4.5);
       this.damageDrone(drone, 2);
     }
   }
@@ -3516,7 +3809,7 @@ export class CombatSystem extends createSystem({
       if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'boss') continue;
       this.v4.set(drone.object.position.x - at.x, 0, drone.object.position.z - at.z);
       if (this.v4.length() > 0.9 + ENEMIES[drone.kind].radius) continue;
-      this.markHit('blast', drone.object.position, this.v4.setY(0.5));
+      this.markHit('blast', drone.object.position, this.v4.setY(0.5), undefined, 5);
       this.damageDrone(drone, 3);
     }
     // ...and the player, if they stayed in it.
@@ -3860,7 +4153,7 @@ export class CombatSystem extends createSystem({
           if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < 0.4) continue;
           if (drone.object.position.distanceTo(shield.position) > ENEMIES[drone.kind].radius + 0.25) continue;
           drone.bladeHitAt = this.elapsed;
-          this.markHit('blast', drone.object.position, this.shieldVel);
+          this.markHit('blast', drone.object.position, this.shieldVel, undefined, 3);
           this.damageDrone(drone, 2 + Math.floor(force / 2));
           this.sfx.clang();
         }
@@ -3882,6 +4175,17 @@ export class CombatSystem extends createSystem({
       }
       shield.position.addScaledVector(this.shieldVel, dt);
       shield.rotateZ(dt * 25);
+      if (this.room.collide(shield.position, 0.2)) {
+        // Off a real wall (or the floor): it keeps its speed and finds the next target.
+        const wall = this.room.normal[1] < 0.7;
+        this.room.bounce(this.shieldVel, wall ? 0.95 : 0.6, 0.05);
+        if (wall) {
+          this.sfx.clang();
+          this.particles.burst(shield.position, GOLD, 24, 2.5, 0.3, this.v2);
+          this.hitStop = Math.max(this.hitStop, 0.03);
+          this.shieldTarget = this.nearestEnemy(shield.position, this.shieldLast, 7);
+        }
+      }
       this.v2.set(0, 0, 0);
       this.particles.emit(this.shieldPrev, this.v2, this.weaponColor, 0.3, 0);
       for (const drone of this.drones) {
@@ -3889,7 +4193,8 @@ export class CombatSystem extends createSystem({
         if (!this.segmentHits(this.shieldPrev, shield.position, drone.object.position, ENEMIES[drone.kind].radius + 0.22)) continue;
         this.shieldLast = drone;
         this.v4.copy(drone.object.position);
-        this.markHit('blast', drone.object.position, this.shieldVel);
+        this.markHit('blast', drone.object.position, this.shieldVel, undefined, 3.5);
+        this.hitStop = Math.max(this.hitStop, 0.04);
         if (this.weaponDef.id === 'vanguard-solar') drone.burn = Math.max(drone.burn, 3);
         this.damageDrone(drone, 3 + Math.floor(force / 2));
         if (this.weaponDef.id === 'vanguard-storm') this.chainLightning(this.v4, drone);
@@ -3971,6 +4276,7 @@ export class CombatSystem extends createSystem({
     const bolt = this.fire(this.v2.copy(at).addScaledVector(this.v1, 0.3), this.v1, true);
     if (bolt) {
       bolt.damage = 2 + Math.floor(this.level('vanguard-guard') / 2);
+      bolt.force = 1.5;
       bolt.target = target;
     }
   }
@@ -3986,8 +4292,9 @@ export class CombatSystem extends createSystem({
       if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'orb' || this.elapsed - drone.bladeHitAt < 0.3) continue;
       if (drone.object.position.distanceTo(this.v1) > ENEMIES[drone.kind].radius + 0.12) continue;
       drone.bladeHitAt = this.elapsed;
-      this.markHit('blast', drone.object.position, this.v2);
+      this.markHit('blast', drone.object.position, this.v2, undefined, 2.5);
       this.damageDrone(drone, 1 + Math.floor(force / 2));
+      this.hitStop = Math.max(this.hitStop, 0.04);
       this.sfx.catchHammer();
       this.flashes.spawn(this.v1, WHITE, 0.05, 0.5, 0.15);
       this.comic.pop('POW!', this.v4.copy(this.v1).setY(this.v1.y + 0.2), this.weaponColor, 0.35);
@@ -4043,6 +4350,7 @@ export class CombatSystem extends createSystem({
         this.markHit('slice', this.hitPoint, this.v4, this.v2);
         if (this.weaponDef.id === 'ronin-flame') drone.burn = Math.max(drone.burn, 3);
         this.damageDrone(drone, damage);
+        this.hitStop = Math.max(this.hitStop, 0.045);
       }
       hand.slashCooldown -= dt;
       if (sword.speed > SWORD_WAVE_SPEED && hand.slashCooldown <= 0) {
@@ -4435,33 +4743,48 @@ export class CombatSystem extends createSystem({
         }
       }
     }
-    const floor = drone ? ENEMIES[drone.kind].ground!.chest : this.surfaceBelow(position) + item.radius * 0.8;
-    if (hit == null && position.y > floor && item.t < 4) return;
-    if (item.thrown) this.psiImpact(position, hit, drone);
     if (drone) {
+      // A thrown alien crashes into whatever it reaches: another alien, a wall, the floor.
+      const floor = ENEMIES[drone.kind].ground!.chest;
+      const wall = this.room.collide(position, item.radius) && this.room.normal[1] < 0.7;
+      if (hit == null && !wall && position.y > floor && item.t < 4) return;
+      if (item.thrown) this.psiImpact(position, hit, drone);
       position.y = floor;
       this.freeSlot(item);
       drone.object.rotation.set(0, drone.object.rotation.y, 0);
-      if (item.thrown) this.damageDrone(drone, 3 + this.level('psion-mass'));
+      if (item.thrown) {
+        this.v1.copy(item.velocity);
+        this.markHit('blast', position, this.v1, undefined, 3);
+        this.damageDrone(drone, 3 + this.level('psion-mass'));
+      }
       return;
     }
     if (hit) {
       // Bounce off whatever it hit, then fall.
+      if (item.thrown) this.psiImpact(position, hit, null);
       item.velocity.multiplyScalar(-0.25);
       item.velocity.y = 2;
       item.thrown = false;
       return;
     }
-    if (position.distanceTo(this.head) > 6 || item.t >= 4) {
-      this.spawnDebris(item);
+    // The real room: bounce off walls and tables, settle on anything flat.
+    if (this.room.collide(position, item.radius * 0.8)) {
+      if (item.thrown) {
+        this.psiImpact(position, null, null);
+        item.thrown = false;
+      }
+      this.room.bounce(item.velocity, 0.35, 0.35);
+      item.spin.multiplyScalar(0.5);
+      if (this.room.normal[1] > 0.7 && item.velocity.lengthSq() < 0.6) {
+        item.object.rotation.set(0, item.object.rotation.y, 0);
+        item.velocity.set(0, 0, 0);
+        item.state = 'rest';
+        this.particles.burst(position, WHITE, 12, 0.8, 0.3, this.v2);
+        this.sfx.catchHammer();
+      }
       return;
     }
-    position.y = floor;
-    item.object.rotation.set(0, item.object.rotation.y, 0);
-    item.velocity.set(0, 0, 0);
-    item.state = 'rest';
-    this.particles.burst(position, WHITE, 12, 0.8, 0.3, this.v2);
-    this.sfx.catchHammer();
+    if (position.distanceTo(this.head) > 12 || item.t >= 6 || position.y < -1) this.spawnDebris(item);
   }
 
   /** A thrown object lands: blast damage around it, extra on a direct hit. */
@@ -4474,6 +4797,8 @@ export class CombatSystem extends createSystem({
       if (drone.state === 'off' || drone === thrown) continue;
       if (drone.object.position.distanceTo(this.impactPoint) > radius + ENEMIES[drone.kind].radius) continue;
       if (inferno) drone.burn = Math.max(drone.burn, 3);
+      this.v1.subVectors(drone.object.position, this.impactPoint).setY(0.4);
+      this.markHit('blast', drone.object.position, this.v1, undefined, 4);
       this.damageDrone(drone, drone === hit ? damage + 2 : damage);
     }
     if (inferno) this.particles.burst(this.impactPoint, ORANGE, 50, 3, 0.7, this.v2);
@@ -4510,6 +4835,7 @@ export class CombatSystem extends createSystem({
     bolt.zap = false;
     bolt.burn = 0;
     bolt.homing = 1;
+    bolt.force = 1.2;
     bolt.radius = 0.06;
     bolt.damage = 1 + Math.floor(this.level('arc-power') / 2);
     bolt.speed = BOLT_SPEED;
@@ -4572,8 +4898,8 @@ export class CombatSystem extends createSystem({
         if (drone.state === 'off') continue;
         const radius = ENEMIES[drone.kind].radius + bolt.radius;
         if (this.segmentHits(bolt.previous, bolt.position, drone.object.position, radius)) {
-          if (crescent) this.markHit('slice', drone.object.position, bolt.velocity, bolt.object.up);
-          else this.markHit('blast', drone.object.position, bolt.velocity);
+          if (crescent) this.markHit('slice', drone.object.position, bolt.velocity, bolt.object.up, bolt.force);
+          else this.markHit('blast', drone.object.position, bolt.velocity, undefined, bolt.force);
           if (bolt.burn > 0) drone.burn = Math.max(drone.burn, bolt.burn);
           this.v4.copy(drone.object.position);
           this.damageDrone(drone, bolt.damage);
@@ -4976,7 +5302,7 @@ export class CombatSystem extends createSystem({
   }
 
   private updateDrones(dt: number, time: number): void {
-    this.gibs.update(dt, (at, velocity, heavy) => this.gore.emit(at, velocity, heavy ? ICHOR_DARK : ICHOR, 0.7, 0.5, 6));
+    this.gibs.update(dt, (at, velocity, heavy) => this.gore.emit(at, velocity, heavy ? ICHOR_DARK : ICHOR, 0.7, 0.5, 6), this.gibCollide);
     this.gore.update(dt);
     this.pools.update(dt);
     for (const drone of this.drones) {
@@ -5184,11 +5510,13 @@ export class CombatSystem extends createSystem({
     }
     if (drone.stagger > 0) {
       // Knocked back a step, upper body thrown back.
-      const k = drone.stagger / 0.35;
+      const k = drone.stagger / drone.staggerMax;
       drone.stagger -= dt;
-      object.position.addScaledVector(drone.knock, dt * 1.4 * k);
+      object.position.addScaledVector(drone.knock, dt * 2 * k);
+      // Real walls stop them.
+      this.room.collide(object.position, def.radius);
       object.position.y = chest;
-      if (rig) rig.upper.rotation.x = rig.upperRest - 0.45 * k;
+      if (rig) rig.upper.rotation.x = rig.upperRest - 0.45 * Math.min(1, k * 1.2);
       return;
     }
     if (drone.stun > 0) {
@@ -5423,7 +5751,18 @@ export class CombatSystem extends createSystem({
     drone.knock.normalize().multiplyScalar(this.hitStyle === 'slice' ? 0.3 : big ? 1.4 : 0.9);
     const chest = def.ground!.chest;
     const scale = chest / 1.15;
-    this.pools.spill(drone.feet.x + drone.knock.x * 0.6, drone.feet.z + drone.knock.z * 0.6, big ? 1.5 : 0.9 * scale);
+    // A ragdoll (before any part is cut away); skewered bodies start one when flung off.
+    const ragdoll = this.hitStyle !== 'impale' && this.startRagdoll(drone, null);
+    if (!ragdoll) this.pools.spill(drone.feet.x + drone.knock.x * 0.6, drone.feet.z + drone.knock.z * 0.6, big ? 1.5 : 0.9 * scale);
+    // The weapon clatters to the floor.
+    const weapon = drone.parts.Weapon;
+    if (weapon && weapon.object.parent === weapon.parent) {
+      this.sc.copy(this.hitDir).multiplyScalar(1.2);
+      this.sc.x += (Math.random() - 0.5) * 1.2;
+      this.sc.y += 1.6;
+      this.sc.z += (Math.random() - 0.5) * 1.2;
+      this.gibs.throw(weapon, this.sc, 9);
+    }
     if (this.hitStyle === 'impale') {
       this.bleed(this.hitPoint, this.hitDir, 30);
       this.sfx.splat();
@@ -5472,6 +5811,7 @@ export class CombatSystem extends createSystem({
       drone.bladeHitAt = this.elapsed;
       this.markHit('impale', tip, direction);
       this.damageDrone(drone, 4);
+      this.hitStop = Math.max(this.hitStop, 0.08);
       this.sfx.slash();
       // damageDrone may have killed it.
       if ((drone.state as DroneState) === 'off' && drone.dying >= 0) {
@@ -5529,6 +5869,7 @@ export class CombatSystem extends createSystem({
   private releaseBody(drone: Drone, velocity: Vector3): void {
     for (const hand of this.hands) if (hand.skewer === drone) hand.skewer = null;
     drone.heldBy = -1;
+    if (this.startRagdoll(drone, velocity)) return;
     drone.flying = true;
     drone.fly.copy(velocity);
   }
@@ -5547,7 +5888,7 @@ export class CombatSystem extends createSystem({
         if (other === drone || other.state === 'off' || other.state === 'emerging' || !ENEMIES[other.kind].ground) continue;
         if (other.object.position.distanceTo(object.position) > ENEMIES[other.kind].radius + 0.35) continue;
         drone.bowlAt = this.elapsed;
-        this.markHit('blast', other.object.position, drone.fly);
+        this.markHit('blast', other.object.position, drone.fly, undefined, 2);
         this.damageDrone(other, 2);
         this.sfx.catchHammer();
         break;
@@ -5587,6 +5928,20 @@ export class CombatSystem extends createSystem({
   private updateDeath(drone: Drone, dt: number): void {
     if (drone.heldBy >= 0) {
       this.updateSkewered(drone, dt);
+      return;
+    }
+    if (drone.ragdoll >= 0) {
+      this.updateRagdoll(drone, dt);
+      return;
+    }
+    if (drone.posed) {
+      // A ragdoll at rest: lie still, then sink away.
+      drone.dying += dt;
+      if (drone.dying > DEATH_LIE) {
+        drone.object.position.y -= dt * 0.35;
+        this.gibs.sink(drone.parts, dt * 0.35);
+      }
+      if (drone.dying > DEATH_LIE + DEATH_SINK) this.endDeath(drone);
       return;
     }
     if (drone.flying) {
@@ -5634,6 +5989,11 @@ export class CombatSystem extends createSystem({
   /** Death over: hide the body and reassemble it for the next spawn. */
   private endDeath(drone: Drone): void {
     for (const hand of this.hands) if (hand.skewer === drone) hand.skewer = null;
+    if (drone.ragdoll >= 0) this.ragdolls[drone.ragdoll].drone = null;
+    drone.ragdoll = -1;
+    drone.posed = false;
+    drone.landed = false;
+    drone.object.quaternion.identity();
     drone.size = 1;
     drone.champion = '';
     drone.object.scale.setScalar(1);
@@ -5646,14 +6006,9 @@ export class CombatSystem extends createSystem({
     for (const part of Object.values(drone.parts)) if (part) restorePart(part);
     const rig = drone.rig;
     if (rig) {
-      rig.legL.rotation.x = 0;
-      rig.legR.rotation.x = 0;
-      rig.kneeL.rotation.x = 0;
-      rig.kneeR.rotation.x = 0;
-      rig.armL.rotation.x = rig.armLRest;
-      rig.armR.rotation.x = rig.armRRest;
-      rig.elbowR.rotation.x = rig.elbowRRest;
-      rig.upper.rotation.set(rig.upperRest, 0, 0);
+      // Back to the rest pose (ragdolls twist bones in every axis).
+      rig.bones.forEach((bone, i) => bone.quaternion.copy(rig.rest[i]));
+      if (rig.head && rig.headRest) rig.head.quaternion.copy(rig.headRest);
     }
   }
 
@@ -5684,8 +6039,9 @@ export class CombatSystem extends createSystem({
   }
 
   /** Records how the next hit lands (style, point, travel direction, cut plane). */
-  private markHit(style: 'blast' | 'slice' | 'impale' | 'dot', point: Vector3, direction: Vector3, cutNormal?: Vector3): void {
+  private markHit(style: 'blast' | 'slice' | 'impale' | 'dot', point: Vector3, direction: Vector3, cutNormal?: Vector3, force = 1): void {
     this.hitStyle = style;
+    this.hitForce = force;
     this.hitPoint.copy(point);
     this.hitDir.copy(direction).normalize();
     if (cutNormal) this.cutNormal.copy(cutNormal).normalize();
@@ -5700,6 +6056,7 @@ export class CombatSystem extends createSystem({
       this.hitStyle = 'blast';
       this.hitPoint.copy(drone.object.position);
       this.hitDir.subVectors(drone.object.position, this.head).normalize();
+      this.hitForce = 1;
     }
     this.hitSet = false;
     if (drone.stun > 0) amount *= 2;
@@ -5713,9 +6070,11 @@ export class CombatSystem extends createSystem({
       this.flashes.spawn(drone.object.position, WHITE, 0.1, drone.kind === 'boss' ? 0.8 : 0.4, 0.12);
       if (ENEMIES[drone.kind].ground && this.hitStyle !== 'dot') {
         this.bleed(this.hitPoint, this.hitDir, 14);
-        // Flinch: knocked back a step, a hit interrupts a wind-up.
-        drone.stagger = drone.kind === 'titan' ? 0.15 : 0.35;
-        drone.knock.copy(this.hitDir).setY(0);
+        // Flinch: knocked back (heavy blows send them metres), a hit interrupts a wind-up.
+        const force = this.hitForce * (drone.kind === 'titan' || drone.champion !== '' ? 0.4 : 1);
+        drone.staggerMax = force > 2.5 ? 0.55 : drone.kind === 'titan' ? 0.15 : 0.35;
+        drone.stagger = drone.staggerMax;
+        drone.knock.copy(this.hitDir).setY(0).normalize().multiplyScalar(0.7 * Math.max(1, force));
         if (drone.meleeStage === 1) drone.meleeStage = 3;
         drone.melee = 0;
       } else this.particles.burst(drone.object.position, GOLD, 14, 2, 0.3, this.v2);

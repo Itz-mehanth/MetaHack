@@ -30,13 +30,21 @@ export interface Part {
   readonly scale: Vector3;
 }
 
-export type PartName = 'Upper' | 'Head' | 'ArmL' | 'ArmR';
+export type PartName = 'Upper' | 'Head' | 'ArmL' | 'ArmR' | 'Weapon';
+const PART_NAMES: readonly PartName[] = ['Upper', 'Head', 'ArmL', 'ArmR', 'Weapon'];
+
+/** Whether `part` is one of `parts` (allocation-free). */
+function owns(parts: Partial<Record<PartName, Part>>, part: Part): boolean {
+  for (const name of PART_NAMES) if (parts[name] === part) return true;
+  return false;
+}
 
 /** Captures the rest transform of each severable part of `root`. */
 export function captureParts(root: Object3D): Partial<Record<PartName, Part>> {
   const parts: Partial<Record<PartName, Part>> = {};
-  for (const name of ['Upper', 'Head', 'ArmL', 'ArmR'] as const) {
-    const object = root.getObjectByName(name);
+  for (const name of PART_NAMES) {
+    // The weapon is the rifle or the sword, whichever the alien carries.
+    const object = name === 'Weapon' ? root.getObjectByName('Gun') ?? root.getObjectByName('Sword') : root.getObjectByName(name);
     if (object?.parent == null) continue;
     parts[name] = {
       object,
@@ -70,6 +78,8 @@ interface Gib {
 }
 
 export type BleedFn = (at: Vector3, velocity: Vector3, heavy: boolean) => void;
+/** Pushes `p` out of the room's surfaces and bounces `v`; returns the contact normal's y, or -2 for no contact. */
+export type CollideFn = (p: Vector3, v: Vector3, r: number) => number;
 
 /**
  * Severed parts in flight: thrown off with the cut, tumbling under gravity,
@@ -105,8 +115,8 @@ export class Gibs {
     gib.resting = false;
   }
 
-  /** Steps every gib; `bleed` sprays ichor from the cut while it flies. */
-  update(dt: number, bleed: BleedFn): void {
+  /** Steps every gib; `bleed` sprays from the cut while it flies; `collide` keeps it in the room. */
+  update(dt: number, bleed: BleedFn, collide: CollideFn): void {
     for (const gib of this.pool) {
       const part = gib.part;
       if (part == null) continue;
@@ -123,17 +133,11 @@ export class Gibs {
         this.v.copy(gib.velocity).multiplyScalar(-0.1);
         bleed(this.world, this.v, false);
       }
-      if (object.position.y < 0.06) {
-        object.position.y = 0.06;
-        if (Math.abs(gib.velocity.y) < 1.2) {
-          gib.resting = true;
-          continue;
-        }
-        // Bounce with heavy damping and floor friction.
-        gib.velocity.y = -gib.velocity.y * 0.3;
-        gib.velocity.x *= 0.5;
-        gib.velocity.z *= 0.5;
-        gib.spin.multiplyScalar(0.4);
+      // Real surfaces: the floor, tables and walls bounce it; it settles on anything flat.
+      const ny = collide(object.position, gib.velocity, 0.07);
+      if (ny > -2) {
+        gib.spin.multiplyScalar(0.6);
+        if (ny > 0.7 && gib.velocity.lengthSq() < 0.5) gib.resting = true;
       }
     }
   }
@@ -142,7 +146,7 @@ export class Gibs {
   recall(parts: Partial<Record<PartName, Part>>): void {
     for (const gib of this.pool) {
       if (gib.part == null) continue;
-      if (gib.part === parts.Upper || gib.part === parts.Head || gib.part === parts.ArmL || gib.part === parts.ArmR) {
+      if (owns(parts, gib.part)) {
         restorePart(gib.part);
         gib.part = null;
       }
@@ -153,9 +157,7 @@ export class Gibs {
   sink(parts: Partial<Record<PartName, Part>>, amount: number): void {
     for (const gib of this.pool) {
       if (gib.part == null) continue;
-      if (gib.part === parts.Upper || gib.part === parts.Head || gib.part === parts.ArmL || gib.part === parts.ArmR) {
-        gib.part.object.position.y -= amount;
-      }
+      if (owns(parts, gib.part)) gib.part.object.position.y -= amount;
     }
   }
 }

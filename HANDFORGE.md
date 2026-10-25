@@ -53,6 +53,14 @@ throughout (no Marvel or other third-party names/designs).
   metal, trim, dark, energy, core); FINISHES (STANDARD, GILDED, CRYSTAL,
   INFERNAL, VOID) restyle the real weapon in hand and in the armory
   (bought per hero in the SKINS tab).
+- Physics (physics.ts, pure + tested): Room colliders from MR planes
+  (walls, tables; infinite floor) and a time-corrected Verlet solver. Deaths
+  are ragdolls (15 points, pooled x8, frozen when settled; scripted fall is
+  the fallback), pushed by the killing blow's force (markHit force: shotgun,
+  explosions, Godbreaker send bodies flying into real walls). Gibs, dropped
+  alien weapons, PSION props, thrown aliens, the shield (ricochets) and the
+  hammer (bounces) collide with the real room. Heavy hits knock living
+  aliens back metres (stopped by walls). Hit-stop on blade/hammer/shield hits.
 - Audio: cinematic synthesised score (music.ts: drums, sub bass, strings,
   brass, choir, bells, per-track lead melody, reverb + echo, 16-bar songs,
   intensity 0 calm / 1 combat / 2 boss) and layered SFX with a hall reverb.
