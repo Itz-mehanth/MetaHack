@@ -1,6 +1,6 @@
 import type { Color, Mesh, MeshBasicMaterial, Object3D, ShaderMaterial } from '@iwsdk/core';
 
-export type Ambient = 'data' | 'embers' | 'storm' | 'snow' | 'void';
+export type Ambient = 'data' | 'embers' | 'storm' | 'snow' | 'void' | 'dust';
 
 export interface Theme {
   readonly top: string;
@@ -76,6 +76,18 @@ export const THEMES: Readonly<Record<string, Theme>> = {
     bandA: '#C04DFF',
     bandB: '#39FF88',
     ambient: 'void',
+  },
+  'scrap-wastes': {
+    top: '#0B0602',
+    mid: '#3A2010',
+    horizon: '#FFB01F',
+    accent: '#3DE0C8',
+    gridMinor: '#C46A1F',
+    gridMajor: '#FFB01F',
+    ring: '#FFB01F',
+    bandA: '#FF5A1F',
+    bandB: '#3DE0C8',
+    ambient: 'dust',
   },
 };
 

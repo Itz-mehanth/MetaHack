@@ -11,6 +11,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  type Quaternion,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -98,6 +99,27 @@ export class Bow {
 
     this.group.add(limb, edge, grip, gem, this.string, this.arrow);
     this.group.visible = false;
+  }
+
+  /** Shows the bow loose in the world (dropped or flying back), unstrung. */
+  showFree(position: Vector3, quaternion: Quaternion): void {
+    this.group.visible = true;
+    this.group.position.copy(position);
+    this.group.quaternion.copy(quaternion);
+    this.group.updateMatrixWorld();
+    this.arrow.visible = false;
+    const p = this.stringPositions;
+    p[0] = -TIP_BACK;
+    p[1] = TIP_HEIGHT;
+    p[2] = 0;
+    p[3] = -TIP_BACK;
+    p[4] = 0;
+    p[5] = 0;
+    p[6] = -TIP_BACK;
+    p[7] = -TIP_HEIGHT;
+    p[8] = 0;
+    this.string.geometry.attributes.position.needsUpdate = true;
+    this.restNock.set(-TIP_BACK, 0, 0).applyMatrix4(this.group.matrixWorld);
   }
 
   setColor(color: Color): void {

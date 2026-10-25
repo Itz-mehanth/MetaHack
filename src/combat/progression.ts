@@ -23,6 +23,7 @@ export const WORLDS: readonly World[] = [
   { id: 'storm-peak', name: 'STORM PEAK', color: '#9D8CFF', enemies: ['drone', 'titan'] },
   { id: 'frost-spire', name: 'FROST SPIRE', color: '#9FE8FF', enemies: ['swarmer', 'drone', 'armored'] },
   { id: 'void-rift', name: 'VOID RIFT', color: '#C04DFF', enemies: ['swarmer', 'armored', 'titan'] },
+  { id: 'scrap-wastes', name: 'SCRAP WASTES', color: '#FFB01F', enemies: ['drone', 'armored', 'swarmer'] },
 ];
 
 export const STAGES_PER_WORLD = 3;
@@ -105,6 +106,7 @@ export const HERO_PRICE: Readonly<Record<HeroId, number>> = {
   tempest: 600,
   orion: 900,
   weaver: 1200,
+  havoc: 1500,
 };
 
 export const ENEMY_COINS: Readonly<Record<EnemyKind, number>> = {
@@ -145,6 +147,9 @@ export const UPGRADES: readonly UpgradeDef[] = [
   { id: 'weaver-range', hero: 'weaver', name: 'LONG LINE', description: 'Webs fly faster' },
   { id: 'weaver-snare', hero: 'weaver', name: 'STICKY', description: 'Longer snares' },
   { id: 'weaver-yank', hero: 'weaver', name: 'WHIPLASH', description: 'Yanks hit harder' },
+  { id: 'havoc-damage', hero: 'havoc', name: 'HOLLOW POINT', description: 'Shots hit harder' },
+  { id: 'havoc-rate', hero: 'havoc', name: 'HAIR TRIGGER', description: 'Faster auto-fire' },
+  { id: 'havoc-pierce', hero: 'havoc', name: 'RAILGUN', description: 'Shots pierce enemies' },
 ];
 
 export interface Skin {
@@ -171,6 +176,9 @@ const SKIN_SETS: ReadonlyArray<readonly [HeroId, string, string]> = [
   ['weaver', 'CLASSIC', '#FF3D5A'],
   ['weaver', 'NOIR', '#C8C8D8'],
   ['weaver', 'MIDNIGHT', '#4D7BFF'],
+  ['havoc', 'CLASSIC', '#FFB01F'],
+  ['havoc', 'TOXIC', '#B6FF3D'],
+  ['havoc', 'CHROME', '#DDE3F0'],
 ];
 
 export const SKINS: readonly Skin[] = SKIN_SETS.map(([hero, name, color], i) => ({

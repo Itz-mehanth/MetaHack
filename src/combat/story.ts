@@ -327,6 +327,59 @@ export const CHAPTERS: readonly Chapter[] = [
       },
     ],
   },
+  {
+    hero: 'havoc',
+    worldId: 'scrap-wastes',
+    region: 'RUSTFALL',
+    villain: { name: 'RAZORBACK', title: 'Scrap Warlord', color: '#FF5A1F' },
+    levels: [
+      {
+        location: 'JUNKYARD GATE',
+        blurb: "RAZORBACK's raiders hold the junkyard gate. Scavengers are locked in scrap cages.",
+        hostages: 3,
+        intro: [
+          { speaker: 'villain', text: 'Fresh scrap! Strip that shiny pistol off the corpse, boys.' },
+          { speaker: 'hero', text: 'Come and take it. One at a time, please.' },
+        ],
+        outro: [
+          { speaker: 'civilian', text: 'You cleared the gate! We can breathe again!' },
+          { speaker: 'villain', text: 'Lucky shots. The convoy will grind you to dust.' },
+        ],
+        taunts: ['Rush the gunslinger!', 'Flank left! FLANK!'],
+        reward: { id: 'overdrive-havoc', name: 'OVERDRIVE', description: 'Clap your palms together when charged to unleash a shockwave' },
+        map: [-0.6, 0.3],
+      },
+      {
+        location: 'CONVOY ROAD',
+        blurb: 'An armoured Legion convoy is hauling prisoners across the wastes. Stop it.',
+        hostages: 4,
+        intro: [
+          { speaker: 'villain', text: 'Nobody stops my convoy. NOBODY.' },
+          { speaker: 'hero', text: 'Then I guess I am nobody.' },
+        ],
+        outro: [{ speaker: 'villain', text: 'Enough games. Meet me at the smelter, gunslinger.' }],
+        taunts: ['Brutes, up front!', 'Pin her down!'],
+        reward: { id: 'core-havoc', name: 'POWER CORE', description: 'Permanent +25% damage for this hero' },
+        map: [0.05, 0.0],
+      },
+      {
+        location: 'THE SMELTER',
+        blurb: 'Boss: RAZORBACK, fused into a war-rig at the heart of his smelter.',
+        hostages: 3,
+        intro: [
+          { speaker: 'villain', text: 'I melt down heroes and wear what is left.' },
+          { speaker: 'hero', text: 'Draw.' },
+        ],
+        outro: [
+          { speaker: 'villain', text: 'Out... gunned...' },
+          { speaker: 'vex', text: 'Another region lost. Hunt them all down!' },
+        ],
+        taunts: ['I will scrap you!', 'Molten metal, hot lead!', 'You are mine!'],
+        reward: { id: 'legend-havoc', name: 'LEGEND SKIN', description: 'A free alternate suit colour, unlocked in the garage' },
+        map: [0.6, -0.5],
+      },
+    ],
+  },
 ];
 
 export function chapterFor(hero: HeroId): Chapter {

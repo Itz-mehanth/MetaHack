@@ -2,6 +2,7 @@ import { AssetType, defineAssets } from '@iwsdk/core';
 import { createAlien } from './scene-assets/aliens.scene-asset.js';
 import { createArena } from './scene-assets/arena.scene-asset.js';
 import {
+  createBlaster,
   createBoss,
   createCore,
   createDrone,
@@ -40,6 +41,7 @@ export default defineAssets({
   swarmer: createSwarmer(),
   titan: createTitan(),
   hammer: createHammer(),
+  blaster: createBlaster(),
   'alien-grunt': createAlien('grunt'),
   'alien-brute': createAlien('brute'),
   'alien-stalker': createAlien('stalker'),
@@ -49,6 +51,7 @@ export default defineAssets({
   'boss-storm-peak': createBoss('#B6A6FF'),
   'boss-frost-spire': createBoss('#9FE8FF'),
   'boss-void-rift': createBoss('#C04DFF'),
+  'boss-scrap-wastes': createBoss('#FF5A1F'),
   orb: createOrb(),
   pod: createPod(),
   'pickup-heal': createPickup('heal'),
@@ -59,6 +62,7 @@ export default defineAssets({
   'hero-tempest': createHeroFigure('tempest'),
   'hero-orion': createHeroFigure('orion'),
   'hero-weaver': createHeroFigure('weaver'),
+  'hero-havoc': createHeroFigure('havoc'),
   pedestal: createPedestal(),
   core: createCore(),
   'work-table': createWorkTable(),

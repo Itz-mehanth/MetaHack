@@ -304,6 +304,43 @@ export function createPickup(kind: 'heal' | 'rapid' | 'power'): Group {
   return root;
 }
 
+/**
+ * HAVOC's plasma pistol. Origin at the grip, barrel along +Z, top along +Y;
+ * `Muzzle` marks the barrel tip, `Cells` the glowing energy cells.
+ */
+export function createBlaster(): Group {
+  const root = new Group();
+  root.name = 'Blaster';
+  const metal = new MeshStandardMaterial({ color: '#2B2E38', roughness: 0.3, metalness: 0.9 });
+  const grip = new MeshStandardMaterial({ color: '#1A1612', roughness: 0.8, metalness: 0.1 });
+  const energy = glow('#FFB01F', 3);
+  const handle = new Mesh(new BoxGeometry(0.03, 0.1, 0.045), grip);
+  handle.rotation.x = 0.25;
+  const body = new Mesh(new BoxGeometry(0.036, 0.05, 0.17), metal);
+  body.name = 'Body';
+  body.position.set(0, 0.06, 0.05);
+  const barrel = new Mesh(new CylinderGeometry(0.012, 0.014, 0.12, 12), metal);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.065, 0.18);
+  const cells = new Group();
+  cells.name = 'Cells';
+  for (let i = 0; i < 3; i += 1) {
+    const cell = new Mesh(new BoxGeometry(0.04, 0.012, 0.025), energy);
+    cell.position.set(0, 0.092, 0.0 + i * 0.035);
+    cells.add(cell);
+  }
+  const ring = new Mesh(new TorusGeometry(0.017, 0.004, 6, 16), energy);
+  ring.position.set(0, 0.065, 0.24);
+  const muzzle = new Group();
+  muzzle.name = 'Muzzle';
+  muzzle.position.set(0, 0.065, 0.25);
+  const guard = new Mesh(new TorusGeometry(0.022, 0.004, 4, 12, Math.PI), metal);
+  guard.position.set(0, 0.02, 0.025);
+  guard.rotation.y = Math.PI / 2;
+  root.add(handle, body, barrel, cells, ring, muzzle, guard);
+  return root;
+}
+
 /** Floating energy core the player shoots to start or restart a run. */
 export function createCore(): Group {
   const root = new Group();

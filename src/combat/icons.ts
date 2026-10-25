@@ -10,6 +10,7 @@ export const ICON_NAMES = [
   'tempest',
   'orion',
   'weaver',
+  'havoc',
   'coins',
   'shield',
   'skull',

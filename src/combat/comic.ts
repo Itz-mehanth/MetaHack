@@ -23,6 +23,7 @@ export const WORDS: Readonly<Record<string, readonly string[]>> = {
   tempest: ['KRAKOOM!', 'WHAM!', 'BOOM!', 'KRAK!'],
   orion: ['THOK!', 'FWIP!', 'TWANG!', 'SPLAT!'],
   weaver: ['THWIP!', 'YOINK!', 'SNAP!', 'THWAK!'],
+  havoc: ['BANG!', 'PEW!', 'KAPOW!', 'BLAM!'],
   hurt: ['OOF!', 'ARGH!'],
   big: ['KA-BOOM!', 'BOOM!'],
 };

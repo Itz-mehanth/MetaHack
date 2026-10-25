@@ -12,7 +12,7 @@ import {
   TorusGeometry,
   DoubleSide,
 } from '@iwsdk/core';
-import { createHammer } from './combat.scene-asset.js';
+import { createBlaster, createHammer } from './combat.scene-asset.js';
 
 /**
  * Stylized hero statues for the hero-select carousel: about 1 m tall,
@@ -21,7 +21,7 @@ import { createHammer } from './combat.scene-asset.js';
  * All designs are original.
  */
 
-type HeroId = 'arc' | 'talon' | 'tempest' | 'orion' | 'weaver';
+type HeroId = 'arc' | 'talon' | 'tempest' | 'orion' | 'weaver' | 'havoc';
 
 const DEFAULT_ACCENT: Record<HeroId, string> = {
   arc: '#3DF5FF',
@@ -29,6 +29,7 @@ const DEFAULT_ACCENT: Record<HeroId, string> = {
   tempest: '#9D8CFF',
   orion: '#5DFFB0',
   weaver: '#FF3D5A',
+  havoc: '#FFB01F',
 };
 
 const SUIT: Record<HeroId, string> = {
@@ -37,6 +38,7 @@ const SUIT: Record<HeroId, string> = {
   tempest: '#262B40',
   orion: '#1B2A22',
   weaver: '#14182A',
+  havoc: '#2A2018',
 };
 
 function accentMaterial(color: string): MeshStandardMaterial {
@@ -162,6 +164,24 @@ export function createHeroFigure(hero: HeroId): Group {
     const bow = part(new TorusGeometry(0.28, 0.008, 6, 32, 1.4), accent, -0.36, 0.55, 0.04);
     bow.rotation.z = -0.7;
     root.add(bow);
+  } else if (hero === 'havoc') {
+    // Gunslinger: wide-brim helmet, long coat, plasma pistol in the right hand.
+    const brim = part(new CylinderGeometry(0.16, 0.16, 0.012, 20), suit, 0, 0.99);
+    const crown = part(new CylinderGeometry(0.07, 0.08, 0.07, 14), suit, 0, 1.03);
+    const band = part(new CylinderGeometry(0.081, 0.081, 0.015, 14), accent, 0, 1.01);
+    root.add(brim, crown, band);
+    const coat = part(new CylinderGeometry(0.13, 0.22, 0.5, 14, 1, true), new MeshStandardMaterial({ color: '#3A2A1C', side: DoubleSide, roughness: 0.8 }), 0, 0.48, -0.01);
+    coat.scale.z = 0.7;
+    root.add(coat);
+    const pistol = createBlaster();
+    pistol.scale.setScalar(0.85);
+    pistol.position.set(0.15, 0.52, 0.08);
+    pistol.rotation.x = 0.3;
+    pistol.traverse((o) => {
+      const mesh = o as Mesh;
+      if (mesh.isMesh && (mesh.material as MeshStandardMaterial).emissiveIntensity >= 2) mesh.material = accent;
+    });
+    root.add(pistol);
   } else {
     // Big white eye lenses and web-line rings across the suit.
     for (const side of [-1, 1]) {

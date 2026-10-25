@@ -4,6 +4,7 @@ import {
   createSystem,
   CylinderGeometry,
   DoubleSide,
+  Euler,
   Group,
   Matrix4,
   Mesh,
@@ -23,7 +24,7 @@ import { HeroCarousel } from './combat/carousel.js';
 import { Claws } from './combat/claws.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
-import { type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose } from './combat/gestures.js';
+import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { HoloMap } from './combat/holomap.js';
@@ -65,7 +66,7 @@ const AIM_ASSIST_COS = 0.985;
 const CRESCENT_SPEED = 9;
 const CRESCENT_MIN_SWING = 2.4;
 const CRESCENT_COOLDOWN = 0.35;
-const HAMMER_REACH = 0.2;
+const HAMMER_REACH = 0.25;
 const HAMMER_THROW_MIN = 1.3;
 const HAMMER_RETURN_SPEED = 13;
 const HAMMER_HEAD_RADIUS = 0.14;
@@ -97,6 +98,7 @@ const GOLD = new Color('#FFD23F');
 const PINK = new Color('#FF2D9A');
 const EMBER = new Color('#FF6A1A');
 const VIOLET = new Color('#9D8CFF');
+const GREEN = new Color('#39FF88');
 
 const ENEMY_ASSET: Readonly<Record<EnemyKind, string>> = {
   drone: 'alien-grunt',
@@ -120,7 +122,7 @@ const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   orb: ORANGE,
   pod: GOLD,
 };
-const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift'];
+const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes'];
 type PickupKind = 'heal' | 'rapid' | 'power';
 const BUFF_SECONDS = 8;
 
@@ -322,6 +324,25 @@ export class CombatSystem extends createSystem({
   private swipePrev = [new Vector3(), new Vector3()];
   private swipeValid = [false, false];
   private bow!: Bow;
+  /** Hand holding the bow (-1: loose in the world). */
+  private bowHolder = -1;
+  private bowOpen = 0;
+  private bowLoose = { position: new Vector3(), velocity: new Vector3(), quaternion: new Quaternion(), resting: false, recall: -1 };
+  private blaster: Object3D | null = null;
+  private blasterMuzzle: Object3D | null = null;
+  private gunHolder = -1;
+  private gunOpen = 0;
+  private gunLoose = { position: new Vector3(), velocity: new Vector3(), quaternion: new Quaternion(), resting: false, recall: -1 };
+  private triggerArmed = true;
+  private gunCooldown = 0;
+  private gunKick = 0;
+  /** Hammer physics once it has been used: falls and rests on surfaces. */
+  private hammerHover = true;
+  private hammerFall = new Vector3();
+  private hammerResting = false;
+  private basis = new Matrix4();
+  private lieQuat = new Quaternion();
+  private lieEuler = new Euler();
   private drawing = false;
   private nock = new Vector3();
   private hammer: Object3D | null = null;
@@ -687,6 +708,12 @@ export class CombatSystem extends createSystem({
     this.hammer.visible = false;
     this.root.add(this.hammer);
     this.hammerHead = this.hammer.getObjectByName('Head') ?? this.hammer;
+    this.blaster = await this.world.assets.instantiate('blaster');
+    this.blaster.name = 'PlasmaPistol';
+    this.blaster.visible = false;
+    this.root.add(this.blaster);
+    this.blasterMuzzle = this.blaster.getObjectByName('Muzzle') ?? this.blaster;
+    addOutline(this.blaster, 0.08, (m) => m.name === 'Body');
     addOutline(this.hammer, 0.08, (m) => m.parent?.name === 'Head' || m.name === 'Handle');
     for (const hero of HEROES) {
       const figure = await this.world.assets.instantiate(`hero-${hero.id}`);
@@ -792,7 +819,8 @@ export class CombatSystem extends createSystem({
     this.updateHands(realDt);
     this.updateClaws(realDt);
     this.updateHammer(realDt, time);
-    this.updateBow();
+    this.updateBow(realDt);
+    this.updateGun(realDt);
     this.updateWebs(realDt, time);
     this.updatePowerups(realDt, dt, time);
 
@@ -997,6 +1025,11 @@ export class CombatSystem extends createSystem({
     this.lastPhase = 'intro';
     this.sfx.wave();
     if (hero === 'tempest') this.summonHammer();
+    // Bow and pistol start in hand (bow in the off hand, pistol in the main hand).
+    this.bowHolder = hero === 'orion' ? (this.profile.settings.leftHanded ? 1 : 0) : -1;
+    this.bowLoose.recall = -1;
+    this.gunHolder = hero === 'havoc' ? (this.profile.settings.leftHanded ? 0 : 1) : -1;
+    this.gunLoose.recall = -1;
     this.buffRapid = 0;
     this.buffPower = 0;
     this.overdrive = 0;
@@ -1410,6 +1443,20 @@ export class CombatSystem extends createSystem({
       } else if (ambient === 'data') {
         this.v2.set(0, 0.15 + Math.random() * 0.2, 0);
         this.particles.emit(this.v1, this.v2, Math.random() < 0.5 ? CYAN : PINK, 4, 0, 0);
+      } else if (ambient === 'snow') {
+        // Slow drifting snowfall.
+        this.v1.y = 2.5 + Math.random();
+        this.v2.set((Math.random() - 0.5) * 0.2, -0.35 - Math.random() * 0.2, (Math.random() - 0.5) * 0.2);
+        this.particles.emit(this.v1, this.v2, WHITE, 7, 0, 0);
+      } else if (ambient === 'void') {
+        // Glitch motes rising toward the rift.
+        this.v2.set((Math.random() - 0.5) * 0.4, 0.4 + Math.random() * 0.6, (Math.random() - 0.5) * 0.4);
+        this.particles.emit(this.v1, this.v2, Math.random() < 0.5 ? VIOLET : GREEN, 3, 0, 0);
+      } else if (ambient === 'dust') {
+        // Low, wind-blown dust.
+        this.v1.y = Math.random() * 1.2;
+        this.v2.set(2 + Math.random(), 0.05, (Math.random() - 0.5) * 0.4);
+        this.particles.emit(this.v1, this.v2, Math.random() < 0.6 ? GOLD : EMBER, 2.5, 0, 0);
       } else {
         // Wind-blown storm sparks.
         this.v2.set(1.5 + Math.random(), -0.4, (Math.random() - 0.5) * 0.5);
@@ -1444,14 +1491,210 @@ export class CombatSystem extends createSystem({
   }
 
   /** Bow in one hand, draw the string with a pinch of the other. */
-  private updateBow(): void {
+  /**
+   * Height of the surface under `point`: the highest detected horizontal
+   * plane (real table, desk or floor in MR) beneath it, else the floor (0).
+   */
+  private surfaceBelow(point: Vector3): number {
+    let best = 0;
+    for (const entity of this.queries.planes.entities) {
+      const plane = entity.getValue(XRPlane, '_plane') as XRPlane | undefined;
+      const object = entity.object3D;
+      if (plane == null || object == null || plane.orientation !== 'horizontal') continue;
+      object.getWorldPosition(this.v4);
+      if (this.v4.y > point.y + 0.02 || this.v4.y <= best) continue;
+      this.v3.copy(point);
+      object.worldToLocal(this.v3);
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const corner of plane.polygon) {
+        minX = Math.min(minX, corner.x);
+        maxX = Math.max(maxX, corner.x);
+        minZ = Math.min(minZ, corner.z);
+        maxZ = Math.max(maxZ, corner.z);
+      }
+      if (this.v3.x >= minX && this.v3.x <= maxX && this.v3.z >= minZ && this.v3.z <= maxZ) best = this.v4.y;
+    }
+    return best;
+  }
+
+  /** Centre of the tube formed by the curled fingers of hand `index`. */
+  private gripPoint(index: number, out: Vector3): Vector3 {
+    const pose = this.hands[index].pose;
+    pose.position(7, this.v1);
+    pose.position(22, this.v2);
+    out.addVectors(this.v1, this.v2);
+    pose.position(12, this.v1);
+    pose.position(17, this.v2);
+    return out.add(this.v1).add(this.v2).multiplyScalar(0.25).lerp(this.hands[index].gauntlet.palmPoint, 0.35);
+  }
+
+  /**
+   * Shared physics for a loose weapon: recalled toward an open palm, or
+   * falling under gravity until it rests flat on the surface beneath it.
+   * Returns the hand index that caught it, or -1.
+   */
+  private updateLoose(loose: { position: Vector3; velocity: Vector3; quaternion: Quaternion; resting: boolean; recall: number }, dt: number, restHeight: number, lie: Quaternion): number {
+    if (loose.recall >= 0) {
+      const hand = this.hands[loose.recall];
+      if (!hand.tracked) {
+        loose.recall = -1;
+        return -1;
+      }
+      this.v1.subVectors(hand.gauntlet.palmPoint, loose.position);
+      const distance = this.v1.length();
+      if (distance < 0.12) {
+        const caught = loose.recall;
+        loose.recall = -1;
+        return caught;
+      }
+      loose.position.addScaledVector(this.v1.normalize(), Math.min(distance, 7 * dt));
+      loose.resting = false;
+      return -1;
+    }
+    if (!loose.resting) {
+      loose.velocity.y -= 9.8 * dt;
+      loose.position.addScaledVector(loose.velocity, dt);
+      const floor = this.surfaceBelow(loose.position) + restHeight;
+      if (loose.position.y <= floor) {
+        loose.position.y = floor;
+        loose.velocity.set(0, 0, 0);
+        loose.resting = true;
+        loose.quaternion.copy(lie);
+        this.particles.burst(loose.position, WHITE, 12, 0.6, 0.3, this.v2);
+        this.sfx.catchHammer();
+      }
+    }
+    // Pick it up with a fist, or call it with an open palm aimed at it.
+    for (let i = 0; i < this.hands.length; i += 1) {
+      const hand = this.hands[i];
+      if (!hand.tracked) continue;
+      const near = hand.gauntlet.palmPoint.distanceTo(loose.position);
+      if (near < 0.25 && isFist(hand.joints)) return i;
+      if (near > 0.45 && isOpenPalm(hand.joints)) {
+        this.v1.subVectors(loose.position, hand.gauntlet.palmPoint).normalize();
+        if (this.v1.dot(hand.gauntlet.palmNormal) > 0.75) {
+          loose.recall = i;
+          this.sfx.portal();
+        }
+      }
+    }
+    return -1;
+  }
+
+  // ---------------------------------------------------------------- HAVOC
+
+  private updateGun(dt: number): void {
+    const gun = this.blaster;
+    if (gun == null) return;
+    const active = this.powersLive && this.hero === 'havoc';
+    gun.visible = active;
+    if (!active) return;
+    this.gunCooldown -= dt;
+    this.gunKick = Math.max(0, this.gunKick - dt * 8);
+    if (this.gunHolder < 0) {
+      this.lieQuat.setFromEuler(this.lieEuler.set(0, 0, Math.PI / 2));
+      const caught = this.updateLoose(this.gunLoose, dt, 0.02, this.lieQuat);
+      gun.position.copy(this.gunLoose.position);
+      gun.quaternion.copy(this.gunLoose.quaternion);
+      if (caught >= 0) {
+        this.gunHolder = caught;
+        this.triggerArmed = false;
+        this.sfx.catchHammer();
+      }
+      return;
+    }
+    const hand = this.hands[this.gunHolder];
+    if (!hand.tracked) {
+      gun.visible = false;
+      return;
+    }
+    const e = fingerExtension(hand.joints);
+    // Let go: middle and ring fingers open.
+    if (e[1] > 1.65 && e[2] > 1.65) this.gunOpen += dt;
+    else this.gunOpen = 0;
+    if (this.gunOpen > 0.3) {
+      this.gunHolder = -1;
+      this.gunLoose.position.copy(gun.position);
+      this.gunLoose.velocity.set(0, 0, 0);
+      this.gunLoose.quaternion.copy(gun.quaternion);
+      this.gunLoose.resting = false;
+      return;
+    }
+    // Barrel along the back-of-hand line, top along the back of the hand.
+    const pose = hand.pose;
+    pose.position(J.wrist, this.v1);
+    pose.position(J.middleProx, this.v2);
+    this.hz.subVectors(this.v2, this.v1).normalize();
+    pose.quaternion(J.middleMeta, this.hammerQuat);
+    this.hy.set(0, 1, 0).applyQuaternion(this.hammerQuat);
+    this.hy.addScaledVector(this.hz, -this.hy.dot(this.hz)).normalize();
+    this.hx.crossVectors(this.hy, this.hz);
+    this.basis.makeBasis(this.hx, this.hy, this.hz);
+    gun.quaternion.setFromRotationMatrix(this.basis);
+    gun.rotateX(-this.gunKick * 0.5);
+    this.gripPoint(this.gunHolder, gun.position);
+    // Trigger: curl the index finger; holding it curled keeps firing.
+    const curled = e[0] < 1.4;
+    if (e[0] > 1.6) this.triggerArmed = true;
+    const auto = 0.34 * (1 - 0.1 * this.level('havoc-rate')) * (this.buffRapid > 0 ? 0.5 : 1);
+    if (curled && this.gunCooldown <= 0) {
+      this.triggerArmed = false;
+      this.gunCooldown = auto;
+      this.shootGun();
+    }
+  }
+
+  private shootGun(): void {
+    const gun = this.blaster!;
+    gun.updateMatrixWorld();
+    this.blasterMuzzle!.getWorldPosition(this.v3);
+    this.v4.set(0, 0, 1).transformDirection(gun.matrixWorld);
+    const bolt = this.fire(this.v3, this.v4, true);
+    if (bolt) {
+      bolt.damage = 1 + Math.floor(this.level('havoc-damage') / 2);
+      bolt.pierceLeft = this.level('havoc-pierce') > 0 ? Math.ceil(this.level('havoc-pierce') / 2) : 0;
+    }
+    this.gunKick = 1;
+    this.flashes.spawn(this.v3, this.accent, 0.05, 0.3, 0.12);
+    this.particles.burst(this.v3, this.accent, 8, 1.2, 0.15, this.v2);
+    this.sfx.blast();
+  }
+
+  private updateBow(dt: number): void {
     const active = this.powersLive && this.hero === 'orion';
-    const bowIndex = this.profile.settings.leftHanded ? 1 : 0;
-    const drawIndex = 1 - bowIndex;
-    const bowHand = this.hands[bowIndex];
-    if (!active || !bowHand.tracked) {
+    if (!active) {
       this.bow.group.visible = false;
       this.drawing = false;
+      return;
+    }
+    if (this.bowHolder < 0) {
+      this.drawing = false;
+      this.lieQuat.setFromEuler(this.lieEuler.set(-Math.PI / 2, 0, 0));
+      const caught = this.updateLoose(this.bowLoose, dt, 0.03, this.lieQuat);
+      this.bow.showFree(this.bowLoose.position, this.bowLoose.quaternion);
+      if (caught >= 0) this.bowHolder = caught;
+      return;
+    }
+    const bowIndex = this.bowHolder;
+    const drawIndex = 1 - bowIndex;
+    const bowHand = this.hands[bowIndex];
+    if (!bowHand.tracked) {
+      this.bow.group.visible = false;
+      this.drawing = false;
+      return;
+    }
+    // Let go: an open bow hand (while not drawing) drops the bow.
+    if (!this.drawing && isOpenPalm(bowHand.joints)) this.bowOpen += dt;
+    else this.bowOpen = 0;
+    if (this.bowOpen > 0.35) {
+      this.bowHolder = -1;
+      this.bowLoose.position.copy(this.bow.group.position);
+      this.bowLoose.velocity.set(0, 0, 0);
+      this.bowLoose.quaternion.copy(this.bow.group.quaternion);
+      this.bowLoose.resting = false;
       return;
     }
     // Grip in the finger tube, as with the hammer.
@@ -1675,6 +1918,8 @@ export class CombatSystem extends createSystem({
     this.hammer.position.y -= 0.3;
     this.hammer.quaternion.identity();
     this.hammerState = 'floating';
+    this.hammerHover = true;
+    this.hammerResting = false;
     this.hammerVelocity.set(0, 0, 0);
     this.flashes.spawn(this.hammer.position, VIOLET, 0.1, 0.6, 0.4);
     this.lightningFx.strike(this.head, this.hammer.position, VIOLET);
@@ -1735,8 +1980,25 @@ export class CombatSystem extends createSystem({
 
     switch (this.hammerState) {
       case 'floating': {
-        hammer.position.y += Math.sin(time * 2) * 0.03 * dt;
-        hammer.rotation.y += dt * 0.6;
+        if (this.hammerHover) {
+          // Freshly summoned: hover until first grabbed.
+          hammer.position.y += Math.sin(time * 2) * 0.03 * dt;
+          hammer.rotation.y += dt * 0.6;
+        } else if (!this.hammerResting) {
+          // Dropped: fall and settle flat on the floor or a real surface.
+          this.hammerFall.y -= 9.8 * dt;
+          hammer.position.addScaledVector(this.hammerFall, dt);
+          hammer.rotateX(dt * 4);
+          const floor = this.surfaceBelow(hammer.position) + 0.055;
+          if (hammer.position.y <= floor) {
+            hammer.position.y = floor;
+            this.hammerFall.set(0, 0, 0);
+            this.hammerResting = true;
+            hammer.rotation.set(0, hammer.rotation.y, Math.PI / 2);
+            this.particles.burst(hammer.position, VIOLET, 20, 0.8, 0.4, this.v2);
+            this.sfx.catchHammer();
+          }
+        }
         for (let i = 0; i < this.hands.length; i += 1) {
           const hand = this.hands[i];
           if (!hand.tracked) continue;
@@ -1764,7 +2026,7 @@ export class CombatSystem extends createSystem({
         if (!this.isGripping(i)) {
           const speed = this.hammerVelocity.length();
           if (speed > HAMMER_THROW_MIN) this.throwHammer(speed);
-          else this.hammerState = 'docked';
+          else this.dropHammer(this.hammerVelocity, 0.5);
         }
         break;
       }
@@ -1779,7 +2041,7 @@ export class CombatSystem extends createSystem({
         hammer.position.lerp(this.v3, Math.min(1, dt * 18));
         hammer.rotation.y += dt * 2;
         if (this.isGripping(i)) this.grabHammer(i);
-        else if (!isOpenPalm(hand.joints) && this.hammerTime > 0.6) this.hammerState = 'floating';
+        else if (!isOpenPalm(hand.joints) && this.hammerTime > 0.6) this.dropHammer(this.hammerVelocity.set(0, 0, 0), 0);
         break;
       }
       case 'flying': {
@@ -1787,8 +2049,7 @@ export class CombatSystem extends createSystem({
         hammer.position.addScaledVector(this.hammerVelocity, dt);
         hammer.rotateX(-dt * 18);
         if (this.hammerTime > HAMMER_FLIGHT || hammer.position.distanceTo(this.head) > 14) {
-          this.hammerState = 'floating';
-          this.hammerVelocity.set(0, 0, 0);
+          this.dropHammer(this.hammerVelocity, 0.3);
           break;
         }
         if (this.hammerTime > RECALL_DELAY) {
@@ -1855,7 +2116,17 @@ export class CombatSystem extends createSystem({
     }
   }
 
+  /** Lets the hammer go: it falls (with some of `velocity`) and settles. */
+  private dropHammer(velocity: Vector3, keep: number): void {
+    this.hammerState = 'floating';
+    this.hammerHover = false;
+    this.hammerResting = false;
+    this.hammerFall.copy(velocity).multiplyScalar(keep);
+  }
+
   private grabHammer(index: number): void {
+    this.hammerHover = false;
+    this.hammerResting = false;
     this.hammerHand = index;
     this.hammerState = 'gripped';
     this.hammerTime = 0;
@@ -1873,6 +2144,7 @@ export class CombatSystem extends createSystem({
   }
 
   private recallHammer(index: number): void {
+    this.hammerResting = false;
     this.hammerHand = index;
     this.hammerState = 'returning';
     this.hammerTime = 0;
@@ -1969,9 +2241,9 @@ export class CombatSystem extends createSystem({
 
   // ---------------------------------------------------------------- bolts
 
-  private fire(origin: Vector3, direction: Vector3, quiet = false): void {
+  private fire(origin: Vector3, direction: Vector3, quiet = false): Bolt | null {
     const bolt = this.bolts.find((b) => !b.active);
-    if (bolt == null) return;
+    if (bolt == null) return null;
     bolt.target = null;
     let best = this.profile.settings.aimAssist ? AIM_ASSIST_COS : 2;
     for (const drone of this.drones) {
@@ -1999,9 +2271,10 @@ export class CombatSystem extends createSystem({
     bolt.object.up.set(0, 1, 0);
     bolt.object.visible = true;
     bolt.object.position.copy(origin);
-    if (quiet) return;
+    if (quiet) return bolt;
     this.flashes.spawn(origin, this.accent, 0.05, 0.25, 0.15);
     this.sfx.blast();
+    return bolt;
   }
 
   /** Turns a bolt toward its target by `amount` (1 = straight at it). */
