@@ -189,6 +189,8 @@ export interface Settings {
   difficulty: Difficulty;
   aimAssist: boolean;
   leftHanded: boolean;
+  /** Spoken character dialogue (subtitles always show). */
+  voices: boolean;
 }
 
 export interface Profile {
@@ -215,7 +217,7 @@ export function defaultProfile(): Profile {
     equipped: {},
     stars: {},
     unlocks: [],
-    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false },
+    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, voices: true },
   };
 }
 

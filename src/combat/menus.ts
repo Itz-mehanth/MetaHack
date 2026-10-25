@@ -445,10 +445,11 @@ export class GameMenus {
         { id: 'aim', x: 64, y: 530, w: 460, h: 110, label: 'AIM ASSIST', sub: s.aimAssist ? 'ON' : 'OFF', selected: s.aimAssist },
         { id: 'difficulty', x: 544, y: 530, w: 460, h: 110, label: 'DIFFICULTY', sub: s.difficulty.toUpperCase() },
         { id: 'lefty', x: 1024, y: 530, w: 512, h: 110, label: 'BOW HAND', sub: s.leftHanded ? 'RIGHT HAND' : 'LEFT HAND' },
+        { id: 'voices', x: 64, y: 690, w: 460, h: 110, label: 'VOICES', sub: s.voices ? 'ON' : 'OFF', selected: s.voices },
         {
           id: 'reset',
-          x: 64,
-          y: 700,
+          x: 544,
+          y: 690,
           w: 620,
           h: 110,
           label: this.confirmReset ? 'TAP AGAIN TO ERASE' : 'RESET PROGRESS',
@@ -458,11 +459,11 @@ export class GameMenus {
         {
           id: 'settings-note',
           kind: 'text',
-          x: 740,
-          y: 710,
-          w: 800,
-          h: 100,
-          label: 'Progress, coins and settings are saved\non this device.',
+          x: 64,
+          y: 850,
+          w: 1470,
+          h: 80,
+          label: 'Progress, coins and settings are saved on this device. Subtitles always show.',
           size: 30,
         },
       ],
@@ -643,6 +644,10 @@ export class GameMenus {
         return;
       case 'aim':
         p.settings.aimAssist = !p.settings.aimAssist;
+        this.actions.changed();
+        return;
+      case 'voices':
+        p.settings.voices = !p.settings.voices;
         this.actions.changed();
         return;
       case 'lefty':

@@ -358,6 +358,8 @@ export class CombatSystem extends createSystem({
     this.root.add(this.panel.group);
     this.music = new Music(this.sfx);
     this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
+    this.voice.setVolume(this.profile.settings.sfx);
+    this.voice.enabled = this.profile.settings.voices;
     this.menus = new GameMenus(this.profile, {
       play: (hero, stage) => this.startStage(hero, stage),
       resume: () => this.resumeStage(),
@@ -935,6 +937,12 @@ export class CombatSystem extends createSystem({
   /** Left wrist: pause during a stage, resume when paused, else go back. */
   private wristPressed(): void {
     this.flashes.spawn(this.wrist.center, WHITE, 0.05, 0.3, 0.25);
+    // The wrist button always skips a transmission.
+    if (this.tx != null || this.menus.screen === 'transmission') {
+      this.sfx.click();
+      this.endTransmission();
+      return;
+    }
     if (this.paused) {
       this.resumeStage();
       return;
@@ -1061,19 +1069,58 @@ export class CombatSystem extends createSystem({
     else this.showMenu('transmission');
   }
 
+  /**
+   * Ends the transmission. Hides the panel and runs the follow-up first, so
+   * nothing that fails afterwards (e.g. stopping speech) can leave a dead
+   * panel on screen. With no transmission running, recovers the menus.
+   */
   private endTransmission(): void {
     const tx = this.tx;
-    if (tx == null) return;
     this.tx = null;
-    this.voice.stop();
     this.panel.hide();
-    tx.done();
+    if (tx == null) {
+      if (this.run.phase === 'title') this.showMenu('map');
+      return;
+    }
+    try {
+      tx.done();
+    } catch (error) {
+      console.error('[Combat] transmission follow-up failed', error);
+      this.recoverMenus();
+    }
+    this.voice.stop();
+  }
+
+  /** Last-resort recovery after an unexpected error: back to the war map. */
+  private recoverMenus(): void {
+    this.tx = null;
+    this.paused = false;
+    this.resultTimer = -1;
+    this.voice.stop();
+    try {
+      if (this.run.phase !== 'title') this.run.toTitle();
+      this.showMenu('map');
+    } catch (error) {
+      console.error('[Combat] menu recovery failed', error);
+      this.panel.hide();
+    }
   }
 
   private updateTransmission(dt: number): void {
-    if (this.tx == null || this.paused) return;
+    // Watchdog: a transmission panel with nothing playing must never linger.
+    if (this.tx == null) {
+      if (this.panel.visible && this.menus.screen === 'transmission') this.endTransmission();
+      return;
+    }
+    if (this.paused) return;
     this.tx.timer -= dt;
-    if (this.tx.timer <= 0) this.advanceTransmission();
+    if (this.tx.timer > 0) return;
+    try {
+      this.advanceTransmission();
+    } catch (error) {
+      console.error('[Combat] transmission failed', error);
+      this.endTransmission();
+    }
   }
 
   /** The villain shouts at the start of each later wave. */
@@ -1144,7 +1191,13 @@ export class CombatSystem extends createSystem({
     this.particles.burst(point, this.accent, 10, 0.4, 0.2, this.v2);
     this.sfx.click();
     const before = this.menus.screen;
-    handle();
+    try {
+      handle();
+    } catch (error) {
+      console.error('[Combat] menu action failed', error);
+      this.recoverMenus();
+      return;
+    }
     if (!this.panel.visible) {
       this.syncCarousel();
       this.syncMap();
@@ -1160,6 +1213,8 @@ export class CombatSystem extends createSystem({
     saveProfile(this.profile);
     this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
     this.voice.setVolume(this.profile.settings.sfx);
+    this.voice.enabled = this.profile.settings.voices;
+    if (!this.voice.enabled) this.voice.stop();
     this.applySkin();
   }
 
