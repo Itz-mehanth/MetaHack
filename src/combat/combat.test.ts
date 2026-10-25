@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { type HandJoints, isBlastPose, isFist, isOpenPalm, palmNormal } from './gestures.js';
-import { MAX_HEALTH, Run, WAVES } from './run.js';
+import { MISSIONS } from './missions.js';
+import { MAX_HEALTH, Run } from './run.js';
+
+const WAVES = MISSIONS[0].waves;
 
 /** Right hand, fingers up, palm facing -Z (away from a head at the origin). */
 function rightHand(curl: boolean, z = -0.4): HandJoints {
@@ -99,6 +102,8 @@ describe('Run', () => {
     run.kill();
     run.kill();
     expect(run.score).toBe(100 + 200);
+    expect(run.kill('armored')).toBe(false);
+    expect(run.score).toBe(100 + 200 + 600);
     for (let i = 0; i < 30; i += 1) run.update(0.1);
     expect(run.combo).toBe(0);
   });
@@ -126,6 +131,40 @@ describe('Run', () => {
       for (let i = 0; i < 40 && run.phase === 'cleared'; i += 1) run.update(0.1);
     }
     expect(run.phase).toBe('victory');
+  });
+
+  it('spawns swarm waves in bursts and returns to the title after a result', () => {
+    const talon = MISSIONS[1];
+    const run = new Run(() => 0);
+    run.start(talon);
+    for (let i = 0; i < 40 && run.phase !== 'fighting'; i += 1) run.update(0.1);
+    const times: number[] = [];
+    let t = 0;
+    for (let i = 0; i < 200 && times.length < 6; i += 1) {
+      t += 0.05;
+      const order = run.update(0.05);
+      if (order) {
+        expect(order.kind).toBe('swarmer');
+        times.push(t);
+      }
+    }
+    // Three quick spawns, then a long gap before the next pack.
+    expect(times[1] - times[0]).toBeLessThan(0.3);
+    expect(times[3] - times[2]).toBeGreaterThan(1.5);
+    run.toTitle();
+    expect(run.phase).toBe('title');
+  });
+
+  it('ends on the title screen a few seconds after defeat', () => {
+    const run = new Run(() => 0.99);
+    run.start();
+    for (let i = 0; i < 5000 && run.phase !== 'defeat'; i += 1) {
+      if (run.phase === 'fighting' && run.aliveCount > 0) run.hit(2);
+      else run.update(0.1);
+    }
+    expect(run.phase).toBe('defeat');
+    for (let i = 0; i < 60; i += 1) run.update(0.1);
+    expect(run.phase).toBe('title');
   });
 
   it('ignores kills and hits outside the fighting phase', () => {

@@ -21,12 +21,14 @@ import { Claws } from './combat/claws.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
 import { type HandJoints, isBlastPose, isFist } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
+import { HeroHub } from './combat/hub.js';
+import { ENEMIES, type EnemyKind, missionFor } from './combat/missions.js';
+import { applyTheme, setFlash, type Theme, THEMES } from './combat/themes.js';
 import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
 import { type Phase, Run } from './combat/run.js';
 import { Sfx } from './combat/sfx.js';
 import { createGlowSprite, Flashes, Particles } from './combat/vfx.js';
-import { DRONE_RADIUS } from './scene-assets/combat.scene-asset.js';
 
 type Handedness = 'left' | 'right';
 type Triple = [number, number, number];
@@ -41,8 +43,6 @@ const CRESCENT_MIN_SWING = 2.4;
 const CRESCENT_COOLDOWN = 0.35;
 const HOMING_RATE = 3;
 const AIM_SMOOTHING = 0.45;
-const CHARGE_DISTANCE = 0.75;
-const CHARGE_TIME = 0.9;
 const EMERGE_TIME = 0.9;
 const SLOWMO_SECONDS = 0.8;
 const SLOWMO_SCALE = 0.25;
@@ -53,6 +53,22 @@ const ORANGE = new Color('#FF8A1F');
 const MAGENTA = new Color('#FF2D6F');
 const GOLD = new Color('#FFD23F');
 const PINK = new Color('#FF2D9A');
+const EMBER = new Color('#FF6A1A');
+const VIOLET = new Color('#9D8CFF');
+
+const ENEMY_ASSET: Readonly<Record<EnemyKind, string>> = {
+  drone: 'drone',
+  armored: 'drone-armored',
+  swarmer: 'swarmer',
+  titan: 'titan',
+};
+const ENEMY_POOL: Readonly<Record<EnemyKind, number>> = { drone: 14, armored: 8, swarmer: 22, titan: 6 };
+const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
+  drone: MAGENTA,
+  armored: ORANGE,
+  swarmer: EMBER,
+  titan: VIOLET,
+};
 
 interface HandState {
   handedness: Handedness;
@@ -69,6 +85,7 @@ interface HandState {
   gauntlet: Gauntlet;
   visualHidden: boolean;
   claws: Claws;
+  indexTip?: Vector3;
   prevTip: Vector3;
   hasPrevTip: boolean;
   slashCooldown: number;
@@ -80,7 +97,7 @@ interface Drone {
   object: Object3D;
   ring: Object3D;
   eye: Object3D;
-  armored: boolean;
+  kind: EnemyKind;
   hp: number;
   state: DroneState;
   t: number;
@@ -106,7 +123,7 @@ interface Bolt {
   position: Vector3;
   previous: Vector3;
   velocity: Vector3;
-  target: Drone | 'core' | null;
+  target: Drone | null;
 }
 
 function triple(): Triple {
@@ -162,9 +179,13 @@ export class CombatSystem extends createSystem({
   private jointQuat = new Quaternion();
   private drones: Drone[] = [];
   private bolts: Bolt[] = [];
-  private core: Object3D | null = null;
+  private hub!: HeroHub;
+  private theme: Theme = THEMES['neon-grid'];
+  private ambientTimer = 0;
+  private lightning = 0;
+  private nextStrike = 4;
+  private tips: Vector3[] = [];
   private arena: Object3D | null = null;
-  private coreVisible = false;
   private damage!: Mesh;
   private damageMaterial!: MeshBasicMaterial;
   private lastPhase: Phase = 'title';
@@ -194,6 +215,8 @@ export class CombatSystem extends createSystem({
     this.wrist = new WristButton();
     this.root.add(this.wrist.group);
     this.wrist.setHero('ARC', CYAN);
+    this.hub = new HeroHub(['tempest']);
+    this.root.add(this.hub.group);
 
     // Unit-length beam along +Z, starting at its origin.
     const beamGeometry = new CylinderGeometry(0.0025, 0.0012, 1, 6, 1, true);
@@ -308,7 +331,7 @@ export class CombatSystem extends createSystem({
     const onSessionStart = () => {
       this.sfx.unlock();
       this.hudPlaced = false;
-      this.placeCore();
+      if (this.run.phase === 'title') this.showHub();
     };
     xr.addEventListener('sessionstart', onSessionStart);
     const canvas = this.world.renderer.domElement;
@@ -326,46 +349,47 @@ export class CombatSystem extends createSystem({
     this.arena = await this.world.assets.instantiate('arena');
     this.arena.name = 'Arena';
     this.root.add(this.arena);
+    applyTheme(this.arena, this.theme);
     const portalGeometry = new RingGeometry(0.17, 0.26, 48);
-    for (let i = 0; i < 22; i += 1) {
-      const armored = i >= 14;
-      const object = await this.world.assets.instantiate(armored ? 'drone-armored' : 'drone');
-      object.name = `${armored ? 'DroneArmored' : 'Drone'}-${i}`;
-      object.visible = false;
-      this.root.add(object);
-      const portalMaterial = new MeshBasicMaterial({
-        color: armored ? ORANGE : MAGENTA,
-        transparent: true,
-        opacity: 0,
-        blending: AdditiveBlending,
-        side: DoubleSide,
-        depthWrite: false,
-      });
-      const portal = new Mesh(portalGeometry, portalMaterial);
-      portal.name = `Portal-${i}`;
-      portal.visible = false;
-      this.root.add(portal);
-      this.drones.push({
-        object,
-        ring: object.getObjectByName('Ring')!,
-        eye: object.getObjectByName('Eye')!,
-        armored,
-        hp: 0,
-        state: 'off',
-        t: 0,
-        speed: 1,
-        phase: 0,
-        spawn: new Vector3(),
-        normal: new Vector3(),
-        offset: new Vector3(),
-        portal,
-        portalMaterial,
-      });
+    let index = 0;
+    for (const kind of Object.keys(ENEMY_POOL) as EnemyKind[]) {
+      for (let n = 0; n < ENEMY_POOL[kind]; n += 1) {
+        const i = index++;
+        const object = await this.world.assets.instantiate(ENEMY_ASSET[kind]);
+        object.name = `Enemy-${kind}-${n}`;
+        object.visible = false;
+        this.root.add(object);
+        const portalMaterial = new MeshBasicMaterial({
+          color: ENEMY_COLOR[kind],
+          transparent: true,
+          opacity: 0,
+          blending: AdditiveBlending,
+          side: DoubleSide,
+          depthWrite: false,
+        });
+        const portal = new Mesh(portalGeometry, portalMaterial);
+        portal.name = `Portal-${i}`;
+        portal.visible = false;
+        this.root.add(portal);
+        this.drones.push({
+          object,
+          ring: object.getObjectByName('Ring')!,
+          eye: object.getObjectByName('Eye')!,
+          kind,
+          hp: 0,
+          state: 'off',
+          t: 0,
+          speed: 1,
+          phase: 0,
+          spawn: new Vector3(),
+          normal: new Vector3(),
+          offset: new Vector3(),
+          portal,
+          portalMaterial,
+        });
+      }
     }
-    this.core = await this.world.assets.instantiate('core');
-    this.core.name = 'StartCore';
-    this.root.add(this.core);
-    this.placeCore();
+    this.showHub();
     this.ready = true;
   }
 
@@ -386,16 +410,26 @@ export class CombatSystem extends createSystem({
 
     this.readHands();
     for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
-    if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.cycleHero();
+    if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.openMenu();
     this.updateHands(realDt);
     this.updateClaws(realDt);
 
+    this.tips.length = 0;
+    for (const hand of this.hands) {
+      if (!hand.pose.tracked) continue;
+      hand.indexTip ??= new Vector3();
+      const tip = hand.indexTip;
+      this.tips.push(hand.pose.position(9, tip));
+    }
+    const picked = this.hub.update(realDt, time, this.tips);
+    if (picked >= 0) this.selectHero(picked);
+
     const order = this.run.update(dt);
-    if (order) this.spawnDrone(order.armored, order.speed);
+    if (order) this.spawnDrone(order.kind, order.speed);
     this.updateDrones(dt, time);
     this.updateBolts(dt);
-    this.updateCore(time);
     this.onPhaseChange();
+    this.updateAmbient(realDt, time);
 
     this.particles.update(dt);
     this.flashes.update(dt);
@@ -519,16 +553,83 @@ export class CombatSystem extends createSystem({
 
   // ---------------------------------------------------------------- heroes
 
-  private cycleHero(): void {
-    const index = HEROES.findIndex((h) => h.id === this.hero);
-    const next = HEROES[(index + 1) % HEROES.length];
-    this.hero = next.id;
-    const color = new Color(next.color);
+  /** Picks a hero from the hub and starts their mission. */
+  private selectHero(index: number): void {
+    const hero = HEROES[index];
+    if (hero == null || this.run.phase !== 'title') return;
+    this.hero = hero.id;
+    const color = new Color(hero.color);
     for (const hand of this.hands) hand.gauntlet.setAccent(color);
-    this.wrist.setHero(next.name, color);
-    this.flashes.spawn(this.wrist.center, color, 0.05, 0.4, 0.3);
-    this.particles.burst(this.wrist.center, color, 30, 1.2, 0.4, this.v2);
+    this.wrist.setHero(`${hero.name} | MENU`, color);
+    const card = this.hub.cards[index];
+    this.flashes.spawn(card.center, color, 0.1, 1.2, 0.5);
+    this.particles.burst(card.center, color, 120, 3, 0.8, this.v2);
+    this.particles.burst(card.center, WHITE, 40, 5, 0.4, this.v2);
+    this.sfx.explode(true);
     this.sfx.swap();
+    this.hub.hide();
+    const mission = missionFor(hero.id);
+    this.setTheme(mission.id);
+    this.run.start(mission);
+  }
+
+  /** Wrist button: abandon the mission and return to hero select. */
+  private openMenu(): void {
+    this.sfx.swap();
+    this.flashes.spawn(this.wrist.center, WHITE, 0.05, 0.3, 0.25);
+    if (this.run.phase !== 'title') this.run.toTitle();
+  }
+
+  private showHub(): void {
+    this.world.camera.getWorldPosition(this.head);
+    this.world.camera.getWorldDirection(this.forward);
+    this.setTheme('neon-grid');
+    this.hub.show(this.head, this.forward);
+  }
+
+  private setTheme(id: string): void {
+    this.theme = THEMES[id] ?? THEMES['neon-grid'];
+    if (this.arena) applyTheme(this.arena, this.theme);
+    this.lightning = 0;
+    this.nextStrike = 3;
+  }
+
+  /** Theme ambience in VR: data motes, rising embers or lightning. */
+  private updateAmbient(dt: number, time: number): void {
+    if (this.arena == null || !this.arena.visible) return;
+    const ambient = this.theme.ambient;
+    this.ambientTimer += dt;
+    const rate = ambient === 'embers' ? 0.015 : ambient === 'data' ? 0.08 : 0.05;
+    while (this.ambientTimer > rate) {
+      this.ambientTimer -= rate;
+      const a = Math.random() * Math.PI * 2;
+      const r = 1.2 + Math.random() * 6;
+      this.v1.set(this.head.x + Math.cos(a) * r, ambient === 'embers' ? Math.random() * 0.4 : Math.random() * 3, this.head.z + Math.sin(a) * r);
+      if (ambient === 'embers') {
+        this.v2.set((Math.random() - 0.5) * 0.3, 0.6 + Math.random() * 0.9, (Math.random() - 0.5) * 0.3);
+        this.particles.emit(this.v1, this.v2, Math.random() < 0.3 ? GOLD : EMBER, 3 + Math.random() * 2, 0.15, -0.1);
+      } else if (ambient === 'data') {
+        this.v2.set(0, 0.15 + Math.random() * 0.2, 0);
+        this.particles.emit(this.v1, this.v2, Math.random() < 0.5 ? CYAN : PINK, 4, 0, 0);
+      } else {
+        // Wind-blown storm sparks.
+        this.v2.set(1.5 + Math.random(), -0.4, (Math.random() - 0.5) * 0.5);
+        this.particles.emit(this.v1, this.v2, VIOLET, 2, 0, 0);
+      }
+    }
+    if (ambient === 'storm') {
+      this.nextStrike -= dt;
+      if (this.nextStrike <= 0) {
+        this.nextStrike = 4 + Math.random() * 6;
+        this.lightning = 1;
+        this.sfx.thunder();
+      }
+    }
+    if (this.lightning > 0) {
+      this.lightning = Math.max(0, this.lightning - dt * 1.8);
+      const flicker = this.lightning * (0.55 + 0.45 * Math.sin(time * 60));
+      setFlash(this.arena, flicker);
+    }
   }
 
   /** TALON: fist extends blades; contact cuts, fast swings throw crescents. */
@@ -551,17 +652,14 @@ export class CombatSystem extends createSystem({
       }
       const speed = this.v3.subVectors(claws.tip, hand.prevTip).length() / dt;
 
-      if (this.coreVisible && this.core) {
-        if (
-          this.segmentHits(claws.base, claws.tip, this.core.position, 0.2) ||
-          this.segmentHits(hand.prevTip, claws.tip, this.core.position, 0.2)
-        ) {
-          this.hitCore();
-        }
+      const card = this.hub.hitBySegment(claws.base, claws.tip, this.v3, this.v4);
+      if (card >= 0) {
+        this.selectHero(card);
+        continue;
       }
       for (const drone of this.drones) {
         if (drone.state === 'off' || drone.state === 'emerging') continue;
-        const radius = DRONE_RADIUS * (drone.armored ? 1.3 : 1) + 0.03;
+        const radius = ENEMIES[drone.kind].radius + 0.03;
         const at = drone.object.position;
         if (this.segmentHits(claws.base, claws.tip, at, radius) || this.segmentHits(hand.prevTip, claws.tip, at, radius)) {
           this.sfx.slash();
@@ -621,10 +719,6 @@ export class CombatSystem extends createSystem({
         bolt.target = drone;
       }
     }
-    if (this.coreVisible && this.core) {
-      const cos = this.v2.subVectors(this.core.position, origin).normalize().dot(direction);
-      if (cos > best) bolt.target = 'core';
-    }
     bolt.kind = 'bolt';
     bolt.radius = 0.06;
     bolt.damage = 1;
@@ -647,7 +741,7 @@ export class CombatSystem extends createSystem({
   private steer(bolt: Bolt, amount: number): void {
     const target = bolt.target;
     if (target == null) return;
-    const point = target === 'core' ? this.core?.position : target.state === 'off' ? null : target.object.position;
+    const point = target.state === 'off' ? null : target.object.position;
     if (point == null) {
       bolt.target = null;
       return;
@@ -675,14 +769,15 @@ export class CombatSystem extends createSystem({
       this.particles.emit(bolt.previous, this.v2, crescent ? PINK : CYAN, crescent ? 0.3 : 0.18, 0);
       if (crescent) bolt.crescent.scale.setScalar(1 + (BOLT_LIFE - bolt.life) * 1.2);
 
-      if (this.coreVisible && this.core && this.segmentHits(bolt.previous, bolt.position, this.core.position, 0.16 + bolt.radius)) {
+      const card = this.hub.hitBySegment(bolt.previous, bolt.position, this.v3, this.v4);
+      if (card >= 0) {
         this.retireBolt(bolt);
-        this.hitCore();
+        this.selectHero(card);
         continue;
       }
       for (const drone of this.drones) {
         if (drone.state === 'off') continue;
-        const radius = DRONE_RADIUS * (drone.armored ? 1.3 : 1) + bolt.radius;
+        const radius = ENEMIES[drone.kind].radius + bolt.radius;
         if (this.segmentHits(bolt.previous, bolt.position, drone.object.position, radius)) {
           this.damageDrone(drone, bolt.damage);
           // Crescents cut through everything in their path.
@@ -713,15 +808,15 @@ export class CombatSystem extends createSystem({
 
   // ---------------------------------------------------------------- drones
 
-  private spawnDrone(armored: boolean, speed: number): void {
-    const drone = this.drones.find((d) => d.state === 'off' && d.armored === armored) ?? this.drones.find((d) => d.state === 'off');
+  private spawnDrone(kind: EnemyKind, speed: number): void {
+    const drone = this.drones.find((d) => d.state === 'off' && d.kind === kind);
     if (drone == null) {
       // Pool exhausted: count it as killed so the wave can still finish.
-      this.run.kill();
+      this.run.kill(kind);
       return;
     }
     this.pickSpawn(drone.spawn, drone.normal);
-    drone.hp = drone.armored ? 2 : 1;
+    drone.hp = ENEMIES[kind].hp;
     drone.state = 'emerging';
     drone.t = 0;
     drone.speed = speed;
@@ -736,7 +831,7 @@ export class CombatSystem extends createSystem({
     drone.portal.scale.setScalar(0.01);
     drone.portal.visible = true;
     drone.portalMaterial.opacity = 1;
-    this.particles.burst(drone.spawn, drone.armored ? ORANGE : MAGENTA, 24, 1.2, 0.5, this.v2);
+    this.particles.burst(drone.spawn, ENEMY_COLOR[kind], kind === 'titan' ? 60 : 24, 1.2, 0.5, this.v2);
     this.sfx.portal();
   }
 
@@ -783,7 +878,7 @@ export class CombatSystem extends createSystem({
 
       if (drone.portal.visible) {
         const p = Math.min(1, drone.t / EMERGE_TIME);
-        drone.portal.scale.setScalar(0.2 + p * (drone.armored ? 1.4 : 1.1));
+        drone.portal.scale.setScalar(0.2 + p * ENEMIES[drone.kind].radius * 7);
         drone.portalMaterial.opacity = drone.state === 'emerging' ? 1 : Math.max(0, drone.portalMaterial.opacity - dt * 1.5);
         if (drone.portalMaterial.opacity <= 0) drone.portal.visible = false;
       }
@@ -800,6 +895,7 @@ export class CombatSystem extends createSystem({
         continue;
       }
 
+      const def = ENEMIES[drone.kind];
       if (drone.state === 'approach') {
         // Hover point: in front of the face, offset so drones fan out.
         this.v1.copy(this.head).addScaledVector(this.forward, 0.3);
@@ -809,10 +905,11 @@ export class CombatSystem extends createSystem({
         const step = drone.speed * dt;
         if (this.v2.length() > step) this.v2.setLength(step);
         object.position.add(this.v2);
-        object.position.y += Math.sin(time * 3 + drone.phase) * 0.25 * dt;
-        object.position.x += Math.cos(time * 2.2 + drone.phase) * 0.25 * dt;
+        const weave = def.weave * (drone.kind === 'swarmer' ? 3 : 1);
+        object.position.y += Math.sin(time * 3 * (drone.kind === 'swarmer' ? 2.5 : 1) + drone.phase) * weave * dt;
+        object.position.x += Math.cos(time * 2.2 * (drone.kind === 'swarmer' ? 2.5 : 1) + drone.phase) * weave * dt;
         object.lookAt(this.head);
-        if (object.position.distanceTo(this.head) < CHARGE_DISTANCE) {
+        if (object.position.distanceTo(this.head) < def.chargeDistance) {
           drone.state = 'charge';
           drone.t = 0;
         }
@@ -824,9 +921,9 @@ export class CombatSystem extends createSystem({
       drone.eye.scale.setScalar(s * (1 + drone.t));
       object.position.x += (Math.random() - 0.5) * 0.01;
       object.position.y += (Math.random() - 0.5) * 0.01;
-      if (drone.t >= CHARGE_TIME) {
+      if (drone.t >= def.chargeTime) {
         this.explodeDrone(drone, false);
-        this.run.hit();
+        this.run.hit(def.damage);
         this.damageMaterial.opacity = 0.55;
         this.damage.visible = true;
         this.sfx.hurt();
@@ -842,14 +939,14 @@ export class CombatSystem extends createSystem({
       this.sfx.ping();
       return;
     }
-    const last = this.run.kill();
-    this.explodeDrone(drone, last);
+    const last = this.run.kill(drone.kind);
+    this.explodeDrone(drone, last || drone.kind === 'titan');
     if (last) this.slowmo = SLOWMO_SECONDS;
   }
 
   private explodeDrone(drone: Drone, big: boolean): void {
     const at = drone.object.position;
-    const color = drone.armored ? ORANGE : MAGENTA;
+    const color = ENEMY_COLOR[drone.kind];
     this.flashes.spawn(at, color, 0.1, big ? 1.6 : 0.9, big ? 0.6 : 0.35);
     this.flashes.spawn(at, WHITE, 0.05, big ? 0.6 : 0.35, 0.15);
     this.particles.burst(at, color, big ? 90 : 45, big ? 3.5 : 2.5, 0.7, this.v2);
@@ -860,49 +957,19 @@ export class CombatSystem extends createSystem({
     drone.eye.scale.setScalar(1);
   }
 
-  // ---------------------------------------------------------------- core & phases
-
-  private placeCore(): void {
-    if (this.core == null) return;
-    this.world.camera.getWorldPosition(this.head);
-    this.world.camera.getWorldDirection(this.forward);
-    this.v1.set(this.forward.x, 0, this.forward.z);
-    if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
-    this.v1.normalize();
-    this.core.position.copy(this.head).addScaledVector(this.v1, 1.3);
-    this.core.position.y = this.head.y - 0.15;
-    this.setCoreVisible(this.run.phase === 'title' || this.run.phase === 'victory' || this.run.phase === 'defeat');
-  }
-
-  private setCoreVisible(visible: boolean): void {
-    this.coreVisible = visible;
-    if (this.core) this.core.visible = visible;
-  }
-
-  private hitCore(): void {
-    if (this.core == null) return;
-    const at = this.core.position;
-    this.particles.clear();
-    this.flashes.spawn(at, CYAN, 0.2, 1.8, 0.6);
-    this.particles.burst(at, CYAN, 120, 4, 0.8, this.v2);
-    this.particles.burst(at, WHITE, 40, 6, 0.4, this.v2);
-    this.sfx.explode(true);
-    this.setCoreVisible(false);
-    this.run.start();
-  }
-
-  private updateCore(time: number): void {
-    if (!this.coreVisible || this.core == null) return;
-    this.core.rotation.y = time * 0.8;
-    this.core.rotation.x = time * 0.5;
-    this.core.scale.setScalar(1 + Math.sin(time * 4) * 0.06);
-  }
+  // ---------------------------------------------------------------- phases
 
   private onPhaseChange(): void {
     const phase = this.run.phase;
     if (phase === this.lastPhase) return;
     this.lastPhase = phase;
     if (phase === 'intro') this.sfx.wave();
+    if (phase === 'title') {
+      for (const drone of this.drones) {
+        if (drone.state !== 'off') this.explodeDrone(drone, false);
+      }
+      this.showHub();
+    }
     if (phase === 'victory' || phase === 'defeat') {
       for (const drone of this.drones) {
         if (drone.state !== 'off') this.explodeDrone(drone, false);
@@ -913,7 +980,6 @@ export class CombatSystem extends createSystem({
       } else {
         this.sfx.defeat();
       }
-      this.placeCore();
     }
   }
 
@@ -925,23 +991,23 @@ export class CombatSystem extends createSystem({
     let hint = '';
     switch (run.phase) {
       case 'title':
-        message = 'HANDFORGE';
-        hint = this.hero === 'arc' ? 'Open your palm at the core to begin' : 'Slash the core to begin';
+        message = 'CHOOSE HERO';
+        hint = 'Poke a card with your fingertip';
         break;
       case 'intro':
-        message = `WAVE ${run.wave + 1}`;
-        hint = run.wave === 0 ? 'Tap your left wrist to switch hero' : '';
+        message = run.wave === 0 ? run.mission.world : `WAVE ${run.wave + 1}`;
+        hint = run.wave === 0 ? `${run.mission.objective}  |  left wrist = menu` : '';
         break;
       case 'cleared':
         message = 'CLEARED';
         break;
       case 'victory':
         message = 'VICTORY';
-        hint = `Score ${run.score}  -  blast the core to replay`;
+        hint = `Score ${run.score}  -  back to hero select`;
         break;
       case 'defeat':
         message = 'BREACHED';
-        hint = `Score ${run.score}  -  blast the core to retry`;
+        hint = `Score ${run.score}  -  back to hero select`;
         break;
     }
     this.hud.update(run, message, hint);

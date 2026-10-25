@@ -44,9 +44,9 @@ const HTML = `
   </div>
   <button class="ghost" id="play-2d">Preview in browser (click to fire)</button>
   <div class="how">
-    <div><b>BLAST</b>Open your palm toward a target, facing away from you.</div>
-    <div><b>SURVIVE</b>Drones breach the walls. Destroy them before they reach you.</div>
-    <div><b>WIN</b>Clear 5 waves. Chain kills for a combo multiplier.</div>
+    <div><b>CHOOSE</b>Poke a hero card: ARC, TALON or TEMPEST.</div>
+    <div><b>FIGHT</b>Each hero has their own power, world and enemies.</div>
+    <div><b>MENU</b>Tap the button on your left wrist to switch hero.</div>
   </div>
   <div class="note" id="xr-note"></div>
 </div>`;

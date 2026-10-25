@@ -1,5 +1,6 @@
 import {
   BackSide,
+  Color,
   BoxGeometry,
   Group,
   Mesh,
@@ -19,7 +20,13 @@ import {
 const domeMaterial = new ShaderMaterial({
   side: BackSide,
   depthWrite: false,
-  uniforms: {},
+  uniforms: {
+    uTop: { value: new Color('#030010') },
+    uMid: { value: new Color('#1A0538') },
+    uHorizon: { value: new Color('#FF2E8C') },
+    uAccent: { value: new Color('#1AE6FF') },
+    uFlash: { value: 0 },
+  },
   vertexShader: /* glsl */ `
     varying vec3 vDir;
     void main() {
@@ -29,6 +36,11 @@ const domeMaterial = new ShaderMaterial({
   `,
   fragmentShader: /* glsl */ `
     varying vec3 vDir;
+    uniform vec3 uTop;
+    uniform vec3 uMid;
+    uniform vec3 uHorizon;
+    uniform vec3 uAccent;
+    uniform float uFlash;
     float hash(vec3 p) {
       p = fract(p * 0.3183099 + 0.1);
       p *= 17.0;
@@ -36,12 +48,13 @@ const domeMaterial = new ShaderMaterial({
     }
     void main() {
       float h = vDir.y;
-      vec3 top = vec3(0.01, 0.0, 0.05);
-      vec3 mid = vec3(0.10, 0.02, 0.22);
-      vec3 horizon = vec3(1.0, 0.18, 0.55);
+      vec3 top = uTop;
+      vec3 mid = uMid;
+      vec3 horizon = uHorizon;
       vec3 col = mix(mid, top, smoothstep(0.05, 0.7, h));
       col += horizon * pow(max(0.0, 1.0 - abs(h - 0.02) * 6.0), 3.0) * 0.9;
-      col += vec3(0.1, 0.9, 1.0) * pow(max(0.0, 1.0 - abs(h - 0.12) * 18.0), 6.0) * 0.25;
+      col += uAccent * pow(max(0.0, 1.0 - abs(h - 0.12) * 18.0), 6.0) * 0.25;
+      col += vec3(0.75, 0.8, 1.0) * uFlash * smoothstep(-0.1, 0.6, h);
       vec3 cell = floor(vDir * 180.0);
       float star = step(0.9975, hash(cell)) * smoothstep(0.1, 0.4, h);
       col += vec3(star);
@@ -54,7 +67,11 @@ const domeMaterial = new ShaderMaterial({
 const floorMaterial = new ShaderMaterial({
   transparent: true,
   depthWrite: false,
-  uniforms: {},
+  uniforms: {
+    uMinor: { value: new Color('#1AD9FF') },
+    uMajor: { value: new Color('#FF338F') },
+    uRing: { value: new Color('#33FFFF') },
+  },
   vertexShader: /* glsl */ `
     varying vec3 vPos;
     void main() {
@@ -64,6 +81,9 @@ const floorMaterial = new ShaderMaterial({
   `,
   fragmentShader: /* glsl */ `
     varying vec3 vPos;
+    uniform vec3 uMinor;
+    uniform vec3 uMajor;
+    uniform vec3 uRing;
     float grid(vec2 p, float size) {
       vec2 g = abs(fract(p / size - 0.5) - 0.5) / fwidth(p / size);
       return 1.0 - min(min(g.x, g.y), 1.0);
@@ -73,9 +93,9 @@ const floorMaterial = new ShaderMaterial({
       float fade = 1.0 - smoothstep(4.0, 26.0, d);
       float minor = grid(vPos.xz, 1.0) * 0.35;
       float major = grid(vPos.xz, 5.0);
-      vec3 col = vec3(0.1, 0.85, 1.0) * minor + vec3(1.0, 0.2, 0.6) * major;
+      vec3 col = uMinor * minor + uMajor * major;
       float ring = smoothstep(0.04, 0.0, abs(d - 1.2)) * 0.8;
-      col += vec3(0.2, 1.0, 1.0) * ring;
+      col += uRing * ring;
       float a = max(max(minor, major), ring) * fade;
       gl_FragColor = vec4(col + vec3(0.02, 0.0, 0.05), max(a, 0.85 * fade));
     }
@@ -113,6 +133,7 @@ export function createArena(): Group {
     body.scale.y = height;
     body.position.y = height / 2;
     const band = new Mesh(strip, i % 2 ? stripCyan : stripPink);
+    band.name = i % 2 ? 'BandA' : 'BandB';
     band.position.y = height * 0.92;
     const band2 = new Mesh(strip, i % 2 ? stripPink : stripCyan);
     band2.position.y = height * 0.35;
@@ -125,6 +146,7 @@ export function createArena(): Group {
   const haloGeometry = new TorusGeometry(9, 0.05, 6, 120);
   for (let i = 0; i < 3; i += 1) {
     const halo = new Mesh(haloGeometry, i === 1 ? stripPink : stripCyan);
+    halo.name = i === 1 ? 'HaloB' : 'HaloA';
     halo.rotation.x = Math.PI / 2;
     halo.position.y = 9 + i * 2.5;
     halo.scale.setScalar(1 + i * 0.35);

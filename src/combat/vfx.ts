@@ -67,6 +67,7 @@ export class Particles {
   private readonly life: Float32Array;
   private readonly maxLife: Float32Array;
   private readonly drag: Float32Array;
+  private readonly gravity: Float32Array;
   private next = 0;
 
   constructor(private readonly capacity = 900, size = 0.035) {
@@ -77,6 +78,7 @@ export class Particles {
     this.life = new Float32Array(capacity);
     this.maxLife = new Float32Array(capacity).fill(1);
     this.drag = new Float32Array(capacity);
+    this.gravity = new Float32Array(capacity);
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(this.positions, 3));
     geometry.setAttribute('color', new BufferAttribute(this.colors, 3));
@@ -103,6 +105,7 @@ export class Particles {
     color: Color,
     life: number,
     drag = 1.5,
+    gravity = 1.2,
   ): void {
     const i = this.next;
     this.next = (this.next + 1) % this.capacity;
@@ -119,6 +122,7 @@ export class Particles {
     this.life[i] = life;
     this.maxLife[i] = life;
     this.drag[i] = drag;
+    this.gravity[i] = gravity;
   }
 
   /** Emits `count` sparks in random directions at `speed` m/s (±50%). */
@@ -142,7 +146,7 @@ export class Particles {
       }
       const k = Math.max(0, 1 - this.drag[i] * dt);
       this.velocities[j] *= k;
-      this.velocities[j + 1] = this.velocities[j + 1] * k - 1.2 * dt;
+      this.velocities[j + 1] = this.velocities[j + 1] * k - this.gravity[i] * dt;
       this.velocities[j + 2] *= k;
       this.positions[j] += this.velocities[j] * dt;
       this.positions[j + 1] += this.velocities[j + 1] * dt;

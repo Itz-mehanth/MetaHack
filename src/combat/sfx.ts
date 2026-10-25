@@ -124,6 +124,11 @@ export class Sfx {
     this.tone('square', 990, 1320, 0.1, 0.08, 0.08);
   }
 
+  thunder(): void {
+    this.hiss(1.8, 900, 0.6);
+    this.tone('sine', 70, 30, 1.4, 0.4);
+  }
+
   victory(): void {
     [523, 659, 784, 1047].forEach((f, i) => this.tone('triangle', f, f, 0.35, 0.18, i * 0.12));
   }
