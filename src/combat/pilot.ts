@@ -477,6 +477,19 @@ export class Pilot {
     if (this.tracks[0].busy || this.tracks[1].busy) return;
     if (view.overdrive) this.clap();
     else if (view.hero === 'ronin') this.cross();
+    else if (view.hero === 'tempest' && view.hammerState === 'gripped') this.raise(view.hammerHand);
+  }
+
+  /** TEMPEST: lift the hammer overhead and hold it there while the storm gathers. */
+  private raise(i: number): void {
+    const side = i === 0 ? -1 : 1;
+    this.begin(i);
+    this.f.set(0, 0.85, -0.5).normalize();
+    this.u.set(-side * 0.3, 0.2, 1);
+    this.thumbFrame(i, this.f, this.u, this.q);
+    this.p.set(side * 0.1, 0.36, -0.25);
+    this.key(i, 0.3, this.p, this.q, SHAPES.fist, false, true);
+    this.key(i, 1.3, this.p, this.q, SHAPES.fist, false);
   }
 
   // ------------------------------------------------------------ poses

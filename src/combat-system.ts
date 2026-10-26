@@ -95,6 +95,7 @@ import { loadProfile, resetProfile, saveProfile } from './combat/save.js';
 import { applyTheme, setFlash, type Theme, THEMES } from './combat/themes.js';
 import { chapterFor, chapterForWorld, type Line, type LevelStory, levelStory } from './combat/story.js';
 import { createCocoon, WebStrand } from './combat/web.js';
+import { WebShots } from './combat/webshot.js';
 import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
 import { FIRST_INTRO_SECONDS, type Phase, Run, type SpawnOrder } from './combat/run.js';
@@ -128,9 +129,9 @@ type WebState = 'idle' | 'flying' | 'tethered' | 'retracting';
 const ARROW_GRAVITY = 1.2;
 const NOCK_REACH = 0.3;
 const PINCH_RELEASE = 0.065;
-const WEB_SPEED = 30;
-const WEB_FLIGHT = 0.7;
-const WEB_COOLDOWN = 0.3;
+const WEB_SPEED = 26;
+const WEB_FLIGHT = 0.9;
+const WEB_COOLDOWN = 0.17;
 const YANK_SPEED = 1.3;
 const HOMING_RATE = 3;
 const AIM_SMOOTHING = 0.45;
@@ -741,6 +742,16 @@ export class CombatSystem extends createSystem({
   /** No headset session: the page is played on a flat screen. */
   private flat = true;
   private frameDt = 0;
+  private webShots!: WebShots;
+  private stormCharge = 0;
+  private stormActive = 0;
+  private stormGap = 0;
+  private stormCooldown = 0;
+  private zapTimer = 0;
+  private zapSound = -10;
+  private crackleTimer = 0;
+  private readonly crackleHand = [0, 0];
+  private readonly wristVel = new Vector3();
   private screenTipHero = '';
   private screenTipIndex = -1;
   /** Pointer driving the hands this frame: the player's, or the reel bot's. */
@@ -774,6 +785,7 @@ export class CombatSystem extends createSystem({
     this.root.add(this.wrist.group);
     this.wrist.setHero('ARC', CYAN);
     this.lightningFx = new Lightning(this.root);
+    this.webShots = new WebShots(this.root, PINK);
     this.bow = new Bow(new Color('#5DFFB0'));
     this.root.add(this.bow.group);
     this.root.add(this.carousel.group);
@@ -1385,6 +1397,10 @@ export class CombatSystem extends createSystem({
         moves: [this.pilot.busy(0), this.pilot.busy(1)],
       },
     });
+    // Test hook: calls down n lightning strikes from the sky.
+    (window as unknown as { __surgeStrike: (n: number) => void }).__surgeStrike = (n: number) => {
+      for (let k = 0; k < n; k += 1) this.stormStrike();
+    };
     // Test hook: where a panel button is on screen (NDC), to tap it like a player.
     (window as unknown as { __surgeWidget: (id: string) => number[] | null }).__surgeWidget = (id: string) => {
       const point = this.panel.visible ? this.panel.widgetPoint(id, new Vector3()) : null;
@@ -1485,6 +1501,7 @@ export class CombatSystem extends createSystem({
 
     this.updateScreen(realDt);
     this.world.camera.getWorldPosition(this.head);
+    this.lightningFx.eye.copy(this.head);
     this.headTriple[0] = this.head.x;
     this.headTriple[1] = this.head.y;
     this.headTriple[2] = this.head.z;
@@ -1531,6 +1548,7 @@ export class CombatSystem extends createSystem({
     if (!this.paused) this.updateTwist(dt, time);
     this.coach.update(realDt, this.head, this.forward);
     this.erasure.update(realDt, time, this.head, this.eraseTarget, this.veilTarget);
+    this.updateAuras(realDt, time);
     this.updateHammer(realDt, time);
     this.updateBow(realDt);
     this.updateGun(realDt);
@@ -1750,7 +1768,8 @@ export class CombatSystem extends createSystem({
     this.screen.show(page, playing);
     if (playing) {
       const clap = hasUnlock(this.profile, `overdrive-${this.hero}`) && this.overdrive >= 1;
-      this.screen.setSpecial(clap ? 'CLAP!' : this.hero === 'ronin' && this.xCooldown <= 0 ? 'X-STRIKE' : '');
+      const storm = this.hero === 'tempest' && this.stormCooldown <= 0 && this.hammerState === 'gripped';
+      this.screen.setSpecial(clap ? 'CLAP!' : this.hero === 'ronin' && this.xCooldown <= 0 ? 'X-STRIKE' : storm ? 'STORM' : '');
     } else intent.special = false;
     if (page && this.screen.clicked && !playing) this.screenClick();
   }
@@ -2081,6 +2100,9 @@ export class CombatSystem extends createSystem({
       if (drone.state !== 'off') this.retireDrone(drone);
     }
     for (const bolt of this.bolts) if (bolt.active) this.retireBolt(bolt);
+    this.webShots.clear();
+    this.stormActive = 0;
+    this.stormCharge = 0;
     this.syncMap();
     this.syncArmory();
     this.setTheme(stage.world.id);
@@ -2150,6 +2172,7 @@ export class CombatSystem extends createSystem({
       hand.gauntlet.setStyle(this.hero);
       hand.claws.setColor(this.weaponColor);
       hand.web.setColor(this.weaponColor);
+      this.webShots?.setColor(this.weaponColor);
       hand.sword.setColor(this.weaponColor);
       hand.psi.setColor(this.accent);
       hand.beamMaterial.color.copy(this.accent);
@@ -3097,108 +3120,141 @@ export class CombatSystem extends createSystem({
     origin.addScaledVector(direction, 0.04);
   }
 
+  /**
+   * WEAVER: webs are bullets. A web pose (or a thrust of the open palm) fires
+   * a spinning web net that splats on whatever it meets: an alien, a wall, the
+   * floor. Nothing is tied to the hand. A webbed alien is held in place; whip
+   * the hand to throw it, or make a fist and pull to rip it apart.
+   */
   private updateWebs(dt: number, time: number): void {
     const active = this.powersLive && this.hero === 'weaver';
     for (let index = 0; index < this.hands.length; index += 1) {
       const hand = this.hands[index];
       hand.webCooldown -= dt;
+      hand.web.hide();
       if (!active || !hand.tracked) {
-        hand.web.hide();
         hand.webState = 'idle';
         hand.webTarget = null;
         continue;
       }
-      this.webAim(index, this.v3, this.v4);
-      // Wrist velocity, for the yank.
+      // Wrist velocity: thrusts fire, whips throw.
       hand.pose.position(J.wrist, this.v1);
-      if (dt > 0) this.v2.subVectors(this.v1, hand.wristPrev).divideScalar(dt);
-      else this.v2.set(0, 0, 0);
+      if (dt > 0) this.wristVel.subVectors(this.v1, hand.wristPrev).divideScalar(dt);
+      else this.wristVel.set(0, 0, 0);
       hand.wristPrev.copy(this.v1);
       hand.webTime += dt;
-
-      switch (hand.webState) {
-        case 'idle':
-          hand.web.hide();
-          if (hand.webCooldown <= 0) {
-            // Web-shooter pose, or thrust an open palm at them.
-            if (isWebPose(hand.joints)) this.shootWeb(index, false);
-            else if (isOpenPalm(hand.joints) && this.v2.dot(hand.gauntlet.palmNormal) > 1.3) this.shootWeb(index, true);
+      const webPose = isWebPose(hand.joints);
+      if (hand.webCooldown <= 0) {
+        if (webPose) this.shootWeb(index, false);
+        else if (isOpenPalm(hand.joints) && this.wristVel.dot(hand.gauntlet.palmNormal) > 1.3) this.shootWeb(index, true);
+      }
+      const target = hand.webTarget;
+      if (target == null || target.state === 'off' || target.snare <= 0) {
+        hand.webTarget = null;
+        hand.webState = 'idle';
+        continue;
+      }
+      hand.webState = 'tethered';
+      // Yank: fist and pull back toward the body rips them apart.
+      this.v1.subVectors(this.head, target.object.position).normalize();
+      if (isFist(hand.joints) && this.wristVel.dot(this.v1) > YANK_SPEED) {
+        this.yank(hand, target);
+        continue;
+      }
+      // Fling: whip the hand and the webbed enemy it points at goes flying.
+      const whip = this.wristVel.length();
+      if (!webPose && !isFist(hand.joints) && whip > 1.8 * tuning.swing && hand.webTime > 0.15) {
+        this.sa.copy(this.wristVel).divideScalar(whip);
+        let victim: Drone | null = ENEMIES[target.kind].ground ? target : null;
+        let best = 0.3;
+        for (const drone of this.drones) {
+          if (drone.state === 'off' || drone.snare <= 0 || !ENEMIES[drone.kind].ground) continue;
+          const cos = this.sb.subVectors(drone.object.position, hand.gauntlet.palmPoint).normalize().dot(this.sa);
+          if (cos > best) {
+            best = cos;
+            victim = drone;
           }
-          break;
-        case 'flying': {
-          this.v1.copy(hand.web.head);
-          hand.web.head.addScaledVector(hand.webVelocity, dt);
-          let hit: Drone | null = null;
-          for (const drone of this.drones) {
-            if (drone.state === 'off' || drone.state === 'emerging') continue;
-            if (this.segmentHits(this.v1, hand.web.head, drone.object.position, ENEMIES[drone.kind].radius + 0.06)) {
-              hit = drone;
-              break;
-            }
-          }
-          if (hit) {
-            // Splat: the glob hits like a bullet and wraps them up.
-            this.flashes.spawn(hit.object.position, WHITE, 0.1, 0.7, 0.2);
-            this.particles.burst(hit.object.position, WHITE, 30, 2.2, 0.35, this.v1);
-            this.markHit('blast', hit.object.position, hand.webVelocity);
-            hit.snare = 4 + 0.8 * this.level('weaver-snare');
-            hand.webTarget = hit;
-            hand.webState = 'tethered';
-            hand.webTime = 0;
-            this.particles.burst(hit.object.position, WHITE, 20, 1.5, 0.3, this.v1);
-            this.sfx.splat();
-            if (this.weaponDef.id === 'weaver-electro') hit.shock = 5;
-            if (this.weaponDef.id === 'weaver-burst') this.webNet(hit);
-            this.damageDrone(hit, 2);
-          } else if (hand.webTime > WEB_FLIGHT) {
-            hand.webState = 'retracting';
-          }
-          hand.web.draw(this.v3, time, 1);
-          break;
         }
-        case 'tethered': {
-          const target = hand.webTarget;
-          if (target == null || target.state === 'off' || target.snare <= 0) {
-            hand.webState = 'retracting';
+        if (victim) {
+          this.v1.copy(this.wristVel).normalize().multiplyScalar(Math.min(15, Math.max(7, whip * 5)));
+          this.v1.y += 2.5;
+          if (this.flingDrone(victim, this.v1)) {
+            this.sfx.yank();
+            this.comic.pop('YOINK!', this.v4.copy(victim.object.position).setY(victim.object.position.y + 0.4), this.accent, 0.4);
             hand.webTarget = null;
-            break;
-          }
-          hand.web.head.copy(target.object.position);
-          hand.web.drawRope(this.v3, dt, this.room, time);
-          // Yank: fist and pull back toward the body rips them apart.
-          this.v1.subVectors(this.head, target.object.position).normalize();
-          if (isFist(hand.joints) && this.v2.dot(this.v1) > YANK_SPEED) {
-            this.yank(hand, target);
-            break;
-          }
-          // Fling: whip the hand any way and the webbed enemy goes flying.
-          const whip = this.v2.length();
-          if (!isFist(hand.joints) && whip > 1.8 * tuning.swing && hand.webTime > 0.15 && ENEMIES[target.kind].ground) {
-            this.v1.copy(this.v2).normalize().multiplyScalar(Math.min(15, Math.max(7, whip * 5)));
-            this.v1.y += 2.5;
-            if (this.flingDrone(target, this.v1)) {
-              this.sfx.yank();
-              this.comic.pop('YOINK!', this.v4.copy(target.object.position).setY(target.object.position.y + 0.4), this.accent, 0.4);
-              hand.webTarget = null;
-              hand.webState = 'retracting';
-            }
-          }
-          break;
-        }
-        case 'retracting': {
-          this.v1.subVectors(this.v3, hand.web.head);
-          const step = 25 * dt;
-          if (this.v1.length() <= step) {
             hand.webState = 'idle';
-            hand.web.hide();
-            break;
           }
-          hand.web.head.addScaledVector(this.v1.normalize(), step);
-          hand.web.draw(this.v3, time, 0.6);
-          break;
         }
       }
     }
+    this.updateWebShots(dt);
+  }
+
+  /** Flies every web in the air: hits aliens and shots, splats on walls and floor. */
+  private updateWebShots(dt: number): void {
+    const shots = this.webShots;
+    for (const shot of shots.shots) {
+      if (!shot.active) continue;
+      if (!shots.step(shot, dt)) {
+        this.v2.set(0, 0, 0);
+        this.particles.burst(shot.position, WHITE, 6, 0.8, 0.2, this.v2);
+        continue;
+      }
+      // A thin stream of sparkle behind the glob.
+      this.v2.set(0, 0, 0);
+      this.particles.emit(shot.position, this.v2, WHITE, 0.3, 0, 0);
+      let hit: Drone | null = null;
+      for (const drone of this.drones) {
+        if (drone.state === 'off' || drone.state === 'emerging') continue;
+        if (this.segmentHits(shot.previous, shot.position, drone.object.position, ENEMIES[drone.kind].radius + 0.08)) {
+          hit = drone;
+          break;
+        }
+      }
+      if (hit) {
+        this.webHit(shot.hand, hit, shot.velocity);
+        shots.retire(shot);
+        continue;
+      }
+      for (const item of this.debris) {
+        if (item.state !== 'rest' && item.state !== 'flying') continue;
+        if (item.object.position.distanceTo(shot.position) > item.radius + 0.08) continue;
+        this.hitProp(item, 1, shot.velocity, 1);
+        this.particles.burst(shot.position, WHITE, 14, 1.5, 0.25, this.v2);
+        shots.retire(shot);
+        break;
+      }
+      if (!shot.active) continue;
+      if (this.room.collide(shot.position, 0.04)) {
+        const n = this.room.normal;
+        this.v3.set(n[0], n[1], n[2]);
+        shots.splat(shot.position, this.v3);
+        this.particles.burst(shot.position, WHITE, 18, 1.6, 0.3, this.v2);
+        this.flashes.spawn(shot.position, WHITE, 0.05, 0.3, 0.15);
+        this.sfx.splat();
+        shots.retire(shot);
+      }
+    }
+    shots.update(dt);
+  }
+
+  /** A web lands on an alien: it splats like a bullet and wraps them up. */
+  private webHit(handIndex: number, hit: Drone, velocity: Vector3): void {
+    const hand = this.hands[handIndex];
+    this.flashes.spawn(hit.object.position, WHITE, 0.1, 0.7, 0.2);
+    this.particles.burst(hit.object.position, WHITE, 36, 2.4, 0.35, this.v1);
+    this.markHit('blast', hit.object.position, velocity);
+    const solid = hit.kind !== 'orb' && hit.kind !== 'pod';
+    if (solid) {
+      hit.snare = 4 + 0.8 * this.level('weaver-snare');
+      hand.webTarget = hit;
+      hand.webState = 'tethered';
+      hand.webTime = 0;
+    }
+    this.sfx.splat();
+    if (this.weaponDef.id === 'weaver-electro') hit.shock = 5;
+    if (this.weaponDef.id === 'weaver-burst') this.webNet(hit);
+    this.damageDrone(hit, 1.4);
   }
 
   private shootWeb(index: number, fromPalm: boolean): void {
@@ -3221,11 +3277,11 @@ export class CombatSystem extends createSystem({
       }
       if (best > 0.97) this.v4.copy(this.v2);
     }
-    hand.web.head.copy(this.v3);
-    hand.webVelocity.copy(this.v4).multiplyScalar(WEB_SPEED * (1 + 0.15 * this.level('weaver-range')));
-    hand.webState = 'flying';
+    this.v4.multiplyScalar(WEB_SPEED * (1 + 0.15 * this.level('weaver-range')));
+    if (this.webShots.fire(this.v3, this.v4, index, WEB_FLIGHT) == null) return;
     hand.webTime = 0;
     hand.webCooldown = WEB_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
+    this.flashes.spawn(this.v3, WHITE, 0.04, 0.25, 0.1);
     this.sfx.thwip();
   }
 
@@ -3448,6 +3504,7 @@ export class CombatSystem extends createSystem({
 
     // Trail and hits for a moving hammer.
     this.hammerHead.getWorldPosition(this.hammerHeadPos);
+    this.updateStorm(dt);
     const moving = this.hammerState === 'flying' || this.hammerState === 'returning';
     const swinging = this.hammerState === 'gripped' && this.hammerVelocity.length() > 1.2;
     if (moving || swinging) {
@@ -3473,7 +3530,10 @@ export class CombatSystem extends createSystem({
         this.markHit('blast', drone.object.position, this.hammerVelocity, undefined, (this.hammerState === 'flying' ? 5 : 3) * (hammerType === 'tempest-godbreaker' ? 1.6 : 1));
         this.hitStop = Math.max(this.hitStop, 0.06);
         this.damageDrone(drone, (this.hammerState === 'flying' ? 3 : 2) + Math.floor(this.level('tempest-impact') / 2) + (hammerType === 'tempest-godbreaker' ? 1 : 0));
-        if (hammerType === 'tempest-thunder') this.chainLightning(this.v1, drone);
+        if (hammerType === 'tempest-thunder') {
+          this.chainLightning(this.v1, drone);
+          this.skyStrike(this.v1, null, 0);
+        }
         else if (hammerType === 'tempest-inferno') this.explodeAt(this.v1, 1.1, 1);
         else this.quake(this.v1);
         if (this.hammerState === 'flying') this.hammerVelocity.multiplyScalar(0.8);
@@ -3486,6 +3546,120 @@ export class CombatSystem extends createSystem({
         this.sfx.thunderHit();
       }
     }
+  }
+
+  /**
+   * TEMPEST: the hammer is a storm. While it is in hand or in flight, arcs
+   * leap from its head to nearby aliens; held overhead it calls STORM CALL:
+   * the sky answers with a barrage on everything in sight. The thunder
+   * hammer arcs more often; the inferno hammer sets its targets alight and
+   * the godbreaker splits the ground.
+   */
+  private updateStorm(dt: number): void {
+    const state = this.hammerState;
+    const type = this.weaponDef.id;
+    const power = type === 'tempest-thunder' ? 1.5 : 1;
+    this.stormCooldown -= dt;
+    this.zapTimer -= dt;
+    this.crackleTimer -= dt;
+    const live = state === 'gripped' || state === 'flying' || state === 'returning';
+    const head = this.hammerHeadPos;
+    if (live && this.zapTimer <= 0) {
+      const flying = state !== 'gripped';
+      this.zapTimer = (flying ? 0.1 : 0.2) / power;
+      const target = this.nearestEnemy(head, null, flying ? 5.5 : 3.2);
+      if (target) {
+        this.v1.copy(target.object.position);
+        this.lightningFx.strike(head, this.v1, VIOLET, 0.24, 0.02, 1);
+        this.particles.burst(this.v1, VIOLET, 10, 1.5, 0.25, this.v2);
+        this.flashes.spawn(this.v1, WHITE, 0.05, 0.4, 0.12);
+        this.markHit('blast', this.v1, this.v2.subVectors(this.v1, head), undefined, 1.5);
+        this.damageDrone(target, flying ? 0.8 : 0.5);
+        if (this.elapsed - this.zapSound > 0.25) {
+          this.zapSound = this.elapsed;
+          this.sfx.thunderHit();
+        }
+      }
+    }
+    // Static crackles over the hammer and the fist around it.
+    if (live && this.crackleTimer <= 0) {
+      this.crackleTimer = 0.09;
+      this.v1.set(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize().multiplyScalar(0.2 + Math.random() * 0.15).add(head);
+      this.lightningFx.strike(head, this.v1, VIOLET, 0.1, 0.007);
+    }
+    // STORM CALL: hold the hammer above your head.
+    if (this.stormActive > 0) {
+      this.stormActive -= dt;
+      this.stormGap -= dt;
+      if (this.stormGap <= 0) {
+        this.stormGap = 0.1;
+        this.stormStrike();
+      }
+    } else if (state === 'gripped' && this.hammer!.position.y > this.head.y + 0.05 && this.stormCooldown <= 0) {
+      this.stormCharge += dt;
+      if (this.crackleTimer <= 0.05) {
+        // The charge climbs the sky.
+        this.v1.set((Math.random() - 0.5) * 0.5, 1.5 + Math.random() * 1.5, (Math.random() - 0.5) * 0.5).add(head);
+        this.lightningFx.strike(head, this.v1, VIOLET, 0.14, 0.012 + this.stormCharge * 0.02);
+      }
+      if (this.stormCharge >= 0.6) {
+        this.stormCharge = 0;
+        this.stormActive = 2.4 + 0.3 * this.level('tempest-impact');
+        this.stormCooldown = 8;
+        this.lightning = 1;
+        this.slowmo = 0.4;
+        this.sfx.thunder();
+        this.sfx.explode(true);
+        this.comic.pop('STORM CALL!', this.v1.copy(head).setY(head.y + 0.5), VIOLET, 0.9);
+        this.flashes.spawn(head, WHITE, 0.3, 2.5, 0.5);
+      }
+    } else this.stormCharge = Math.max(0, this.stormCharge - dt * 2);
+  }
+
+  /** One bolt of the barrage, on a random alien within sight (or the ground ahead). */
+  private stormStrike(): void {
+    let target: Drone | null = null;
+    let seen = 0;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'pod' || drone.kind === 'orb') continue;
+      if (drone.object.position.distanceTo(this.head) > 16) continue;
+      seen += 1;
+      if (Math.random() < 1 / seen) target = drone;
+    }
+    if (target) {
+      this.skyStrike(target.object.position, target, 3 + Math.floor(this.level('tempest-impact') / 2));
+      return;
+    }
+    this.v3.copy(this.head).addScaledVector(this.forward, 4 + Math.random() * 6);
+    this.v3.x += (Math.random() - 0.5) * 6;
+    this.v3.z += (Math.random() - 0.5) * 6;
+    this.v3.y = 0;
+    this.skyStrike(this.v3, null, 0);
+  }
+
+  /** A bolt from the sky onto `at`; with a target it also hurts and chains. */
+  private skyStrike(at: Vector3, target: Drone | null, damage: number): void {
+    const type = this.weaponDef.id;
+    this.sb.set(at.x + (Math.random() - 0.5) * 1.5, at.y + 6, at.z + (Math.random() - 0.5) * 1.5);
+    this.lightningFx.strike(this.sb, at, VIOLET, 0.4, 0.045, 3);
+    this.flashes.spawn(at, WHITE, 0.15, 1.4, 0.3);
+    this.particles.burst(at, VIOLET, 32, 3.5, 0.5, this.v2);
+    this.particles.burst(at, WHITE, 14, 5, 0.4, this.v2);
+    this.lightning = Math.max(this.lightning, 0.5);
+    if (this.elapsed - this.zapSound > 0.12) {
+      this.zapSound = this.elapsed;
+      this.sfx.thunderHit();
+    }
+    for (const item of this.debris) {
+      if ((item.state !== 'rest' && item.state !== 'flying') || item.object.position.distanceTo(at) > 1.4) continue;
+      this.hitProp(item, 3, this.v2.set(0, 0.5, 0), 3);
+    }
+    if (type === 'tempest-godbreaker' && Math.random() < 0.3) this.quake(at);
+    if (target == null || damage <= 0) return;
+    this.markHit('blast', at, this.v2.subVectors(at, this.head).setY(0.3), undefined, 4);
+    if (type === 'tempest-inferno') target.burn = Math.max(target.burn, 4);
+    this.damageDrone(target, damage);
+    this.chainLightning(at, target);
   }
 
   /** Lets the hammer go: it falls (with some of `velocity`) and settles. */
@@ -3535,6 +3709,82 @@ export class CombatSystem extends createSystem({
     this.hammerTime = 0;
     this.sfx.portal();
     this.lightningFx.strike(this.hands[index].gauntlet.palmPoint, this.hammer!.position, VIOLET, 0.3);
+  }
+
+  /**
+   * Each hero's hands carry their power: motes, sparks and arcs in the
+   * hero's colours, plus streaks behind a fast hand. Particle-only, so it
+   * costs almost nothing.
+   */
+  private updateAuras(dt: number, time: number): void {
+    if (!this.powersLive || dt <= 0) return;
+    const rate = Math.min(2, dt * 60);
+    for (let i = 0; i < this.hands.length; i += 1) {
+      const hand = this.hands[i];
+      if (!hand.tracked) continue;
+      const palm = hand.gauntlet.palmPoint;
+      const speed = hand.palmVel.length();
+      // Streaks behind a fast hand.
+      if (speed > 2.5 && Math.random() < 0.8 * rate) {
+        this.v2.copy(hand.palmVel).multiplyScalar(-0.08);
+        this.particles.emit(palm, this.v2, this.accent, 0.3, 0.8, 0);
+      }
+      switch (this.hero) {
+        case 'arc':
+          if (Math.random() < 0.3 * rate) this.mote(palm, 0.07, 0.35, this.accent, 0.5);
+          break;
+        case 'talon':
+          if (hand.claws.extension > 0.8 && Math.random() < 0.35 * rate) this.mote(hand.claws.tip, 0.03, 0.25, Math.random() < 0.4 ? WHITE : this.weaponColor, 0.35);
+          break;
+        case 'tempest':
+          // Arcs crawl over both hands, always.
+          if (this.crackleHand[i] <= time) {
+            this.crackleHand[i] = time + 0.14 + Math.random() * 0.12;
+            this.v1.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(0.13).add(palm);
+            this.lightningFx.strike(palm, this.v1, VIOLET, 0.09, 0.006);
+          }
+          break;
+        case 'orion':
+          if (Math.random() < 0.25 * rate) this.mote(palm, 0.1, 0.25, this.weaponColor, 0.7);
+          break;
+        case 'weaver':
+          if (Math.random() < 0.3 * rate) {
+            hand.pose.position(J.tips[Math.random() < 0.5 ? 0 : 3], this.v3);
+            this.mote(this.v3, 0.02, 0.2, WHITE, 0.5);
+          }
+          break;
+        case 'havoc':
+          if (this.gunHolder === i && this.gunCooldown > 0 && Math.random() < 0.4 * rate) this.mote(this.blasterMuzzle!.getWorldPosition(this.v3), 0.03, 0.5, EMBER, 0.5);
+          break;
+        case 'ronin': {
+          const sword = hand.sword;
+          if (sword.extension > 0.9 && Math.random() < 0.5 * rate) {
+            this.v3.lerpVectors(sword.base, sword.tip, Math.random());
+            this.mote(this.v3, 0.01, 0.3, Math.random() < 0.3 ? WHITE : this.weaponColor, 0.4);
+          }
+          break;
+        }
+        case 'psion':
+          if (Math.random() < 0.4 * rate) {
+            const a = time * 5 + i * 3.1;
+            this.v3.set(palm.x + Math.cos(a) * 0.08, palm.y + Math.sin(time * 3) * 0.03, palm.z + Math.sin(a) * 0.08);
+            this.mote(this.v3, 0.005, 0.4, this.accent, 0.7);
+          }
+          break;
+        case 'vanguard':
+          if (this.shield && this.shield.visible && i === (this.profile.settings.leftHanded ? 1 : 0) && Math.random() < 0.35 * rate) {
+            this.mote(this.shield.position, 0.2, 0.2, this.shieldState === 'worn' ? GOLD : WHITE, 0.5);
+          }
+          break;
+      }
+    }
+  }
+
+  /** A mote drifting up from near `at`. */
+  private mote(at: Vector3, spread: number, rise: number, color: Color, life: number): void {
+    this.v1.set(at.x + (Math.random() - 0.5) * spread * 2, at.y + (Math.random() - 0.5) * spread * 2, at.z + (Math.random() - 0.5) * spread * 2);
+    this.v2.set((Math.random() - 0.5) * 0.2, rise * (0.5 + Math.random()), (Math.random() - 0.5) * 0.2);
+    this.particles.emit(this.v1, this.v2, color, life, 0.5, -0.1);
   }
 
   /** Arcs lightning from `from` to up to three nearby enemies for 1 damage each. */

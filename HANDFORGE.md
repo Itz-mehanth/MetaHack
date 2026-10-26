@@ -68,8 +68,16 @@ throughout (no Marvel or other third-party names/designs).
   props damage them; non-lethal hits shove them; shards bounce off the real
   room; destroyed props rebuild after 6-10 s. Hook: __surgeProp(kind).
 - Hands push the world: a fast palm slaps enemy shots back at the aliens
-  (SLAP!); free hands shove aliens (knockback) and props. WEAVER's tether
-  is a simulated rope (sags, swings with the hand).
+  (SLAP!); free hands shove aliens (knockback) and props.
+- WEAVER's webs are bullets (webshot.ts): a spinning web net per shot, fired
+  as fast as the pose is held (0.17 s), splatting on aliens (snare), props,
+  walls and floor; no rope. Whip the hand to throw a webbed alien, fist and
+  pull to rip it.
+- TEMPEST is a storm (updateStorm): arcs leap from the hammer to nearby
+  aliens in hand and in flight; hold it overhead for STORM CALL (sky
+  barrage, 8 s cooldown; STORM button on screens). Lightning (lightning.ts)
+  is glowing camera-facing ribbons with forks. updateAuras: every hero's
+  hands carry motes, sparks, arcs and speed streaks.
 - Tuning on device: Settings > GESTURES (NORMAL / VERY SENSITIVE / STRICT:
   fist and open-palm ratios, swing/throw speed multiplier, gestures.ts
   `tuning`), Settings > HAND DEBUG (finger ratios I/M/R/P, detected gesture,

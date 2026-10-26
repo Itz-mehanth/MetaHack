@@ -83,6 +83,7 @@ export const SCREEN_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   tempest: [
     { gesture: 'throw', title: 'TAP TO THROW THE HAMMER', sub: 'It flies at what you tap, then comes back.' },
     { gesture: 'palm', title: 'TAP AGAIN TO RECALL', sub: 'It also returns by itself.' },
+    { gesture: 'throw', title: 'PRESS STORM', sub: 'Lift the hammer: the sky strikes every alien in sight.' },
   ],
   orion: [{ gesture: 'pinch', title: 'HOLD TO DRAW, LET GO TO SHOOT', sub: 'Drag to aim. A full draw hits harder.' }],
   weaver: [
