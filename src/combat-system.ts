@@ -757,6 +757,8 @@ export class CombatSystem extends createSystem({
   private readonly reelDepths = new Float32Array(8);
   private reelSound = false;
   private screenAspect = 0;
+  /** A giant OBLIVAX far beyond the reel's fight. */
+  private looming: Object3D | null = null;
 
   init(): void {
     this.root = new Group();
@@ -1270,6 +1272,23 @@ export class CombatSystem extends createSystem({
     }
     this.shards = new Shards(this.root);
     for (let k = 0; k < 4; k += 1) this.liftSlots.push(this.makeThrowable(new Group(), 0.3));
+    // The attract reel's sky: OBLIVAX looming over the battlefield.
+    this.looming = await this.world.assets.instantiate('boss-oblivion');
+    this.looming.name = 'LoomingOblivax';
+    this.looming.visible = false;
+    // The sky is a transparent sphere a few metres out, drawn after opaque
+    // objects; his own transparent copies draw right after it, so he stands
+    // in the sky instead of behind it.
+    this.looming.traverse((child) => {
+      const mesh = child as Mesh;
+      if (!mesh.isMesh) return;
+      const material = (mesh.material as MeshBasicMaterial).clone();
+      material.transparent = true;
+      material.depthWrite = true;
+      mesh.material = material;
+      mesh.renderOrder = -4;
+    });
+    this.root.add(this.looming);
     this.showMenu('main');
     this.ready = true;
     this.installDebugHooks();
@@ -1814,6 +1833,7 @@ export class CombatSystem extends createSystem({
   private stopAttract(): void {
     this.attract = false;
     shell.showcase = '';
+    if (this.looming) this.looming.visible = false;
     for (const drone of this.drones) {
       if (drone.state !== 'off') this.retireDrone(drone);
       // Bodies still falling or lying from the reel go too.
@@ -1880,6 +1900,15 @@ export class CombatSystem extends createSystem({
     const tethered = this.hands[0].webState === 'tethered' || this.hands[1].webState === 'tethered';
     const special = (hasUnlock(this.profile, `overdrive-${this.hero}`) && this.overdrive >= 1) || (this.hero === 'ronin' && this.xCooldown <= 0);
     this.bot.update(dt, targets, count, tethered, special);
+    const titan = this.looming;
+    if (titan) {
+      // Far off and huge, drifting and breathing, always watching the hero.
+      const t = this.elapsed;
+      titan.visible = true;
+      titan.scale.setScalar(9);
+      titan.position.set(this.v3.x + Math.sin(t * 0.05) * 4, 3 + Math.sin(t * 0.37) * 0.4, this.v3.z - 50);
+      titan.lookAt(this.v3);
+    }
     this.shotTime += dt;
     if (this.shotTime > SHOT_SECONDS) this.nextShot();
     if (shell.sound !== this.reelSound) {

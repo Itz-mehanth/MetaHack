@@ -101,6 +101,20 @@ throughout (no Marvel or other third-party names/designs).
 - MR: room-scan sweep, enemies from real walls (ahead or all around),
   threat arrows. Debug links: ?autostart=<stage>&hero=<id>&skipstory=1,
   ?menu=garage|heroes|map.
+- Screen play (phones, tablets, computers; no headset): puppet.ts builds
+  full WebXR hand poses from a hand shape (unit tested against gestures.ts);
+  pilot.ts choreographs them from taps, holds and swipes (screen-input.ts:
+  look pad, gyro, right-drag/keys, pause, special = X-strike or CLAP), so
+  every hero runs its real gesture code. Menus are framed for a flat view
+  and tapped; SCREEN_TIPS replace the hand coach; portrait shows a rotate
+  prompt. Tests: ?dtmax=0.2 (real-time steps on slow renderers),
+  __surgeTargets(), __surgeWidget(id), __surgeBolts().
+- Landing page (landing.ts): cinematic overlay on a live attract reel
+  (attract.ts): a bot plays each hero with its flashiest weapon in its own
+  world while a director moves the camera and OBLIVAX looms on the horizon;
+  live NOW PLAYING card, glitch cuts, ENTER MR / ENTER VR / PLAY NOW (primary
+  chosen per device), sound toggle; HOME returns from the menus. The reel
+  never saves and the hero cannot be hurt; ?reel=0 turns it off.
 
 ## Hard requirements
 - Every core interaction works **without controllers** (hand tracking only).
