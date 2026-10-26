@@ -18,15 +18,15 @@ export interface World {
 }
 
 export const WORLDS: readonly World[] = [
-  { id: 'neon-grid', name: 'NEON GRID', color: '#3DF5FF', enemies: ['drone', 'armored'] },
-  { id: 'ember-foundry', name: 'EMBER FOUNDRY', color: '#FF6A1A', enemies: ['swarmer', 'blade', 'armored'] },
-  { id: 'storm-peak', name: 'STORM PEAK', color: '#9D8CFF', enemies: ['drone', 'titan'] },
-  { id: 'frost-spire', name: 'FROST SPIRE', color: '#9FE8FF', enemies: ['swarmer', 'drone', 'armored'] },
-  { id: 'void-rift', name: 'VOID RIFT', color: '#C04DFF', enemies: ['swarmer', 'blade', 'armored', 'titan'] },
-  { id: 'scrap-wastes', name: 'SCRAP WASTES', color: '#FFB01F', enemies: ['drone', 'armored', 'swarmer'] },
-  { id: 'moon-temple', name: 'MOON TEMPLE', color: '#4DA6FF', enemies: ['blade', 'swarmer', 'armored'] },
-  { id: 'sky-ruins', name: 'SKY RUINS', color: '#E05CFF', enemies: ['drone', 'armored', 'titan'] },
-  { id: 'iron-bastion', name: 'IRON BASTION', color: '#3D6BFF', enemies: ['drone', 'blade', 'armored'] },
+  { id: 'neon-grid', name: 'NEON GRID', color: '#3DF5FF', enemies: ['drone', 'armored', 'flyer'] },
+  { id: 'ember-foundry', name: 'EMBER FOUNDRY', color: '#FF6A1A', enemies: ['swarmer', 'blade', 'armored', 'flyer'] },
+  { id: 'storm-peak', name: 'STORM PEAK', color: '#9D8CFF', enemies: ['drone', 'titan', 'flyer'] },
+  { id: 'frost-spire', name: 'FROST SPIRE', color: '#9FE8FF', enemies: ['swarmer', 'drone', 'armored', 'flyer'] },
+  { id: 'void-rift', name: 'VOID RIFT', color: '#C04DFF', enemies: ['swarmer', 'blade', 'armored', 'titan', 'flyer'] },
+  { id: 'scrap-wastes', name: 'SCRAP WASTES', color: '#FFB01F', enemies: ['drone', 'armored', 'swarmer', 'flyer'] },
+  { id: 'moon-temple', name: 'MOON TEMPLE', color: '#4DA6FF', enemies: ['blade', 'swarmer', 'armored', 'flyer'] },
+  { id: 'sky-ruins', name: 'SKY RUINS', color: '#E05CFF', enemies: ['drone', 'armored', 'titan', 'flyer'] },
+  { id: 'iron-bastion', name: 'IRON BASTION', color: '#3D6BFF', enemies: ['drone', 'blade', 'armored', 'flyer'] },
 ];
 
 export const STAGES_PER_WORLD = 3;
@@ -56,6 +56,8 @@ function buildWaves(world: World, worldIndex: number, stage: number): WaveDef[] 
     for (let k = 0; k < world.enemies.length; k += 1) {
       const kind = world.enemies[k];
       if (kind === 'titan' && !(last || stage === 2)) continue;
+      // Flyers join once the player has met the ground game (not in the very first level).
+      if (kind === 'flyer' && tier < 1) continue;
       const weight = k === 0 ? 3 : w >= k ? 1 : 0;
       for (let n = 0; n < weight; n += 1) kinds.push(kind);
     }
@@ -122,6 +124,7 @@ export const ENEMY_COINS: Readonly<Record<EnemyKind, number>> = {
   swarmer: 4,
   titan: 40,
   blade: 12,
+  flyer: 8,
   boss: 150,
   orb: 0,
   pod: 10,

@@ -13,6 +13,7 @@ import {
   createSwarmer,
   createTitan,
 } from './scene-assets/combat.scene-asset.js';
+import { SPECIES } from './combat/creatures.js';
 import { createDebris } from './scene-assets/props.scene-asset.js';
 import { createOblivax } from './scene-assets/oblivax.scene-asset.js';
 import { createHeroFigure, createPedestal } from './scene-assets/heroes.scene-asset.js';
@@ -110,6 +111,13 @@ export default defineAssets({
   'ghost-lintel': createGhost('lintel'),
   'ghost-capstone': createGhost('capstone'),
   'welcome-panel': uikitml('welcome.uikitml', 'Welcome Panel'),
+  // Rigged, animated creatures (CC0, Quaternius), loaded per world as it is entered.
+  ...Object.fromEntries(
+    SPECIES.map((species) => [
+      `creature-${species.id}`,
+      { url: publicAssetUrl(`creatures/${species.id}.glb`), type: AssetType.GLTF, priority: 'lazy' as const, name: species.name },
+    ]),
+  ),
   // CC0 Poly Haven surface maps (applied at runtime by combat/materials.ts).
   'tex-metal-color': { url: publicAssetUrl('textures/metal_plate_diffuse_1k.jpg'), type: AssetType.Texture },
   'tex-metal-normal': { url: publicAssetUrl('textures/metal_plate_nor_gl_1k.jpg'), type: AssetType.Texture },

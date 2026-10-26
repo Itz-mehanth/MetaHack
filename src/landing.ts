@@ -190,7 +190,7 @@ const HTML = () => `
     ${how('overdrive', '#FF2D9A', 'CONVERGENCE', 'With three Anchors, face OBLIVAX in your own room. Every hero joins in. Clap to end it.')}
   </div>
   <footer>
-    Original characters, story, models, music and sound, made for the Meta VR Start Developer Competition 2026.<br>
+    Original heroes, story, weapons, music and sound, made for the Meta VR Start Developer Competition 2026. Creature models: Quaternius (CC0).<br>
     No headset? PLAY NOW works on phones, tablets and computers: tap, hold and swipe.<br>
     Icons by Lorc and Delapouite from <a href="https://game-icons.net" target="_blank" rel="noopener">game-icons.net</a>
     (<a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>), recoloured.

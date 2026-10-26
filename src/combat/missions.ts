@@ -4,10 +4,11 @@
  * Enemy kinds. The walking Hollow Legion aliens keep their original ids:
  * drone = Grunt (rifle), armored = Brute (heavy), swarmer = Stalker
  * (melee sprinter), titan = Colossus (giant cannon), blade = Reaver
- * (energy swordsman). boss, orb (enemy
- * shot) and pod (hostage cage) are special.
+ * (energy swordsman). flyer = a creature that circles overhead, spits
+ * plasma and dive-bombs (creatures only). boss, orb (enemy shot) and pod
+ * (hostage cage) are special.
  */
-export type EnemyKind = 'drone' | 'armored' | 'swarmer' | 'titan' | 'blade' | 'boss' | 'orb' | 'pod';
+export type EnemyKind = 'drone' | 'armored' | 'swarmer' | 'titan' | 'blade' | 'flyer' | 'boss' | 'orb' | 'pod';
 
 export interface EnemyDef {
   readonly name: string;
@@ -82,6 +83,8 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     score: 300,
     ground: { chest: 1.17, stopDistance: 0, fireInterval: 0, shotSpeed: 0, shots: 0 },
   },
+  /** Airborne creature: no `ground`; circles the player, shoots, then dives. */
+  flyer: { name: 'FLYER', hp: 3, radius: 0.42, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 1, score: 200 },
   boss: { name: 'BOSS', hp: 40, radius: 0.6, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 3, score: 5000 },
   orb: { name: 'SHOT', hp: 1, radius: 0.1, chargeDistance: 0.35, chargeTime: 0.05, weave: 0, damage: 1, score: 25 },
   /** Hostage pod: never moves or attacks; destroying it frees the civilian. */

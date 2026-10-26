@@ -17,5 +17,9 @@ Textures and HDRI from Poly Haven (https://polyhaven.com), CC0: metal_plate
 Fonts from Google Fonts under the SIL Open Font License: Bangers, Orbitron,
 Rajdhani.
 
-All characters, story, models, music and sound effects are original and
+Creature models (public/creatures/*.glb): "Ultimate Monsters Bundle" by
+Quaternius (https://quaternius.com), CC0 1.0 public domain. Converted to GLB
+with unused animations removed; no other changes.
+
+The heroes, story, aliens, weapons, music and sound effects are original and
 generated in code for this project.

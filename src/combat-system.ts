@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  AssetManager,
   CanvasTexture,
   Color,
   createSystem,
@@ -68,6 +69,8 @@ import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
 import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose, setSensitivity, tuning } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
+import { CreatureModel } from './combat/creature.js';
+import { ROLE_HEIGHT, ROLE_POOL, ROSTER, speciesById, speciesFor } from './combat/creatures.js';
 import { HoloMap } from './combat/holomap.js';
 import { GameMenus, wrap } from './combat/menus.js';
 import { ENEMIES, type EnemyKind } from './combat/missions.js';
@@ -179,12 +182,13 @@ const ENEMY_ASSET: Readonly<Record<EnemyKind, string>> = {
   swarmer: 'alien-stalker',
   titan: 'alien-colossus',
   blade: 'alien-reaver',
+  flyer: '',
   boss: '',
   orb: 'orb',
   pod: 'pod',
 };
 /** Bosses are loaded separately, one per region. */
-const ENEMY_POOL: Readonly<Record<EnemyKind, number>> = { drone: 12, armored: 8, swarmer: 14, titan: 5, blade: 8, boss: 0, orb: 32, pod: 5 };
+const ENEMY_POOL: Readonly<Record<EnemyKind, number>> = { drone: 12, armored: 8, swarmer: 14, titan: 5, blade: 8, flyer: 0, boss: 0, orb: 32, pod: 5 };
 /** Walking pace relative to the wave speed: heavies lumber. */
 const PACE: Partial<Record<EnemyKind, number>> = { armored: 0.8, titan: 0.55, blade: 1.05 };
 const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
@@ -193,6 +197,7 @@ const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   swarmer: EMBER,
   titan: VIOLET,
   blade: new Color('#FF3355'),
+  flyer: CYAN,
   boss: new Color('#FF3B5C'),
   orb: ORANGE,
   pod: GOLD,
@@ -396,6 +401,13 @@ interface Drone {
   flying: boolean;
   fly: Vector3;
   bowlAt: number;
+  /** '' for the original humanoid aliens, else the creature species id. */
+  species: string;
+  /** Animated model of a creature (null for humanoids and bosses). */
+  creature: CreatureModel | null;
+  /** A walker stepped forward this frame, at `moveSpeed` m/s (picks the walk or run clip). */
+  moving: boolean;
+  moveSpeed: number;
 }
 
 interface Pickup {
@@ -743,6 +755,9 @@ export class CombatSystem extends createSystem({
   private flat = true;
   private frameDt = 0;
   private webShots!: WebShots;
+  /** Creature pools being built or built, by `kind:species`. */
+  private readonly creaturePools = new Map<string, Promise<void>>();
+  private readonly bloodColors = new Map<string, Color>();
   private stormCharge = 0;
   private stormActive = 0;
   private stormGap = 0;
@@ -1045,77 +1060,7 @@ export class CombatSystem extends createSystem({
         addOutline(object, 0.1, (m) => m.name === 'Body');
         object.visible = false;
         this.root.add(object);
-        const portalMaterial = new MeshBasicMaterial({
-          color: ENEMY_COLOR[kind],
-          transparent: true,
-          opacity: 0,
-          blending: AdditiveBlending,
-          side: DoubleSide,
-          depthWrite: false,
-        });
-        const cocoon = createCocoon();
-        this.root.add(cocoon);
-        const portal = new Mesh(portalGeometry, portalMaterial);
-        portal.name = `Portal-${i}`;
-        portal.visible = false;
-        this.root.add(portal);
-        this.drones.push({
-          object,
-          ring: object.getObjectByName('Ring') ?? new Group(),
-          eye: object.getObjectByName('Eye') ?? new Group(),
-          kind,
-          hp: 0,
-          state: 'off',
-          t: 0,
-          speed: 1,
-          phase: 0,
-          spawn: new Vector3(),
-          normal: new Vector3(),
-          offset: new Vector3(),
-          portal,
-          portalMaterial,
-          hammerHitAt: -10,
-          snare: 0,
-          cocoon,
-          counted: true,
-          world: '',
-          maxHp: 1,
-          attackTimer: 0,
-          bossPhase: 1,
-          rig: this.findRig(object),
-          stride: 0,
-          blob: ENEMIES[kind].ground ? this.makeBlob() : null,
-          lifted: false,
-          bladeHitAt: -10,
-          parts: ENEMIES[kind].ground ? captureParts(object) : {},
-          dying: -1,
-          feet: new Vector3(),
-          knock: new Vector3(),
-          stagger: 0,
-          stun: 0,
-          meleeStage: 0,
-          melee: 0,
-          volleys: 0,
-          push: false,
-          dash: 0,
-          dashCool: 0,
-          heldBy: -1,
-          ragdoll: -1,
-          posed: false,
-          landed: false,
-          staggerMax: 0.35,
-          size: 1,
-          champion: '',
-          burn: 0,
-          shock: 0,
-          dotTimer: 0,
-          dropY: 0,
-          dropV: 0,
-          flying: false,
-          fly: new Vector3(),
-          bowlAt: -10,
-        });
-        // Yaw first, then pitch about the body's own side axis (falls, flinches).
+        this.makeDrone(object, kind, portalGeometry, i);
         object.rotation.order = 'YXZ';
       }
     }
@@ -1194,6 +1139,10 @@ export class CombatSystem extends createSystem({
         flying: false,
         fly: new Vector3(),
         bowlAt: -10,
+        species: '',
+        creature: null,
+        moving: false,
+        moveSpeed: 0,
       });
     }
     for (const kind of ['heal', 'rapid', 'power'] as const) {
@@ -1330,6 +1279,338 @@ export class CombatSystem extends createSystem({
     return blob;
   }
 
+  /** Adds a pooled enemy (portal, cocoon, shadow and all) around `object`. */
+  private makeDrone(object: Object3D, kind: EnemyKind, portalGeometry: RingGeometry, index: number, extra: { species?: string; creature?: CreatureModel | null } = {}): Drone {
+    const portalMaterial = new MeshBasicMaterial({
+      color: ENEMY_COLOR[kind],
+      transparent: true,
+      opacity: 0,
+      blending: AdditiveBlending,
+      side: DoubleSide,
+      depthWrite: false,
+    });
+    const cocoon = createCocoon();
+    this.root.add(cocoon);
+    const portal = new Mesh(portalGeometry, portalMaterial);
+    portal.name = `Portal-${index}`;
+    portal.visible = false;
+    this.root.add(portal);
+    const creature = extra.creature ?? null;
+    const drone: Drone = {
+      object,
+      ring: object.getObjectByName('Ring') ?? new Group(),
+      eye: object.getObjectByName('Eye') ?? new Group(),
+      kind,
+      hp: 0,
+      state: 'off',
+      t: 0,
+      speed: 1,
+      phase: 0,
+      spawn: new Vector3(),
+      normal: new Vector3(),
+      offset: new Vector3(),
+      portal,
+      portalMaterial,
+      hammerHitAt: -10,
+      snare: 0,
+      cocoon,
+      counted: true,
+      world: '',
+      maxHp: 1,
+      attackTimer: 0,
+      bossPhase: 1,
+      rig: creature ? null : this.findRig(object),
+      stride: 0,
+      blob: ENEMIES[kind].ground ? this.makeBlob() : null,
+      lifted: false,
+      bladeHitAt: -10,
+      parts: ENEMIES[kind].ground && !creature ? captureParts(object) : {},
+      dying: -1,
+      feet: new Vector3(),
+      knock: new Vector3(),
+      stagger: 0,
+      stun: 0,
+      meleeStage: 0,
+      melee: 0,
+      volleys: 0,
+      push: false,
+      dash: 0,
+      dashCool: 0,
+      heldBy: -1,
+      ragdoll: -1,
+      posed: false,
+      landed: false,
+      staggerMax: 0.35,
+      size: 1,
+      champion: '',
+      burn: 0,
+      shock: 0,
+      dotTimer: 0,
+      dropY: 0,
+      dropV: 0,
+      flying: false,
+      fly: new Vector3(),
+      bowlAt: -10,
+      species: extra.species ?? '',
+      creature,
+      moving: false,
+      moveSpeed: 0,
+    };
+    this.drones.push(drone);
+    return drone;
+  }
+
+  // ---------------------------------------------------------------- creatures
+
+  /**
+   * Loads and pools the creatures a world fields (a no-op once they exist).
+   * A failed download leaves that role to the humanoid aliens.
+   */
+  private prepareCreatures(worldId: string): Promise<void> {
+    const jobs: Promise<void>[] = [];
+    for (const [kind, id] of Object.entries(ROSTER[worldId] ?? {}) as Array<[EnemyKind, string]>) {
+      const key = `${kind}:${id}`;
+      let job = this.creaturePools.get(key);
+      if (job == null) {
+        job = this.buildCreaturePool(kind, id).catch((error) => {
+          console.warn(`creature ${id} failed to load`, error);
+        });
+        this.creaturePools.set(key, job);
+      }
+      jobs.push(job);
+    }
+    return Promise.all(jobs).then(() => undefined);
+  }
+
+  private async buildCreaturePool(kind: EnemyKind, id: string): Promise<void> {
+    const species = speciesById(id);
+    const height = ROLE_HEIGHT[kind];
+    const count = ROLE_POOL[kind];
+    if (species == null || height == null || count == null) return;
+    const gltf = await AssetManager.loadGLTFById(`creature-${id}`);
+    const lift = ENEMIES[kind].ground?.chest ?? null;
+    const portalGeometry = new RingGeometry(0.17, 0.26, 48);
+    for (let n = 0; n < count; n += 1) {
+      const creature = new CreatureModel(gltf.scene, gltf.animations, height * species.scale, lift);
+      creature.reset();
+      const object = new Group();
+      object.name = `Creature-${id}-${kind}-${n}`;
+      object.add(creature.group);
+      object.visible = false;
+      object.rotation.order = 'YXZ';
+      this.root.add(object);
+      this.makeDrone(object, kind, portalGeometry, 1000 + this.drones.length, { species: id, creature });
+    }
+  }
+
+  /** Ichor colour of a creature (undefined: the humanoids' red). */
+  private bloodOf(drone: Drone): Color | undefined {
+    if (drone.species === '') return undefined;
+    let color = this.bloodColors.get(drone.species);
+    if (color == null) {
+      color = new Color(speciesById(drone.species)?.blood ?? '#B0000C');
+      this.bloodColors.set(drone.species, color);
+    }
+    return color;
+  }
+
+  /** Picks the creature's base clip (walk, run or idle) unless a hit or strike is still playing. */
+  private animateCreature(drone: Drone): void {
+    const creature = drone.creature!;
+    const playing = creature.playing;
+    if (drone.snare > 0) {
+      creature.play('idle', 0.4);
+      return;
+    }
+    if (drone.stun > 0) {
+      creature.play('hit', 0.5);
+      return;
+    }
+    if ((playing === 'hit' || playing === 'attack') && !creature.finished && (drone.stagger > 0 || drone.meleeStage > 0)) return;
+    if (drone.moving) {
+      if (drone.kind === 'swarmer' || drone.moveSpeed > 2.4) creature.play('run', Math.min(1.7, Math.max(0.8, drone.moveSpeed / 2.6)));
+      else creature.play('walk', Math.min(1.8, Math.max(0.7, drone.moveSpeed / 1.0)));
+    } else creature.play('idle', 1);
+  }
+
+  /** A creature dies: the death clip plays, ichor sprays, then it lies and sinks (flyers tumble first). */
+  private killCreature(drone: Drone, big: boolean): void {
+    const creature = drone.creature!;
+    const object = drone.object;
+    const def = ENEMIES[drone.kind];
+    drone.state = 'off';
+    drone.dying = 0;
+    drone.snare = 0;
+    drone.cocoon.visible = false;
+    drone.lifted = false;
+    drone.stagger = 0;
+    drone.stun = 0;
+    drone.landed = false;
+    drone.eye.scale.setScalar(1);
+    drone.portal.visible = false;
+    drone.feet.set(object.position.x, 0, object.position.z);
+    drone.knock.copy(this.hitDir).setY(0);
+    if (drone.knock.lengthSq() < 1e-4) drone.knock.set(object.position.x - this.head.x, 0, object.position.z - this.head.z);
+    drone.knock.normalize().multiplyScalar(this.hitStyle === 'slice' ? 0.4 : big ? 1.6 : 1);
+    creature.play('death', 1, true, 0.08);
+    if (def.ground == null) drone.fly.copy(drone.knock).multiplyScalar(2).setY(1.5);
+    const tint = this.bloodOf(drone);
+    const slice = this.hitStyle === 'slice';
+    this.bleed(slice ? this.hitPoint : object.position, this.hitDir, slice ? 44 : big ? 36 : 24, tint);
+    this.flashes.spawn(object.position, tint ?? ENEMY_COLOR[drone.kind], 0.1, big ? 1.4 : 0.8, 0.3);
+    if (def.ground) this.pools.spill(drone.feet.x + drone.knock.x * 0.5, drone.feet.z + drone.knock.z * 0.5, big ? 1.5 : 0.9);
+    if (slice) {
+      this.sfx.splat();
+      this.sfx.slash();
+    } else this.sfx.explode(big);
+  }
+
+  private updateCreatureDeath(drone: Drone, dt: number): void {
+    const creature = drone.creature!;
+    const object = drone.object;
+    drone.dying += dt;
+    creature.update(dt);
+    if (ENEMIES[drone.kind].ground) {
+      // Knocked back, down on the clip, then still, then sinking away.
+      const slide = Math.max(0, 1 - drone.dying / 0.7);
+      drone.feet.addScaledVector(drone.knock, dt * 2 * slide);
+      object.position.x = drone.feet.x;
+      object.position.z = drone.feet.z;
+      const lie = creature.duration('death') + 1.4;
+      if (drone.dying > lie) object.position.y -= dt * 0.4;
+      if (drone.dying > lie + 1) this.endDeath(drone);
+      return;
+    }
+    // Flyer: tumbles out of the sky, thuds, lies, sinks.
+    if (!drone.landed) {
+      drone.fly.y -= 9.8 * this.gravityScale * dt;
+      object.position.addScaledVector(drone.fly, dt);
+      object.rotation.x += dt * 6;
+      object.rotation.z += dt * 3;
+      if (this.room.collide(object.position, 0.2) || object.position.y < 0.25) {
+        drone.landed = true;
+        drone.t = 0;
+        object.position.y = Math.max(0.25, object.position.y);
+        this.particles.burst(object.position, DUST, 18, 1.2, 0.4, this.v2);
+        this.sfx.catchHammer();
+      }
+      return;
+    }
+    drone.t += dt;
+    if (drone.t > 1.3) object.position.y -= dt * 0.4;
+    if (drone.t > 2.3) this.endDeath(drone);
+  }
+
+  /**
+   * Flyers circle the player, spit plasma now and then, and dive-bomb: they
+   * hover and shake through a wind-up, then streak at the head. Step aside,
+   * block with a shield, or shoot them down mid-dive.
+   */
+  private updateFlyer(drone: Drone, dt: number, time: number): void {
+    const def = ENEMIES.flyer;
+    const object = drone.object;
+    const creature = drone.creature;
+    this.v1.subVectors(this.head, object.position);
+    const distance = this.v1.length();
+    if (drone.snare > 0) {
+      drone.snare = Math.max(0, drone.snare - dt);
+      drone.cocoon.visible = drone.snare > 0;
+      drone.cocoon.position.copy(object.position);
+      drone.cocoon.scale.setScalar(def.radius * 1.5 * (1 + Math.sin(time * 6) * 0.04));
+      drone.cocoon.rotation.y += dt * 0.8;
+      object.position.y -= dt * 0.15;
+      object.position.x += (Math.random() - 0.5) * 0.004;
+      creature?.play('idle', 0.3);
+      return;
+    }
+    if (drone.stagger > 0) {
+      drone.stagger -= dt;
+      object.position.addScaledVector(drone.knock, dt * 2);
+      this.room.collide(object.position, def.radius);
+      return;
+    }
+    drone.attackTimer -= dt;
+    const stage = drone.meleeStage;
+    if (stage === 0) {
+      // Circle at a distance: each flyer has its own radius, height and direction.
+      const angle = drone.phase + time * (0.3 + (drone.phase % 0.3)) * (drone.phase > Math.PI ? -1 : 1);
+      const radius = 3.2 + (drone.phase % 1) * 1.3;
+      this.v2.set(this.head.x + Math.cos(angle) * radius, this.head.y + 0.15 + Math.sin(time * 1.3 + drone.phase) * 0.35 + drone.offset.y, this.head.z + Math.sin(angle) * radius);
+      this.v3.subVectors(this.v2, object.position);
+      const gap = this.v3.length();
+      const step = Math.min(gap, (1.6 + drone.speed) * dt);
+      if (gap > 1e-3) object.position.addScaledVector(this.v3, step / gap);
+      object.position.y = Math.max(0.9, object.position.y);
+      object.lookAt(this.head);
+      drone.moveSpeed = dt > 0 ? step / dt : 0;
+      creature?.play(gap > 1.2 ? 'run' : 'walk', 1);
+      if (drone.attackTimer <= 0) {
+        if (Math.random() < 0.5 && distance > 2) {
+          this.enemyFire(drone, 1, 2.8);
+          drone.attackTimer = 2 + Math.random() * 1.5;
+        } else {
+          drone.meleeStage = 1;
+          drone.melee = 0;
+          this.sfx.creak();
+          creature?.play('attack', 0.8, true, 0.1);
+        }
+      }
+    } else if (stage === 1) {
+      // Wind-up: hang in the air, shaking, eyes on the target.
+      drone.melee += dt;
+      object.position.x += (Math.random() - 0.5) * 0.02;
+      object.position.y += (Math.random() - 0.5) * 0.02;
+      object.lookAt(this.head);
+      drone.eye.scale.setScalar(1 + drone.melee);
+      if (drone.melee >= 0.8) {
+        drone.meleeStage = 2;
+        drone.melee = 0;
+        this.v2.copy(this.head);
+        this.v2.y -= 0.1;
+        drone.fly.subVectors(this.v2, object.position).normalize().multiplyScalar(7.5);
+        this.sfx.crescent();
+        creature?.play('run', 1.6);
+      }
+    } else if (stage === 2) {
+      // The dive.
+      drone.melee += dt;
+      object.position.addScaledVector(drone.fly, dt);
+      this.v2.copy(object.position).add(drone.fly);
+      object.lookAt(this.v2);
+      this.v3.subVectors(this.head, object.position);
+      if (this.v3.length() < 0.5) {
+        if (this.shieldBlocks(object.position)) {
+          this.sfx.clang();
+          this.particles.burst(object.position, GOLD, 24, 2.5, 0.3, this.v2);
+          this.comic.pop('BLOCKED!', this.v4.copy(object.position).setY(object.position.y + 0.3), this.weaponColor, 0.4);
+          drone.stun = 0.8;
+        } else {
+          this.hurtPlayer(def.damage, false, object.position);
+          this.sfx.slash();
+        }
+        drone.meleeStage = 3;
+        drone.melee = 0;
+        drone.fly.multiplyScalar(-0.3).setY(2.5);
+      } else if (drone.melee > 1 || this.room.collide(object.position, 0.25)) {
+        drone.meleeStage = 3;
+        drone.melee = 0;
+        drone.fly.setY(2.5);
+      }
+    } else {
+      // Pull up and away, then back to circling.
+      drone.melee += dt;
+      object.position.addScaledVector(drone.fly, dt);
+      drone.fly.multiplyScalar(Math.max(0, 1 - dt * 2));
+      drone.fly.y += dt * 3;
+      object.lookAt(this.head);
+      creature?.play('walk', 1.2);
+      if (drone.melee >= 1) {
+        drone.meleeStage = 0;
+        drone.attackTimer = 2.2 + Math.random() * 2;
+      }
+    }
+  }
+
   private findRig(object: Object3D): Rig | null {
     const get = (name: string) => object.getObjectByName(name);
     const legL = get('LegL');
@@ -1384,7 +1665,7 @@ export class CombatSystem extends createSystem({
       screen: this.menus.screen,
       panel: this.panel.visible,
       live: this.powersLive,
-      enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}:${d.state}`),
+      enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}${d.species ? `/${d.species}` : ''}:${d.state}`),
       kills: this.run.kills,
       hands: this.hands.map((h) => h.tracked),
       debug: {
@@ -1397,6 +1678,10 @@ export class CombatSystem extends createSystem({
         moves: [this.pilot.busy(0), this.pilot.busy(1)],
       },
     });
+    // Test hook: spawns n enemies of a kind (not counted toward the wave).
+    (window as unknown as { __surgeSpawn: (kind: string, n?: number) => void }).__surgeSpawn = (kind: string, n = 1) => {
+      for (let k = 0; k < n; k += 1) this.spawnDrone(kind as EnemyKind, 0.8, false);
+    };
     // Test hook: calls down n lightning strikes from the sky.
     (window as unknown as { __surgeStrike: (n: number) => void }).__surgeStrike = (n: number) => {
       for (let k = 0; k < n; k += 1) this.stormStrike();
@@ -1464,7 +1749,7 @@ export class CombatSystem extends createSystem({
     const hero = (HEROES.find((h) => h.id === params.get('hero'))?.id ?? 'arc') as HeroId;
     if (params.has('skipstory') && !isSagaStage(stage)) {
       this.story = levelStory(stage.world.id, stage.number) ?? null;
-      this.launchStage(hero, stage);
+      void this.prepareCreatures(stage.world.id).then(() => this.launchStage(hero, stage));
     } else this.startStage(hero, stage);
   }
 
@@ -1837,6 +2122,7 @@ export class CombatSystem extends createSystem({
     this.tipQueue = [];
     this.coach.hide();
     this.setTheme(chapter.worldId);
+    void this.prepareCreatures(chapter.worldId);
     this.erasure.setLook(lookFor(base.id, base.world.id));
     this.run.start(stage, { maxHealth: 99, speedScale: 0.9, spawnScale: 1 });
     // Straight into the fight: no countdown in a trailer.
@@ -2066,7 +2352,11 @@ export class CombatSystem extends createSystem({
       const chapter = chapterForWorld(stage.world.id);
       if (chapter) intro = [chapterCall(chapter.region, HEROES.find((h) => h.id === hero)!.name), ...intro];
     }
-    const go = () => this.travel(stage, () => this.launchStage(hero, stage));
+    // The world's creatures download while the jump tunnel plays.
+    const go = () => {
+      const ready = this.prepareCreatures(stage.world.id);
+      this.travel(stage, () => void ready.then(() => this.launchStage(hero, stage)));
+    };
     if (intro.length > 0) this.beginTransmission(intro, go);
     else go();
   }
@@ -2088,6 +2378,8 @@ export class CombatSystem extends createSystem({
 
   /** Starts `stage` with `hero`, applying difficulty, upgrades and skin. */
   private launchStage(hero: HeroId, stage: Stage): void {
+    // Normally ready already (see startStage); a no-op if so.
+    void this.prepareCreatures(stage.world.id);
     this.hero = hero;
     if (!isSagaStage(stage)) this.menus.hero = hero;
     this.panel.hide();
@@ -2264,6 +2556,8 @@ export class CombatSystem extends createSystem({
       return;
     }
     const chapter = chapterFor(this.hero);
+    // Fetch this world's creatures while the player reads the briefing.
+    void this.prepareCreatures(chapter.worldId);
     this.holomap.build(chapter, equippedColor(this.profile, this.hero), this.markers.get(this.hero) ?? null);
     this.menus.chapterStages().forEach((stage, i) => {
       const unlocked = isStageUnlocked(this.profile, stage);
@@ -6030,7 +6324,10 @@ export class CombatSystem extends createSystem({
 
   private spawnDrone(kind: EnemyKind, speed: number, counted = true): Drone | null {
     if (kind === 'boss') return this.spawnBoss();
-    const drone = this.drones.find((d) => d.state === 'off' && d.dying < 0 && d.kind === kind);
+    const species = speciesFor(this.run.stage.world.id, kind);
+    const free = (d: Drone) => d.state === 'off' && d.dying < 0 && d.kind === kind;
+    // The world's creature if its pool is ready (and has a free body), else the humanoid.
+    const drone = this.drones.find((d) => free(d) && d.species === species) ?? this.drones.find((d) => free(d) && d.species === '');
     if (drone == null) {
       // Pool exhausted: count it as killed so the wave can still finish.
       if (counted) this.run.kill(kind);
@@ -6065,6 +6362,14 @@ export class CombatSystem extends createSystem({
         drone.dropY = 3.1;
       }
     }
+    if (kind === 'flyer') {
+      drone.spawn.y = Math.min(2.4, Math.max(1.3, drone.spawn.y));
+      drone.attackTimer = 2 + Math.random() * 2;
+      drone.meleeStage = 0;
+      drone.fly.set(0, 0, 0);
+      drone.stagger = 0;
+    }
+    drone.creature?.reset();
     drone.hp = ENEMIES[kind].hp;
     drone.state = 'emerging';
     drone.t = 0;
@@ -6405,6 +6710,7 @@ export class CombatSystem extends createSystem({
         continue;
       }
       drone.t += dt;
+      drone.creature?.update(dt);
       drone.ring.rotation.z += dt * (drone.state === 'charge' ? 18 : 4);
       const object = drone.object;
 
@@ -6446,6 +6752,11 @@ export class CombatSystem extends createSystem({
       }
       if ((drone.state === 'approach' || drone.state === 'aim' || drone.state === 'melee') && ENEMIES[drone.kind].ground) {
         this.updateWalker(drone, dt, time);
+        if (drone.creature) this.animateCreature(drone);
+        continue;
+      }
+      if (drone.kind === 'flyer' && drone.state === 'approach') {
+        this.updateFlyer(drone, dt, time);
         continue;
       }
       if (drone.state === 'fly') {
@@ -6575,6 +6886,7 @@ export class CombatSystem extends createSystem({
     this.v3.set(-this.v1.z, 0, this.v1.x);
     this.faceHead(object);
     object.rotation.x = 0;
+    drone.moving = false;
     if (drone.snare > 0) {
       drone.snare = Math.max(0, drone.snare - dt);
       drone.cocoon.visible = drone.snare > 0;
@@ -6657,6 +6969,8 @@ export class CombatSystem extends createSystem({
         object.position.addScaledVector(this.v3, Math.sin(time * 2 + drone.phase) * def.weave * dt);
         drone.stride += step;
         moving = true;
+        drone.moving = true;
+        drone.moveSpeed = dt > 0 ? step / dt : 0;
       }
     } else if (drone.state === 'aim') {
       // Holding at range: shuffle sideways and fire; then push in.
@@ -6722,6 +7036,7 @@ export class CombatSystem extends createSystem({
         drone.meleeStage = 1;
         drone.melee = 0;
         this.sfx.creak();
+        if (drone.creature) drone.creature.play('attack', drone.creature.duration('attack') / (windup + 0.35), true, 0.1);
       }
     } else if (drone.meleeStage === 1 && drone.melee >= windup) {
       drone.meleeStage = 2;
@@ -6817,10 +7132,10 @@ export class CombatSystem extends createSystem({
   }
 
   /** Alien ichor: a spray along `direction` at `at`. */
-  private bleed(at: Vector3, direction: Vector3, count: number): void {
+  private bleed(at: Vector3, direction: Vector3, count: number, tint?: Color): void {
     for (let i = 0; i < count; i += 1) {
       this.v2.set(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).multiplyScalar(1.6).addScaledVector(direction, 1.8 + Math.random() * 1.5);
-      this.gore.emit(at, this.v2, Math.random() < 0.35 ? ICHOR_DARK : ICHOR, 0.6 + Math.random() * 0.5, 0.6, 8);
+      this.gore.emit(at, this.v2, tint ?? (Math.random() < 0.35 ? ICHOR_DARK : ICHOR), 0.6 + Math.random() * 0.5, 0.6, 8);
     }
   }
 
@@ -6898,7 +7213,7 @@ export class CombatSystem extends createSystem({
     if (hand.tipVel.dot(direction) < 0.9 * tuning.swing) return;
     for (const drone of this.drones) {
       const def = ENEMIES[drone.kind];
-      if (def.ground == null || drone.state === 'off' || drone.state === 'emerging' || drone.lifted) continue;
+      if (def.ground == null || drone.state === 'off' || drone.state === 'emerging' || drone.lifted || drone.creature) continue;
       if (this.elapsed - drone.bladeHitAt < 0.3) continue;
       const scale = def.ground.chest / 1.15;
       const at = drone.object.position;
@@ -7023,6 +7338,10 @@ export class CombatSystem extends createSystem({
 
   /** Falling, lying and sinking; then the pooled body is put back together. */
   private updateDeath(drone: Drone, dt: number): void {
+    if (drone.creature) {
+      this.updateCreatureDeath(drone, dt);
+      return;
+    }
     if (drone.heldBy >= 0) {
       this.updateSkewered(drone, dt);
       return;
@@ -7099,6 +7418,8 @@ export class CombatSystem extends createSystem({
     drone.dying = -1;
     drone.object.visible = false;
     drone.object.rotation.x = 0;
+    drone.object.rotation.z = 0;
+    drone.creature?.reset();
     this.gibs.recall(drone.parts);
     for (const part of Object.values(drone.parts)) if (part) restorePart(part);
     const rig = drone.rig;
@@ -7112,7 +7433,15 @@ export class CombatSystem extends createSystem({
   /** Fires `shots` plasma bolts from a walker's muzzle at the player's head. */
   private enemyFire(drone: Drone, shots: number, speed: number): void {
     if (drone.rig?.muzzle) drone.rig.muzzle.getWorldPosition(this.v4);
-    else this.v4.copy(drone.object.position);
+    else {
+      // Creatures spit from the mouth: a little above the centre, toward the target.
+      this.v4.copy(drone.object.position);
+      if (drone.creature) {
+        this.v4.y += 0.2 * drone.size;
+        this.v3.subVectors(this.head, this.v4).setY(0).normalize();
+        this.v4.addScaledVector(this.v3, 0.3 * drone.size);
+      }
+    }
     this.flashes.spawn(this.v4, ENEMY_COLOR[drone.kind], 0.05, 0.3, 0.15);
     this.sfx.enemyShot();
     for (let i = 0; i < shots; i += 1) {
@@ -7165,8 +7494,8 @@ export class CombatSystem extends createSystem({
     if (drone.kind === 'boss') this.chargeOverdrive(0.02);
     if (drone.hp > 0) {
       this.flashes.spawn(drone.object.position, WHITE, 0.1, drone.kind === 'boss' ? 0.8 : 0.4, 0.12);
-      if (ENEMIES[drone.kind].ground && this.hitStyle !== 'dot') {
-        this.bleed(this.hitPoint, this.hitDir, 14);
+      if ((ENEMIES[drone.kind].ground || drone.kind === 'flyer') && this.hitStyle !== 'dot') {
+        this.bleed(this.hitPoint, this.hitDir, 14, this.bloodOf(drone));
         // Flinch: knocked back (heavy blows send them metres), a hit interrupts a wind-up.
         const force = this.hitForce * (drone.kind === 'titan' || drone.champion !== '' ? 0.4 : 1);
         drone.staggerMax = force > 2.5 ? 0.55 : drone.kind === 'titan' ? 0.15 : 0.35;
@@ -7174,6 +7503,7 @@ export class CombatSystem extends createSystem({
         drone.knock.copy(this.hitDir).setY(0).normalize().multiplyScalar(0.7 * Math.max(1, force));
         if (drone.meleeStage === 1) drone.meleeStage = 3;
         drone.melee = 0;
+        drone.creature?.play('hit', 1.3, true, 0.05);
       } else this.particles.burst(drone.object.position, GOLD, 14, 2, 0.3, this.v2);
       this.sfx.ping();
       return;
@@ -7227,6 +7557,10 @@ export class CombatSystem extends createSystem({
   }
 
   private explodeDrone(drone: Drone, big: boolean): void {
+    if (drone.creature && drone.object.visible) {
+      this.killCreature(drone, big);
+      return;
+    }
     if (drone.rig && ENEMIES[drone.kind].ground && drone.object.visible) {
       this.killWalker(drone, big);
       return;
@@ -7250,6 +7584,7 @@ export class CombatSystem extends createSystem({
   /** Removes an enemy silently (restart or quit). */
   private retireDrone(drone: Drone): void {
     if (drone.dying >= 0) this.endDeath(drone);
+    drone.creature?.reset();
     drone.size = 1;
     drone.champion = '';
     drone.state = 'off';

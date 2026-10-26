@@ -67,6 +67,16 @@ throughout (no Marvel or other third-party names/designs).
   Bullets, blades, hammer, shield, punches, meteors, explosions and thrown
   props damage them; non-lethal hits shove them; shards bounce off the real
   room; destroyed props rebuild after 6-10 s. Hook: __surgeProp(kind).
+- Creatures (creatures.ts, creature.ts): 30 rigged, animated CC0 monsters
+  (Quaternius "Ultimate Monsters", see CREDITS) replace the humanoid aliens
+  in most worlds (ROSTER: species per world and role). Roles: drone/armored/
+  blade/titan use the "big" family, swarmer the "blob" family, and the new
+  FLYER kind (flying family) circles overhead, spits plasma and dive-bombs.
+  Models are public/creatures/<id>.glb (clips idle/walk/run/attack/hit/
+  death), loaded lazily per world while the map or jump tunnel plays and
+  pooled; each has an ink outline, species-coloured ichor and a death clip
+  (flyers tumble out of the sky). Champions become giant creatures. Hooks:
+  __surgeSpawn(kind, n), enemies listed as kind/species in __surge().
 - Hands push the world: a fast palm slaps enemy shots back at the aliens
   (SLAP!); free hands shove aliens (knockback) and props.
 - WEAVER's webs are bullets (webshot.ts): a spinning web net per shot, fired
