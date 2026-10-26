@@ -68,6 +68,8 @@ export interface PilotView {
   tethered: [boolean, boolean];
   /** OVERDRIVE is charged and unlocked: the special is a clap. */
   overdrive: boolean;
+  /** ARC's UNI-BEAM is ready to charge. */
+  unibeam: boolean;
 }
 
 export function newView(): PilotView {
@@ -90,6 +92,7 @@ export function newView(): PilotView {
     held: [false, false],
     tethered: [false, false],
     overdrive: false,
+    unibeam: false,
   };
 }
 
@@ -478,6 +481,19 @@ export class Pilot {
     if (view.overdrive) this.clap();
     else if (view.hero === 'ronin') this.cross();
     else if (view.hero === 'tempest' && view.hammerState === 'gripped') this.raise(view.hammerHand);
+    else if (view.hero === 'arc' && view.unibeam) this.chestCharge(1);
+  }
+
+  /** ARC: an open palm pressed to the chest while the reactor charges. */
+  private chestCharge(i: number): void {
+    const side = i === 0 ? -1 : 1;
+    this.begin(i);
+    this.f.set(-side * 0.9, 0.2, -0.3).normalize();
+    this.y.set(0, 0.2, 1);
+    this.handFrame(this.f, this.y, this.q);
+    this.p.set(side * 0.09, -0.3, -0.14);
+    this.key(i, 0.3, this.p, this.q, SHAPES.open, false, true);
+    this.key(i, 0.95, this.p, this.q, SHAPES.open, false);
   }
 
   /** TEMPEST: lift the hammer overhead and hold it there while the storm gathers. */

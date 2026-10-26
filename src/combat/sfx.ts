@@ -336,6 +336,8 @@ export class Sfx {
     this.tone('sawtooth', 220, 45, 0.4, 0.3);
     this.noiseSweep('lowpass', 1200, 100, 0.3, 0.45);
     this.thump(0.6, 0.3, 90);
+    // A body blow you can feel in the headset's speakers.
+    this.thump(0.9, 0.4, 55);
   }
 
   portal(): void {

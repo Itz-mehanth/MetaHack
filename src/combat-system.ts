@@ -70,6 +70,8 @@ import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isWe
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { CreatureModel } from './combat/creature.js';
+import { BeamFx } from './combat/beamfx.js';
+import { Haptics } from './combat/haptics.js';
 import { BOSSES, ROLE_HEIGHT, ROLE_POOL, ROSTER, speciesById, speciesFor } from './combat/creatures.js';
 import { HoloMap } from './combat/holomap.js';
 import { GameMenus, wrap } from './combat/menus.js';
@@ -756,6 +758,19 @@ export class CombatSystem extends createSystem({
   private frameDt = 0;
   private webShots!: WebShots;
   private senseAt = -10;
+  private readonly haptics = new Haptics();
+  private handBeams: BeamFx[] = [];
+  private chestBeam!: BeamFx;
+  private reactor!: Sprite;
+  private readonly laserUsed = [false, false];
+  private uniState: 'idle' | 'ready' | 'firing' = 'idle';
+  private uniCharge = 0;
+  private uniReady = 0;
+  private uniTime = 0;
+  private uniTick = 0;
+  private uniCooldown = 0;
+  private readonly uniAim = new Vector3(0, 0, -1);
+  private readonly chest = new Vector3();
   /** Creature pools being built or built, by `kind:species`. */
   private readonly creaturePools = new Map<string, Promise<void>>();
   private readonly bloodColors = new Map<string, Color>();
@@ -802,6 +817,11 @@ export class CombatSystem extends createSystem({
     this.wrist.setHero('ARC', CYAN);
     this.lightningFx = new Lightning(this.root);
     this.webShots = new WebShots(this.root, PINK);
+    this.handBeams = [new BeamFx(this.root, WHITE), new BeamFx(this.root, WHITE)];
+    this.chestBeam = new BeamFx(this.root, CYAN);
+    this.reactor = createGlowSprite(CYAN, 0);
+    this.reactor.visible = false;
+    this.root.add(this.reactor);
     this.bow = new Bow(new Color('#5DFFB0'));
     this.root.add(this.bow.group);
     this.root.add(this.carousel.group);
@@ -1854,6 +1874,8 @@ export class CombatSystem extends createSystem({
     const live = !this.paused && !this.panel.visible && this.run.phase !== 'title';
     this.powersLive = live;
     this.updateHands(realDt);
+    for (let i = 0; i < 2; i += 1) if (!this.laserUsed[i]) this.handBeams[i].hide();
+    this.updateUniBeam(realDt, time);
     this.updateClaws(realDt);
     this.updateSwords(realDt, time);
     this.updateShield(realDt);
@@ -1989,6 +2011,8 @@ export class CombatSystem extends createSystem({
   }
 
   private updateHands(dt: number): void {
+    this.laserUsed[0] = false;
+    this.laserUsed[1] = false;
     for (const hand of this.hands) {
       hand.cooldown -= dt;
       const posed = this.powersLive && this.hero === 'arc' && hand.tracked && isBlastPose(hand.joints, hand.handedness, this.headTriple);
@@ -2084,7 +2108,8 @@ export class CombatSystem extends createSystem({
     if (playing) {
       const clap = hasUnlock(this.profile, `overdrive-${this.hero}`) && this.overdrive >= 1;
       const storm = this.hero === 'tempest' && this.stormCooldown <= 0 && this.hammerState === 'gripped';
-      this.screen.setSpecial(clap ? 'CLAP!' : this.hero === 'ronin' && this.xCooldown <= 0 ? 'X-STRIKE' : storm ? 'STORM' : '');
+      const uni = this.hero === 'arc' && this.uniCooldown <= 0 && this.uniState === 'idle';
+      this.screen.setSpecial(clap ? 'CLAP!' : this.hero === 'ronin' && this.xCooldown <= 0 ? 'X-STRIKE' : storm ? 'STORM' : uni ? 'UNI-BEAM' : '');
     } else intent.special = false;
     if (page && this.screen.clicked && !playing) this.screenClick();
   }
@@ -2339,6 +2364,7 @@ export class CombatSystem extends createSystem({
       view.tethered[i] = this.hands[i].webState === 'tethered';
     }
     view.overdrive = hasUnlock(this.profile, `overdrive-${this.hero}`) && this.overdrive >= 1;
+    view.unibeam = this.uniCooldown <= 0 && this.uniState === 'idle';
   }
 
   /** Screen play: turns the view to the menu that just opened. */
@@ -2533,6 +2559,8 @@ export class CombatSystem extends createSystem({
       hand.claws.setColor(this.weaponColor);
       hand.web.setColor(this.weaponColor);
       this.webShots?.setColor(this.weaponColor);
+      for (const beam of this.handBeams) beam.setColor(this.weaponColor);
+      this.chestBeam?.setColor(this.accent);
       hand.sword.setColor(this.weaponColor);
       hand.psi.setColor(this.accent);
       hand.beamMaterial.color.copy(this.accent);
@@ -3147,6 +3175,126 @@ export class CombatSystem extends createSystem({
       const flicker = this.lightning * (0.55 + 0.45 * Math.sin(time * 60));
       setFlash(this.arena, flicker);
     }
+  }
+
+  // ---------------------------------------------------------------- ARC chest beam
+
+  /**
+   * ARC's UNI-BEAM: press an open palm to the chest to charge the reactor,
+   * then push the hand out. The reactor fires a huge beam for a few seconds
+   * that follows where the hand points (on a screen: the pointer). Everything
+   * along it burns. Cooldown follows each firing.
+   */
+  private updateUniBeam(dt: number, time: number): void {
+    const live = this.powersLive && this.hero === 'arc';
+    this.uniCooldown -= dt;
+    if (!live) {
+      this.uniState = 'idle';
+      this.uniCharge = 0;
+      this.chestBeam.hide();
+      this.reactor.visible = false;
+      return;
+    }
+    // The chest: below the chin and a little forward.
+    this.chest.copy(this.head);
+    this.chest.y -= 0.3;
+    this.v1.set(this.forward.x, 0, this.forward.z);
+    if (this.v1.lengthSq() > 1e-4) this.chest.addScaledVector(this.v1.normalize(), 0.1);
+    let atChest = false;
+    let reach: HandState | null = null;
+    let far = 0.28;
+    for (const hand of this.hands) {
+      if (!hand.tracked) continue;
+      const d = hand.gauntlet.palmPoint.distanceTo(this.chest);
+      if (d < 0.22) atChest = true;
+      else if (d > far && d < 1.1) {
+        far = d;
+        reach = hand;
+      }
+    }
+    switch (this.uniState) {
+      case 'idle':
+        if (atChest && this.uniCooldown <= 0) {
+          this.uniCharge += dt;
+          if (this.uniCharge >= 0.5) {
+            this.uniState = 'ready';
+            this.uniReady = 0;
+            this.sfx.swap();
+            this.comic.pop('UNI-BEAM!', this.v2.copy(this.chest).addScaledVector(this.forward, 0.5), this.accent, 0.5);
+          }
+        } else this.uniCharge = Math.max(0, this.uniCharge - dt * 2);
+        break;
+      case 'ready':
+        this.uniReady += dt;
+        // Push the hand away from the chest (or tap the screen) to fire.
+        if ((!atChest && (reach != null || this.flat)) || this.uniReady > 5) {
+          if (this.uniReady > 5 && atChest) {
+            this.uniState = 'idle';
+            this.uniCharge = 0;
+          } else {
+            this.uniState = 'firing';
+            this.uniTime = 0;
+            this.uniCooldown = 10;
+            this.uniAim.copy(this.forward);
+            this.sfx.explode(true);
+            this.slowmo = Math.max(this.slowmo, 0.25);
+          }
+        }
+        break;
+      case 'firing':
+        this.uniTime += dt;
+        if (this.uniTime > 3.5) {
+          this.uniState = 'idle';
+          this.uniCharge = 0;
+          this.chestBeam.hide();
+        }
+        break;
+    }
+    // The reactor glows with the charge.
+    const glow = this.uniState === 'firing' ? 1 : this.uniState === 'ready' ? 0.75 + Math.sin(time * 18) * 0.15 : Math.min(1, this.uniCharge / 0.5) * 0.6;
+    this.reactor.visible = glow > 0.02;
+    if (this.reactor.visible) {
+      this.reactor.position.copy(this.chest).addScaledVector(this.forward, 0.04);
+      this.reactor.scale.setScalar(0.06 + glow * 0.16);
+      this.reactor.material.opacity = Math.min(1, glow);
+      this.reactor.material.color.copy(this.accent);
+    }
+    if (this.uniState !== 'firing') return;
+    // Aim: the hand's direction from the chest (the pointer on a screen), smoothed.
+    if (this.flat) this.screenAim(this.v3);
+    else if (reach) this.v3.subVectors(reach.gauntlet.palmPoint, this.chest).normalize();
+    else this.v3.copy(this.forward);
+    this.uniAim.lerp(this.v3, Math.min(1, dt * 9)).normalize();
+    const fade = Math.min(1, this.uniTime / 0.15, (3.5 - this.uniTime) / 0.3);
+    this.chestBeam.show(this.chest, this.uniAim, 16, 0.16, time, Math.max(0, fade));
+    this.uniTick -= dt;
+    if (this.uniTick > 0) return;
+    this.uniTick = 0.1;
+    this.sfx.laser();
+    const power = 0.7 * (1 + 0.2 * this.level('arc-power'));
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'pod') continue;
+      this.v4.subVectors(drone.object.position, this.chest);
+      const along = this.v4.dot(this.uniAim);
+      if (along < 0.2 || along > 16) continue;
+      this.v4.addScaledVector(this.uniAim, -along);
+      if (this.v4.length() > ENEMIES[drone.kind].radius + 0.28) continue;
+      this.markHit('blast', drone.object.position, this.uniAim, undefined, 1.2);
+      this.damageDrone(drone, power);
+      this.flashes.spawn(drone.object.position, WHITE, 0.08, 0.7, 0.15);
+    }
+    for (const item of this.debris) {
+      if (item.state !== 'rest' && item.state !== 'flying') continue;
+      this.v4.subVectors(item.object.position, this.chest);
+      const along = this.v4.dot(this.uniAim);
+      if (along < 0.2 || along > 16) continue;
+      this.v4.addScaledVector(this.uniAim, -along);
+      if (this.v4.length() < item.radius + 0.25) this.hitProp(item, 1, this.uniAim, 1.5);
+    }
+    // Sparks along the beam.
+    this.v3.copy(this.chest).addScaledVector(this.uniAim, 2 + Math.random() * 10);
+    this.v2.set((Math.random() - 0.5) * 2, Math.random() * 2, (Math.random() - 0.5) * 2);
+    this.particles.emit(this.v3, this.v2, Math.random() < 0.5 ? WHITE : this.accent, 0.4, 0.5, 0);
   }
 
   // ---------------------------------------------------------------- ORION
@@ -4928,13 +5076,11 @@ export class CombatSystem extends createSystem({
       best = drone;
       distance = t;
     }
-    hand.beam.visible = true;
-    hand.beam.position.copy(palm);
-    this.v1.copy(palm).add(dir);
-    hand.beam.lookAt(this.v1);
-    hand.beam.scale.set(7 + Math.random() * 2, 7 + Math.random() * 2, distance);
-    hand.beamMaterial.opacity = 0.9;
-    hand.beamMaterial.color.copy(this.weaponColor);
+    // The proton beam: a layered, flowing beam instead of a line.
+    const index = this.hands.indexOf(hand);
+    this.laserUsed[index] = true;
+    hand.beam.visible = false;
+    this.handBeams[index].show(palm, dir, distance, 0.035, this.elapsed, Math.min(1, hand.armTime * 5));
     this.v3.copy(palm).addScaledVector(dir, distance);
     hand.glow.visible = true;
     hand.glow.position.copy(palm);
@@ -6913,6 +7059,8 @@ export class CombatSystem extends createSystem({
       angle = Math.atan2(this.sa.y, this.sa.x) - Math.PI;
     }
     this.blood.hit(angle, damage > 0 ? 1 : 0.5);
+    // Something hit us: rumble anything that can (controllers, a phone).
+    if (damage > 0) this.haptics.pulse(this.world.renderer.xr.getSession(), Math.min(1, 0.6 + damage * 0.2), 200);
     if (counted) this.run.hit(damage);
     else this.run.damage(damage);
     this.damageMaterial.opacity = 0.18;

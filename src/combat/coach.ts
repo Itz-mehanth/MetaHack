@@ -25,7 +25,10 @@ export interface Tip {
 
 /** How to fight with each hero, in the order a player needs it. */
 export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
-  arc: [{ gesture: 'palm', title: 'OPEN YOUR PALM', sub: 'Face it at an enemy. It fires on its own.' }],
+  arc: [
+    { gesture: 'palm', title: 'OPEN YOUR PALM', sub: 'Face it at an enemy. It fires on its own.' },
+    { gesture: 'palm', title: 'PALM TO CHEST, THEN PUSH OUT', sub: 'The arc reactor fires a huge beam that follows your hand.' },
+  ],
   talon: [
     { gesture: 'fist', title: 'MAKE A FIST', sub: 'Claws come out. Punch through enemies.' },
     { gesture: 'swing', title: 'SWING FAST', sub: 'A fast swing throws a slash wave.' },
@@ -75,6 +78,7 @@ export const SCREEN_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   arc: [
     { gesture: 'palm', title: 'TAP OR HOLD ON ENEMIES', sub: 'Your palm turns and fires where you point.' },
     { gesture: 'palm', title: 'KEEP HOLDING', sub: 'After a second both hands fire.' },
+    { gesture: 'palm', title: 'PRESS UNI-BEAM', sub: 'The reactor fires a giant beam where you point.' },
   ],
   talon: [
     { gesture: 'fist', title: 'TAP TO STRIKE', sub: 'Claws rake what you tap. Hold to keep slashing.' },
