@@ -85,7 +85,7 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
   },
   /** Airborne creature: no `ground`; circles the player, shoots, then dives. */
   flyer: { name: 'FLYER', hp: 3, radius: 0.42, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 1, score: 200 },
-  boss: { name: 'BOSS', hp: 40, radius: 0.6, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 3, score: 5000 },
+  boss: { name: 'BOSS', hp: 40, radius: 0.85, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 3, score: 5000 },
   orb: { name: 'SHOT', hp: 1, radius: 0.1, chargeDistance: 0.35, chargeTime: 0.05, weave: 0, damage: 1, score: 25 },
   /** Hostage pod: never moves or attacks; destroying it frees the civilian. */
   pod: { name: 'CAGE', hp: 3, radius: 0.24, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 0, score: 300 },

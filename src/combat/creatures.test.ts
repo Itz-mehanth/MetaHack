@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ROLE_FAMILY, ROLE_HEIGHT, ROLE_POOL, ROSTER, SPECIES, speciesById, speciesFor, speciesIn } from './creatures.js';
+import { BOSSES, ROLE_FAMILY, ROLE_HEIGHT, ROLE_POOL, ROSTER, SPECIES, speciesById, speciesFor, speciesIn } from './creatures.js';
 import { STAGES, WORLDS } from './progression.js';
 
 describe('creature roster', () => {
@@ -35,6 +35,15 @@ describe('creature roster', () => {
   it('puts flyers in every world and keeps species ids unique', () => {
     for (const world of WORLDS) expect(speciesFor(world.id, 'flyer'), world.id).not.toBe('');
     expect(new Set(SPECIES.map((s) => s.id)).size).toBe(SPECIES.length);
+  });
+
+  it('gives every region a flying creature boss', () => {
+    for (const world of WORLDS) {
+      const boss = BOSSES[world.id];
+      expect(boss, world.id).toBeDefined();
+      expect(speciesById(boss.species)?.family, world.id).toBe('flying');
+      expect(boss.height).toBeGreaterThan(2);
+    }
   });
 
   it('keeps flyers out of the first stage of the first world', () => {

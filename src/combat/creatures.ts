@@ -48,6 +48,11 @@ export const SPECIES: readonly Species[] = [
   { id: 'hywirl', name: 'HYWIRL', family: 'flying', scale: 1, blood: '#C58AFF' },
   { id: 'armabee', name: 'STINGER', family: 'flying', scale: 1, blood: '#FFD23F' },
   { id: 'dragon', name: 'DRAKE', family: 'flying', scale: 1.15, blood: '#FF6A1A' },
+  { id: 'dragonevo', name: 'WYRM', family: 'flying', scale: 1, blood: '#FF6A1A' },
+  { id: 'alpakingevo', name: 'SKY LLAMA KING', family: 'flying', scale: 1, blood: '#FFB0E0' },
+  { id: 'armabeeevo', name: 'HIVE QUEEN', family: 'flying', scale: 1, blood: '#FFD23F' },
+  { id: 'glubevo', name: 'DEEP GLUB', family: 'flying', scale: 1, blood: '#6BD5FF' },
+  { id: 'golelingevo', name: 'GOLEM LORD', family: 'flying', scale: 1, blood: '#FFE58A' },
   { id: 'glub', name: 'GLUB', family: 'flying', scale: 1, blood: '#6BD5FF' },
   { id: 'goleling', name: 'GOLEM SPRITE', family: 'flying', scale: 1, blood: '#FFE58A' },
   { id: 'alpaking', name: 'SKY LLAMA', family: 'flying', scale: 1.05, blood: '#FFB0E0' },
@@ -95,6 +100,19 @@ export const ROSTER: Readonly<Record<string, Partial<Record<EnemyKind, string>>>
   'moon-temple': { blade: 'tribal', swarmer: 'pinkblob', armored: 'mushking', flyer: 'goleling' },
   'sky-ruins': { drone: 'alien', armored: 'bluedemon', titan: 'dino', flyer: 'alpaking' },
   'iron-bastion': { armored: 'orcskull', flyer: 'ghostskull' },
+};
+
+/** Each region's boss: a giant flying creature (species, height in metres). */
+export const BOSSES: Readonly<Record<string, { readonly species: string; readonly height: number }>> = {
+  'neon-grid': { species: 'dragon', height: 2.6 },
+  'ember-foundry': { species: 'dragonevo', height: 3 },
+  'storm-peak': { species: 'squidle', height: 2.6 },
+  'frost-spire': { species: 'glubevo', height: 2.8 },
+  'void-rift': { species: 'ghost', height: 3 },
+  'scrap-wastes': { species: 'armabeeevo', height: 2.8 },
+  'moon-temple': { species: 'golelingevo', height: 2.8 },
+  'sky-ruins': { species: 'alpakingevo', height: 3 },
+  'iron-bastion': { species: 'hywirl', height: 2.8 },
 };
 
 /** The species fighting as `kind` in `worldId` ('' for the humanoid aliens). */

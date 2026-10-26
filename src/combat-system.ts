@@ -70,7 +70,7 @@ import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isWe
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { CreatureModel } from './combat/creature.js';
-import { ROLE_HEIGHT, ROLE_POOL, ROSTER, speciesById, speciesFor } from './combat/creatures.js';
+import { BOSSES, ROLE_HEIGHT, ROLE_POOL, ROSTER, speciesById, speciesFor } from './combat/creatures.js';
 import { HoloMap } from './combat/holomap.js';
 import { GameMenus, wrap } from './combat/menus.js';
 import { ENEMIES, type EnemyKind } from './combat/missions.js';
@@ -1379,7 +1379,34 @@ export class CombatSystem extends createSystem({
       }
       jobs.push(job);
     }
+    const boss = BOSSES[worldId];
+    if (boss) {
+      const key = `boss:${boss.species}`;
+      let job = this.creaturePools.get(key);
+      if (job == null) {
+        job = this.buildBossCreature(worldId, boss.species, boss.height).catch((error) => {
+          console.warn(`boss ${boss.species} failed to load`, error);
+        });
+        this.creaturePools.set(key, job);
+      }
+      jobs.push(job);
+    }
     return Promise.all(jobs).then(() => undefined);
+  }
+
+  /** The region boss as a giant creature (the mech stays as the fallback). */
+  private async buildBossCreature(worldId: string, id: string, height: number): Promise<void> {
+    const gltf = await AssetManager.loadGLTFById(`creature-${id}`);
+    const creature = new CreatureModel(gltf.scene, gltf.animations, height, null);
+    creature.reset();
+    const object = new Group();
+    object.name = `BossCreature-${worldId}`;
+    object.add(creature.group);
+    object.visible = false;
+    object.rotation.order = 'YXZ';
+    this.root.add(object);
+    const drone = this.makeDrone(object, 'boss', new RingGeometry(0.17, 0.26, 48), 2000 + this.drones.length, { species: id, creature });
+    drone.world = worldId;
   }
 
   private async buildCreaturePool(kind: EnemyKind, id: string): Promise<void> {
@@ -6395,11 +6422,12 @@ export class CombatSystem extends createSystem({
   /** The region's lieutenant tears through a giant portal ahead. */
   private spawnBoss(): Drone | null {
     const region = this.run.stage.world.id;
-    const boss = this.drones.find((d) => d.kind === 'boss' && d.world === region);
+    const boss = this.drones.find((d) => d.kind === 'boss' && d.world === region && d.creature) ?? this.drones.find((d) => d.kind === 'boss' && d.world === region);
     if (boss == null) {
       this.run.kill('boss');
       return null;
     }
+    boss.creature?.reset();
     const oblivax = region === 'oblivion';
     const scale = oblivax ? (this.script === 'finale' ? 3.2 : 1.5) : 1 + Math.min(5, REGIONS.indexOf(region)) * 0.2;
     boss.counted = true;
@@ -6443,6 +6471,8 @@ export class CombatSystem extends createSystem({
     object.position.y += Math.sin(time * 1.3) * 0.25;
     object.lookAt(this.head);
     boss.eye.scale.setScalar(1 + Math.sin(time * 6) * 0.15);
+    const roar = boss.creature;
+    if (roar && !(roar.playing === 'attack' && !roar.finished)) roar.play('walk', 1);
     if (this.bossLocked) return;
     const fraction = boss.hp / boss.maxHp;
     const phase = fraction > 0.66 ? 1 : fraction > 0.33 ? 2 : 3;
@@ -6452,6 +6482,7 @@ export class CombatSystem extends createSystem({
       const taunt = taunts[(phase - 1) % Math.max(1, taunts.length)] ?? 'ENOUGH!';
       this.taunt = taunt;
       this.comic.pop('RAAAGH!', this.v2.copy(object.position).setY(object.position.y + 0.9), ENEMY_COLOR.boss, 0.8);
+      boss.creature?.play('attack', 0.7, true, 0.1);
       this.flashes.spawn(object.position, ENEMY_COLOR.boss, 0.5, 2.5, 0.6);
       const minion = REGIONS.indexOf(boss.world) === 1 ? 'swarmer' : 'drone';
       for (let i = 0; i < phase + 1; i += 1) this.spawnDrone(minion, 0.9 + phase * 0.2, false);
@@ -6459,6 +6490,7 @@ export class CombatSystem extends createSystem({
     boss.attackTimer -= dt;
     if (boss.attackTimer <= 0) {
       boss.attackTimer = 3.4 - phase * 0.7;
+      boss.creature?.play('attack', 1.2, true, 0.1);
       for (let i = 0; i < phase + 1; i += 1) {
         this.v1.copy(object.position);
         this.v1.x += (Math.random() - 0.5) * 0.9;
