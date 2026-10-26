@@ -755,6 +755,7 @@ export class CombatSystem extends createSystem({
   private flat = true;
   private frameDt = 0;
   private webShots!: WebShots;
+  private senseAt = -10;
   /** Creature pools being built or built, by `kind:species`. */
   private readonly creaturePools = new Map<string, Promise<void>>();
   private readonly bloodColors = new Map<string, Color>();
@@ -1485,6 +1486,7 @@ export class CombatSystem extends createSystem({
     const slice = this.hitStyle === 'slice';
     this.bleed(slice ? this.hitPoint : object.position, this.hitDir, slice ? 44 : big ? 36 : 24, tint);
     this.flashes.spawn(object.position, tint ?? ENEMY_COLOR[drone.kind], 0.1, big ? 1.4 : 0.8, 0.3);
+    this.particles.burst(object.position, tint ?? ENEMY_COLOR[drone.kind], big ? 90 : 36, 3, 0.6, this.v2);
     if (def.ground) this.pools.spill(drone.feet.x + drone.knock.x * 0.5, drone.feet.z + drone.knock.z * 0.5, big ? 1.5 : 0.9);
     if (slice) {
       this.sfx.splat();
@@ -1579,6 +1581,7 @@ export class CombatSystem extends createSystem({
           drone.meleeStage = 1;
           drone.melee = 0;
           this.sfx.creak();
+          this.spiderSense(object.position);
           creature?.play('attack', 0.8, true, 0.1);
         }
       }
@@ -2442,6 +2445,7 @@ export class CombatSystem extends createSystem({
     this.resetScript();
     this.pending = null;
     this.equipHero(hero);
+    if (!this.attract) this.heroSurge();
     // Each level is its own world, tearing through the room in MR.
     const look = isSagaStage(stage) ? WORLD_LOOKS.oblivion : lookFor(stage.id, stage.world.id);
     this.erasure.setLook(look);
@@ -2449,6 +2453,43 @@ export class CombatSystem extends createSystem({
     this.pools.clear();
     this.setTwist(isSagaStage(stage) ? 'none' : twistFor(stage.id));
     this.spawnPods(this.story?.hostages ?? 0);
+  }
+
+  /** The hero powers up as the level starts: a ring of energy, flashes either side and the name in comic type. */
+  private heroSurge(): void {
+    const def = HEROES.find((h) => h.id === this.hero);
+    if (def == null) return;
+    this.v1.copy(this.head).addScaledVector(this.forward, 1.1);
+    this.v1.y -= 0.1;
+    this.comic.pop(`${def.name} ONLINE!`, this.v1, this.accent, 0.7);
+    this.v3.set(-this.forward.z, 0, this.forward.x).normalize();
+    for (const side of [-1, 1]) {
+      this.v2.copy(this.head).addScaledVector(this.forward, 0.55).addScaledVector(this.v3, side * 0.3);
+      this.v2.y -= 0.35;
+      this.flashes.spawn(this.v2, this.accent, 0.1, 0.8, 0.5);
+      this.particles.burst(this.v2, this.accent, 40, 1.6, 0.6, this.v4);
+    }
+    if (this.shockwave) {
+      this.shockwave.position.copy(this.head).setY(this.head.y - 0.5);
+      this.shockwave.rotation.set(Math.PI / 2, 0, 0);
+      (this.shockwave.material as MeshBasicMaterial).color.copy(this.accent);
+      this.shockwave.visible = true;
+      this.shockwaveTime = 0;
+    }
+    this.sfx.swap();
+  }
+
+  /** WEAVER's spider-sense: a ping, a tingle and a flicker of slow motion as a strike winds up. */
+  private spiderSense(from: Vector3): void {
+    if (this.hero !== 'weaver' || !this.powersLive || this.elapsed - this.senseAt < 0.8) return;
+    if (from.distanceTo(this.head) > 4.5) return;
+    this.senseAt = this.elapsed;
+    this.sfx.ping();
+    this.v1.copy(this.head).addScaledVector(this.forward, 0.7);
+    this.v1.y += 0.25;
+    this.comic.pop('TINGLE!', this.v1, WHITE, 0.35);
+    this.flashes.spawn(from, WHITE, 0.1, 0.6, 0.25);
+    this.slowmo = Math.max(this.slowmo, 0.3);
   }
 
   /** Equips `hero` (also mid-stage): skin, wrist label, weapon, props, coach tips. */
@@ -7068,6 +7109,7 @@ export class CombatSystem extends createSystem({
         drone.meleeStage = 1;
         drone.melee = 0;
         this.sfx.creak();
+        this.spiderSense(drone.object.position);
         if (drone.creature) drone.creature.play('attack', drone.creature.duration('attack') / (windup + 0.35), true, 0.1);
       }
     } else if (drone.meleeStage === 1 && drone.melee >= windup) {

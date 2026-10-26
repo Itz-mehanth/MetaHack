@@ -33,6 +33,10 @@ export const SPECIES: readonly Species[] = [
   { id: 'cactoro', name: 'THORNBACK', family: 'big', scale: 1, blood: '#5DFF9E' },
   { id: 'tribal', name: 'MASKED', family: 'big', scale: 1, blood: '#FFB04A' },
   { id: 'ninja', name: 'SHADE', family: 'big', scale: 1, blood: '#9D8CFF' },
+  { id: 'george', name: 'JUGGERNAUT', family: 'big', scale: 1, blood: '#FFD23F' },
+  { id: 'leela', name: 'STRIDER', family: 'big', scale: 1, blood: '#3DF5FF' },
+  { id: 'mike', name: 'GUARD UNIT', family: 'big', scale: 1, blood: '#FFB04A' },
+  { id: 'stan', name: 'BREACHER', family: 'big', scale: 1, blood: '#FF5A3D' },
   { id: 'frog', name: 'LEAPER', family: 'big', scale: 0.9, blood: '#7CFF6B' },
   { id: 'monkroose', name: 'SCAVENGER', family: 'big', scale: 1, blood: '#FFB04A' },
   { id: 'spiky', name: 'SPIKER', family: 'blob', scale: 1.05, blood: '#7CFF6B' },
@@ -91,15 +95,15 @@ export const ROLE_POOL: Partial<Record<EnemyKind, number>> = { drone: 8, armored
  * original humanoid alien.
  */
 export const ROSTER: Readonly<Record<string, Partial<Record<EnemyKind, string>>>> = {
-  'neon-grid': { armored: 'alien', flyer: 'squidle' },
-  'ember-foundry': { swarmer: 'bloborc', blade: 'demon', armored: 'orcskull', flyer: 'dragon' },
+  'neon-grid': { drone: 'mike', armored: 'stan', titan: 'george', flyer: 'squidle' },
+  'ember-foundry': { swarmer: 'bloborc', blade: 'demon', armored: 'orc', titan: 'orcskull', flyer: 'dragon' },
   'storm-peak': { drone: 'ninja', titan: 'dino', flyer: 'ghost' },
-  'frost-spire': { swarmer: 'blobyeti', drone: 'tribal', armored: 'yeti', flyer: 'glub' },
+  'frost-spire': { swarmer: 'blobyeti', drone: 'tribal', armored: 'bluedemon', titan: 'yeti', flyer: 'glub' },
   'void-rift': { swarmer: 'spiky', blade: 'ninja', armored: 'bluedemon', titan: 'cactoro', flyer: 'hywirl' },
-  'scrap-wastes': { drone: 'monkroose', armored: 'orc', swarmer: 'greenblob', flyer: 'armabee' },
-  'moon-temple': { blade: 'tribal', swarmer: 'pinkblob', armored: 'mushking', flyer: 'goleling' },
+  'scrap-wastes': { drone: 'monkroose', armored: 'orc', swarmer: 'greenblob', titan: 'george', flyer: 'armabee' },
+  'moon-temple': { blade: 'tribal', swarmer: 'pinkblob', armored: 'orc', titan: 'mushking', flyer: 'goleling' },
   'sky-ruins': { drone: 'alien', armored: 'bluedemon', titan: 'dino', flyer: 'alpaking' },
-  'iron-bastion': { armored: 'orcskull', flyer: 'ghostskull' },
+  'iron-bastion': { drone: 'mike', blade: 'leela', armored: 'stan', titan: 'george', flyer: 'ghostskull' },
 };
 
 /** Each region's boss: a giant flying creature (species, height in metres). */
