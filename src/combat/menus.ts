@@ -452,7 +452,7 @@ export class GameMenus {
     );
     return {
       title: chapter.region,
-      subtitle: `${HEROES.find((h) => h.id === this.hero)!.name} vs ${chapter.villain.name}  |  Boss holds an ANCHOR (${anchorsRecovered(this.profile).length}/8 recovered)`,
+      subtitle: `${HEROES.find((h) => h.id === this.hero)!.name} vs ${chapter.villain.name}  |  Boss holds an ANCHOR (${anchorsRecovered(this.profile).length}/9 recovered)`,
       coins: this.profile.coins,
       accent,
       widgets,
@@ -593,9 +593,9 @@ export class GameMenus {
       });
     }
     const tier = weaponTier(p, hero);
+    widgets.push({ id: 'tier', kind: 'text', x: 830, y: 166, w: 380, h: 40, label: `${HEROES.find((h) => h.id === hero)!.name}  TIER ${tier}/5`, size: 34, color: accent });
     return {
       title: 'ARMORY',
-      subtitle: `${HEROES.find((h) => h.id === hero)!.name} - weapon tier ${tier}/5 - every 3 upgrades powers up its look`,
       coins: p.coins,
       accent,
       widgets,

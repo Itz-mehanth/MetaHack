@@ -5,6 +5,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   PlaneGeometry,
+  ShaderMaterial,
   SRGBColorSpace,
   Vector3,
 } from '@iwsdk/core';
@@ -17,6 +18,56 @@ const WIDTH_M = 0.78;
 const HEIGHT_M = WIDTH_M * (PANEL_PX_H / PANEL_PX_W);
 const FONT = "'Orbitron', 'Rajdhani', system-ui, sans-serif";
 const BODY = "'Rajdhani', system-ui, sans-serif";
+const COMIC = "'Bangers', 'Impact', sans-serif";
+
+function rgb(hex: string): [number, number, number] {
+  const h = hex.startsWith('#') ? hex.slice(1) : hex;
+  const full = h.length === 3 ? h.replace(/./g, (x) => x + x) : h.slice(0, 6);
+  const n = parseInt(full, 16);
+  return Number.isNaN(n) ? [255, 255, 255] : [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** `a` blended toward `b` by `t`, as an rgba() string with `alpha`. */
+function mix(a: string, b: string, t: number, alpha: number): string {
+  const A = rgb(a);
+  const B = rgb(b);
+  const ch = (k: number) => Math.round(A[k] + (B[k] - A[k]) * t);
+  return `rgba(${ch(0)}, ${ch(1)}, ${ch(2)}, ${alpha})`;
+}
+
+/** Rectangle path with its corners cut at 45 degrees. */
+function chamfer(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, cut: number): void {
+  c.beginPath();
+  c.moveTo(x + cut, y);
+  c.lineTo(x + w - cut, y);
+  c.lineTo(x + w, y + cut);
+  c.lineTo(x + w, y + h - cut);
+  c.lineTo(x + w - cut, y + h);
+  c.lineTo(x + cut, y + h);
+  c.lineTo(x, y + h - cut);
+  c.lineTo(x, y + cut);
+  c.closePath();
+}
+
+/** Parallelogram path leaning right by `skew` pixels. */
+function slant(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, skew: number): void {
+  c.beginPath();
+  c.moveTo(x + skew, y);
+  c.lineTo(x + w, y);
+  c.lineTo(x + w - skew, y + h);
+  c.lineTo(x, y + h);
+  c.closePath();
+}
+
+function hexagon(c: CanvasRenderingContext2D, x: number, y: number, r: number): void {
+  c.beginPath();
+  for (let i = 0; i < 6; i += 1) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    if (i === 0) c.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    else c.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+  }
+  c.closePath();
+}
 
 export type WidgetKind = 'button' | 'tile' | 'slider' | 'text' | 'portrait';
 
@@ -83,6 +134,13 @@ export class Panel {
   private dirty = true;
   private readonly local = new Vector3();
   private readonly flat = new Vector3();
+  /** Cached backdrops per accent colour. */
+  private readonly backdrops = new Map<string, HTMLCanvasElement>();
+  /** Animated hologram layer: a sweeping scan band and a pulsing edge. */
+  private readonly holo: ShaderMaterial;
+  private time = 0;
+  /** 0..1 unfold animation when the panel opens. */
+  private open = 1;
   private readonly event: PanelEvent = { id: '', point: new Vector3() };
 
   constructor() {
@@ -109,7 +167,43 @@ export class Panel {
     });
     const halo = new Mesh(new PlaneGeometry(WIDTH_M * 1.06, HEIGHT_M * 1.08), this.glow);
     halo.position.z = -0.003;
-    this.group.add(halo, this.face);
+    this.holo = new ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uOpen: { value: 1 }, uColor: { value: this.glow.color } },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform float uOpen;
+        uniform vec3 uColor;
+        varying vec2 vUv;
+        void main() {
+          // A bright band sweeping down every few seconds.
+          float s = fract(uTime * 0.28);
+          float band = exp(-pow((1.0 - vUv.y - s) * 18.0, 2.0)) * 0.22;
+          // Edge glow, breathing.
+          float edge = min(min(vUv.x, 1.0 - vUv.x) * 1.6, min(vUv.y, 1.0 - vUv.y));
+          float rim = smoothstep(0.04, 0.0, edge) * (0.18 + 0.08 * sin(uTime * 3.0));
+          // Fine moving interference lines.
+          float lines = step(0.5, fract(vUv.y * 240.0 - uTime * 6.0)) * 0.025;
+          // Opening: a white-hot unfold.
+          float flash = (1.0 - uOpen) * 0.55;
+          gl_FragColor = vec4(uColor * (band + rim + lines) + vec3(flash), 1.0);
+        }
+      `,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const holoMesh = new Mesh(new PlaneGeometry(WIDTH_M, HEIGHT_M), this.holo);
+    holoMesh.position.z = 0.002;
+    holoMesh.renderOrder = 26;
+    this.group.add(halo, this.face, holoMesh);
     this.group.visible = false;
     void document.fonts?.ready.then(() => {
       this.dirty = true;
@@ -141,6 +235,7 @@ export class Panel {
   }
 
   show(): void {
+    if (!this.visible) this.open = 0;
     this.visible = true;
     this.group.visible = true;
     this.armed = false;
@@ -171,6 +266,13 @@ export class Panel {
   /** Handles fingertip pokes; returns a press event or null. */
   update(dt: number, tips: readonly Vector3[]): PanelEvent | null {
     if (!this.visible) return null;
+    // Hologram life: the scan band, and the unfold when opening.
+    this.time += dt;
+    this.open = Math.min(1, this.open + dt * 4.5);
+    const unfold = 1 - Math.pow(1 - this.open, 3);
+    this.group.scale.set(0.92 + 0.08 * unfold, 0.04 + 0.96 * unfold, 1);
+    this.holo.uniforms.uTime.value = this.time;
+    this.holo.uniforms.uOpen.value = this.open;
     this.flash = Math.max(0, this.flash - dt * 4);
     if (this.flash === 0 && this.flashId) {
       this.flashId = '';
@@ -239,40 +341,116 @@ export class Panel {
 
   // ---------------------------------------------------------------- drawing
 
+  /**
+   * The static backdrop for an accent colour, cached: chamfered glass with
+   * an accent-tinted gradient, comic halftone dots, action speed lines,
+   * scanlines, a double neon frame with corner brackets and measuring ticks.
+   */
+  private backdrop(accent: string): HTMLCanvasElement {
+    const cached = this.backdrops.get(accent);
+    if (cached) return cached;
+    const canvas = document.createElement('canvas');
+    canvas.width = PANEL_PX_W;
+    canvas.height = PANEL_PX_H;
+    const c = canvas.getContext('2d')!;
+    const W = PANEL_PX_W;
+    const H = PANEL_PX_H;
+    const CUT = 56;
+    const shape = (inset: number) => chamfer(c, inset, inset, W - inset * 2, H - inset * 2, CUT - inset * 0.4);
+    // Glass: deep night with the accent bleeding in from the top.
+    shape(10);
+    const bg = c.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, mix(accent, '#0A0420', 0.78, 0.94));
+    bg.addColorStop(0.35, 'rgba(10, 4, 28, 0.93)');
+    bg.addColorStop(1, 'rgba(2, 1, 8, 0.95)');
+    c.fillStyle = bg;
+    c.fill();
+    c.save();
+    shape(10);
+    c.clip();
+    // Action speed lines bursting from the top-left corner.
+    c.strokeStyle = mix(accent, '#FFFFFF', 0.4, 0.07);
+    for (let i = 0; i < 44; i += 1) {
+      const a = (i / 44) * (Math.PI / 2) + Math.sin(i * 12.9898) * 0.02;
+      c.lineWidth = 2 + (i % 3) * 2;
+      c.beginPath();
+      c.moveTo(-40, -40);
+      c.lineTo(-40 + Math.cos(a) * 2200, -40 + Math.sin(a) * 2200);
+      c.stroke();
+    }
+    // Comic halftone dots, densest in the bottom-right corner.
+    c.fillStyle = mix(accent, '#FFFFFF', 0.2, 0.16);
+    for (let y = 18; y < H; y += 22) {
+      for (let x = 18 + ((y / 22) % 2) * 11; x < W; x += 22) {
+        const t = Math.max(0, (x / W + y / H - 1.05) / 0.95);
+        if (t <= 0) continue;
+        c.beginPath();
+        c.arc(x, y, 1 + t * 7, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+    // Scanlines.
+    c.fillStyle = 'rgba(0, 0, 0, 0.18)';
+    for (let y = 0; y < H; y += 6) c.fillRect(0, y, W, 2);
+    // A soft accent glow pooled under the title.
+    const pool = c.createRadialGradient(360, 90, 0, 360, 90, 520);
+    pool.addColorStop(0, mix(accent, '#FFFFFF', 0, 0.22));
+    pool.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = pool;
+    c.fillRect(0, 0, W, 400);
+    c.restore();
+    // Frame: outer neon line, inner hairline.
+    c.save();
+    shape(10);
+    c.lineWidth = 6;
+    c.strokeStyle = accent;
+    c.shadowColor = accent;
+    c.shadowBlur = 34;
+    c.stroke();
+    c.restore();
+    shape(26);
+    c.lineWidth = 2;
+    c.strokeStyle = mix(accent, '#FFFFFF', 0.5, 0.35);
+    c.stroke();
+    // Corner brackets.
+    c.save();
+    c.strokeStyle = '#FFFFFF';
+    c.lineWidth = 6;
+    c.shadowColor = accent;
+    c.shadowBlur = 18;
+    const L = 70;
+    for (const [x, y, sx, sy] of [
+      [10, 10, 1, 1],
+      [W - 10, 10, -1, 1],
+      [10, H - 10, 1, -1],
+      [W - 10, H - 10, -1, -1],
+    ] as const) {
+      c.beginPath();
+      c.moveTo(x + sx * (CUT + L), y);
+      c.lineTo(x + sx * CUT, y);
+      c.lineTo(x, y + sy * CUT);
+      c.lineTo(x, y + sy * (CUT + L));
+      c.stroke();
+    }
+    c.restore();
+    // Measuring ticks along the bottom edge and a system tag.
+    c.fillStyle = mix(accent, '#FFFFFF', 0.4, 0.5);
+    for (let x = 140; x < W - 140; x += 24) c.fillRect(x, H - 34, 2, x % 120 === 20 ? 14 : 7);
+    c.font = `700 18px ${FONT}`;
+    c.textAlign = 'right';
+    c.textBaseline = 'middle';
+    c.fillText('SURGE//OS  v2.6  HOLO-LINK', W - 90, H - 54);
+    this.backdrops.set(accent, canvas);
+    return canvas;
+  }
+
   private draw(): void {
     this.dirty = false;
     const c = this.ctx;
     const { accent, title, subtitle, coins, widgets } = this.content;
     c.clearRect(0, 0, PANEL_PX_W, PANEL_PX_H);
-
-    c.save();
-    c.beginPath();
-    c.roundRect(8, 8, PANEL_PX_W - 16, PANEL_PX_H - 16, 48);
-    const bg = c.createLinearGradient(0, 0, 0, PANEL_PX_H);
-    bg.addColorStop(0, 'rgba(14, 6, 34, 0.9)');
-    bg.addColorStop(1, 'rgba(3, 1, 10, 0.92)');
-    c.fillStyle = bg;
-    c.fill();
-    c.lineWidth = 5;
-    c.strokeStyle = accent;
-    c.shadowColor = accent;
-    c.shadowBlur = 30;
-    c.stroke();
-    c.restore();
-
-    c.textBaseline = 'middle';
-    c.textAlign = 'left';
-    c.fillStyle = '#FFFFFF';
-    c.shadowColor = accent;
-    c.shadowBlur = 24;
-    c.font = `900 72px ${FONT}`;
-    c.fillText(title, 64, 92);
-    c.shadowBlur = 0;
-    if (subtitle) {
-      c.fillStyle = accent;
-      c.font = `600 34px ${BODY}`;
-      c.fillText(subtitle, 68, 152);
-    }
+    c.drawImage(this.backdrop(accent), 0, 0);
+    this.drawTitle(title, subtitle, accent);
     if (coins != null) this.drawCoins(coins);
 
     for (const w of widgets) {
@@ -299,22 +477,73 @@ export class Panel {
     this.texture.needsUpdate = true;
   }
 
+  /** Comic title: inked letters with a colour-split shadow over a slanted caption banner. */
+  private drawTitle(title: string, subtitle: string | undefined, accent: string): void {
+    const c = this.ctx;
+    c.save();
+    c.font = `86px ${COMIC}`;
+    const width = Math.min(1000, c.measureText(title).width);
+    // Caption banner behind the title.
+    slant(c, 44, 46, width + 110, 92, 26);
+    const band = c.createLinearGradient(44, 0, width + 160, 0);
+    band.addColorStop(0, mix(accent, '#000000', 0.15, 0.85));
+    band.addColorStop(1, mix(accent, '#000000', 0.6, 0));
+    c.fillStyle = band;
+    c.fill();
+    c.textBaseline = 'middle';
+    c.textAlign = 'left';
+    c.lineJoin = 'round';
+    // Colour-split shadow, then ink, then the white letters.
+    c.fillStyle = 'rgba(255, 45, 154, 0.85)';
+    c.fillText(title, 74 + 5, 96 + 4, 1000);
+    c.fillStyle = 'rgba(61, 245, 255, 0.85)';
+    c.fillText(title, 74 - 4, 96 - 2, 1000);
+    c.lineWidth = 12;
+    c.strokeStyle = '#06020F';
+    c.strokeText(title, 74, 96, 1000);
+    const fill = c.createLinearGradient(0, 60, 0, 130);
+    fill.addColorStop(0, '#FFFFFF');
+    fill.addColorStop(1, mix(accent, '#FFFFFF', 0.55, 1));
+    c.fillStyle = fill;
+    c.fillText(title, 74, 96, 1000);
+    if (subtitle) {
+      c.font = `600 32px ${BODY}`;
+      const sw = Math.min(1090, c.measureText(subtitle).width + 40);
+      c.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      slant(c, 60, 150, sw, 44, 12);
+      c.fill();
+      c.fillStyle = mix(accent, '#FFFFFF', 0.35, 1);
+      c.fillText(subtitle, 80, 173, 1060);
+    }
+    c.restore();
+  }
+
   private drawCoins(coins: number): void {
     const c = this.ctx;
     const text = coins.toLocaleString('en-US');
-    c.font = `900 48px ${FONT}`;
+    c.font = `900 44px ${FONT}`;
     const width = c.measureText(text).width;
-    const x = PANEL_PX_W - 70 - width;
-    if (!drawIcon(c, 'coins', x - 42, 92, 64, '#FFD23F', 18)) {
+    const x = PANEL_PX_W - 80 - width;
+    // A dark pill with the coin icon.
+    c.save();
+    c.beginPath();
+    c.roundRect(x - 84, 58, width + 120, 72, 36);
+    c.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    c.fill();
+    c.lineWidth = 3;
+    c.strokeStyle = 'rgba(255, 210, 63, 0.7)';
+    c.stroke();
+    c.restore();
+    if (!drawIcon(c, 'coins', x - 44, 94, 54, '#FFD23F', 16)) {
       c.beginPath();
-      c.arc(x - 40, 92, 24, 0, Math.PI * 2);
+      c.arc(x - 44, 94, 22, 0, Math.PI * 2);
       c.fillStyle = '#FFD23F';
       c.fill();
     }
     c.textAlign = 'left';
+    c.textBaseline = 'middle';
     c.fillStyle = '#FFE58A';
-    c.font = `900 48px ${FONT}`;
-    c.fillText(text, x, 94);
+    c.fillText(text, x, 96);
   }
 
   private roundBox(w: Widget, radius: number, fill: string, stroke: string | null, glow: number): void {
@@ -334,67 +563,183 @@ export class Panel {
     c.restore();
   }
 
+  /**
+   * Slanted comic button: an inked offset shadow, a glass or hot-gradient
+   * face, a glowing edge, an icon in a round badge and chevrons on the main
+   * action. Hover brightens it; a press flashes white.
+   */
   private drawButton(w: Widget, hover: boolean, flash: number, accent: string): void {
     const color = w.color ?? accent;
     const c = this.ctx;
-    const primary = w.selected;
-    const fill = w.disabled
-      ? 'rgba(255,255,255,0.05)'
-      : primary
-        ? color
-        : `rgba(255,255,255,${0.06 + (hover ? 0.08 : 0) + flash * 0.3})`;
-    this.roundBox(w, Math.min(36, w.h / 2), fill, w.disabled ? null : color, hover ? 30 : 12);
-    if (w.icon) {
-      const size = Math.min(w.h * 0.62, 110);
-      const tint = w.disabled ? 'rgba(255,255,255,0.35)' : primary ? '#06020F' : color;
-      drawIcon(c, w.icon, w.x + size * 0.5 + 26, w.y + w.h / 2, size, tint, primary ? 0 : 14);
+    const primary = w.selected && !w.disabled;
+    const skew = Math.min(22, w.h * 0.22);
+    c.save();
+    // Ink shadow, offset like a printed panel.
+    if (!w.disabled) {
+      slant(c, w.x + 8, w.y + 8, w.w, w.h, skew);
+      c.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      c.fill();
     }
-    c.textAlign = 'center';
-    c.fillStyle = w.disabled ? 'rgba(255,255,255,0.35)' : primary ? '#06020F' : '#FFFFFF';
-    c.font = `900 ${w.size ?? 40}px ${FONT}`;
-    const cy = w.y + w.h / 2;
-    if (w.sub) {
-      c.fillText(w.label, w.x + w.w / 2, cy - 18);
-      c.font = `600 28px ${BODY}`;
-      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.3)' : primary ? '#06020F' : 'rgba(233,252,255,0.8)';
-      c.fillText(w.sub, w.x + w.w / 2, cy + 24);
+    slant(c, w.x, w.y, w.w, w.h, skew);
+    if (w.disabled) c.fillStyle = 'rgba(255, 255, 255, 0.04)';
+    else if (primary) {
+      const g = c.createLinearGradient(w.x, w.y, w.x, w.y + w.h);
+      g.addColorStop(0, mix(color, '#FFFFFF', 0.35, 1));
+      g.addColorStop(0.55, color);
+      g.addColorStop(1, mix(color, '#000000', 0.35, 1));
+      c.fillStyle = g;
     } else {
-      c.fillText(w.label, w.x + w.w / 2, cy + 2);
+      const g = c.createLinearGradient(w.x, w.y, w.x, w.y + w.h);
+      g.addColorStop(0, `rgba(255, 255, 255, ${0.1 + (hover ? 0.1 : 0)})`);
+      g.addColorStop(1, `rgba(255, 255, 255, ${0.02 + (hover ? 0.05 : 0)})`);
+      c.fillStyle = g;
+    }
+    c.fill();
+    if (flash > 0) {
+      c.fillStyle = `rgba(255, 255, 255, ${flash * 0.6})`;
+      c.fill();
+    }
+    c.lineWidth = primary ? 5 : 3;
+    c.strokeStyle = w.disabled ? 'rgba(255, 255, 255, 0.15)' : primary ? '#06020F' : color;
+    c.shadowColor = color;
+    c.shadowBlur = w.disabled ? 0 : hover ? 34 : primary ? 22 : 10;
+    c.stroke();
+    c.restore();
+    // Glossy top highlight.
+    if (!w.disabled) {
+      c.save();
+      slant(c, w.x + skew * 0.4, w.y + 4, w.w - skew * 0.8, Math.max(6, w.h * 0.18), skew * 0.2);
+      c.fillStyle = `rgba(255, 255, 255, ${primary ? 0.35 : 0.08})`;
+      c.fill();
+      c.restore();
+    }
+    const ink = w.disabled ? 'rgba(255,255,255,0.35)' : primary ? '#06020F' : '#FFFFFF';
+    let left = w.x + skew;
+    if (w.icon) {
+      const size = Math.min(w.h * 0.58, 104);
+      const bx = w.x + skew * 0.5 + size * 0.5 + 18;
+      const by = w.y + w.h / 2;
+      c.save();
+      c.beginPath();
+      c.arc(bx, by, size * 0.62, 0, Math.PI * 2);
+      c.fillStyle = primary ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.35)';
+      c.fill();
+      c.lineWidth = 3;
+      c.strokeStyle = w.disabled ? 'rgba(255,255,255,0.2)' : primary ? 'rgba(0,0,0,0.5)' : color;
+      c.stroke();
+      c.restore();
+      drawIcon(c, w.icon, bx, by, size * 0.86, w.disabled ? 'rgba(255,255,255,0.35)' : primary ? '#06020F' : color, primary ? 0 : 14);
+      left = bx + size * 0.62;
+    }
+    // Chevrons on the main action.
+    if (primary && w.w > 360) {
+      c.save();
+      c.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      for (let k = 0; k < 3; k += 1) {
+        const x = w.x + w.w - skew - 70 + k * 20;
+        const y = w.y + w.h / 2;
+        c.beginPath();
+        c.moveTo(x, y - 18);
+        c.lineTo(x + 14, y);
+        c.lineTo(x, y + 18);
+        c.lineTo(x + 7, y);
+        c.closePath();
+        c.fill();
+      }
+      c.restore();
+    }
+    const right = primary && w.w > 360 ? w.x + w.w - skew - 80 : w.x + w.w - skew;
+    const cx = (left + right) / 2;
+    const cy = w.y + w.h / 2;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = ink;
+    c.font = `900 ${w.size ?? 40}px ${FONT}`;
+    const maxWidth = Math.max(40, right - left - 16);
+    if (w.sub) {
+      c.fillText(w.label, cx, cy - 18, maxWidth);
+      c.font = `700 27px ${BODY}`;
+      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.3)' : primary ? 'rgba(6,2,15,0.8)' : mix(color, '#FFFFFF', 0.55, 0.9);
+      c.fillText(w.sub, cx, cy + 25, maxWidth);
+    } else {
+      c.fillText(w.label, cx, cy + 2, maxWidth);
     }
   }
 
+  /** Angled card: colour band, icon in a glowing hex badge, title, chips, ribbon badge. */
   private drawTile(w: Widget, hover: boolean, flash: number, accent: string): void {
-    const color = w.color ?? accent;
+    const color = w.disabled ? '#5A5A6A' : w.color ?? accent;
     const c = this.ctx;
-    const fill = w.selected ? 'rgba(255,255,255,0.14)' : `rgba(255,255,255,${0.04 + (hover ? 0.07 : 0) + flash * 0.3})`;
-    this.roundBox(w, 28, fill, w.disabled ? 'rgba(255,255,255,0.18)' : color, hover || w.selected ? 34 : 10);
-    c.textAlign = 'center';
-    const cx = w.x + w.w / 2;
-    let y = w.y + 56;
-    if (w.icon) {
-      const size = Math.min(130, w.h * 0.26);
-      drawIcon(c, w.icon, cx, w.y + 24 + size / 2, size, w.disabled ? 'rgba(255,255,255,0.3)' : color, 26);
-      y += size + 4;
+    const cut = 34;
+    c.save();
+    chamfer(c, w.x + 8, w.y + 10, w.w, w.h, cut);
+    c.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    c.fill();
+    chamfer(c, w.x, w.y, w.w, w.h, cut);
+    const g = c.createLinearGradient(0, w.y, 0, w.y + w.h);
+    g.addColorStop(0, mix(color, '#000000', 0.45, w.selected ? 0.55 : 0.32));
+    g.addColorStop(0.45, `rgba(12, 6, 30, ${0.82})`);
+    g.addColorStop(1, 'rgba(4, 2, 12, 0.9)');
+    c.fillStyle = g;
+    c.fill();
+    if (hover || flash > 0) {
+      c.fillStyle = `rgba(255, 255, 255, ${(hover ? 0.06 : 0) + flash * 0.4})`;
+      c.fill();
     }
-    c.fillStyle = w.disabled ? 'rgba(255,255,255,0.45)' : '#FFFFFF';
+    c.lineWidth = w.selected ? 6 : 3;
+    c.strokeStyle = color;
     c.shadowColor = color;
-    c.shadowBlur = w.disabled ? 0 : 16;
-    c.font = `900 ${w.size ?? 42}px ${FONT}`;
-    c.fillText(w.label, cx, y);
-    c.shadowBlur = 0;
+    c.shadowBlur = hover || w.selected ? 34 : 10;
+    c.stroke();
+    c.restore();
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const cx = w.x + w.w / 2;
+    let y = w.y + 60;
+    if (w.icon) {
+      const size = Math.min(120, w.h * 0.24);
+      const iy = w.y + 30 + size / 2;
+      c.save();
+      hexagon(c, cx, iy, size * 0.68);
+      c.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      c.fill();
+      c.lineWidth = 4;
+      c.strokeStyle = color;
+      c.shadowColor = color;
+      c.shadowBlur = 24;
+      c.stroke();
+      c.restore();
+      drawIcon(c, w.icon, cx, iy, size * 0.8, w.disabled ? 'rgba(255,255,255,0.35)' : color, 22);
+      y = iy + size * 0.68 + 44;
+    }
+    c.save();
+    c.font = `${(w.size ?? 42) + 6}px ${COMIC}`;
+    c.lineJoin = 'round';
+    c.lineWidth = 9;
+    c.strokeStyle = '#06020F';
+    c.strokeText(w.label, cx, y, w.w - 40);
+    c.fillStyle = w.disabled ? 'rgba(255,255,255,0.5)' : '#FFFFFF';
+    c.fillText(w.label, cx, y, w.w - 40);
+    c.restore();
     if (w.sub) {
-      y += 52;
-      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.35)' : color;
-      c.font = `700 30px ${FONT}`;
-      c.fillText(w.sub, cx, y);
+      y += 54;
+      c.font = `800 26px ${FONT}`;
+      const sw = Math.min(w.w - 40, c.measureText(w.sub).width + 36);
+      c.save();
+      c.beginPath();
+      c.roundRect(cx - sw / 2, y - 22, sw, 44, 22);
+      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.08)' : mix(color, '#000000', 0.2, 0.9);
+      c.fill();
+      c.restore();
+      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.45)' : '#06020F';
+      c.fillText(w.sub, cx, y + 1, w.w - 60);
     }
     if (w.detail) {
-      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.3)' : 'rgba(233,252,255,0.78)';
+      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.3)' : 'rgba(233,252,255,0.82)';
       c.font = `600 28px ${BODY}`;
-      const lines = w.detail.split('\n');
-      for (const line of lines) {
+      for (const line of w.detail.split('\n')) {
         y += 40;
-        c.fillText(line, cx, y);
+        c.fillText(line, cx, y + 6, w.w - 30);
       }
     }
     if (w.stars != null) {
@@ -405,45 +750,61 @@ export class Panel {
       }
     }
     if (w.badge) {
-      c.font = `900 28px ${FONT}`;
-      const bw = c.measureText(w.badge).width + 40;
-      const bx = cx - bw / 2;
-      const by = w.y + w.h - 54;
+      // Ribbon across the top-right corner.
       c.save();
-      c.beginPath();
-      c.roundRect(bx, by, bw, 40, 20);
-      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.1)' : color;
-      c.fill();
+      c.translate(w.x + w.w - 58, w.y + 58);
+      c.rotate(Math.PI / 4);
+      c.fillStyle = w.disabled ? '#3A3A48' : color;
+      c.fillRect(-110, -20, 220, 40);
+      c.fillStyle = '#06020F';
+      c.font = `900 22px ${FONT}`;
+      c.fillText(w.badge, 0, 1, 180);
       c.restore();
-      c.fillStyle = w.disabled ? 'rgba(255,255,255,0.6)' : '#06020F';
-      c.fillText(w.badge, cx, by + 21);
     }
   }
 
+  /** Segmented energy bar with a diamond knob. */
   private drawSlider(w: Widget, hover: boolean, accent: string): void {
     const color = w.color ?? accent;
     const c = this.ctx;
     const value = w.value ?? 0;
-    this.roundBox(w, w.h / 2, `rgba(255,255,255,${hover ? 0.1 : 0.05})`, color, hover ? 24 : 8);
+    c.save();
+    slant(c, w.x, w.y, w.w, w.h, 18);
+    c.fillStyle = `rgba(255,255,255,${hover ? 0.1 : 0.05})`;
+    c.fill();
+    c.lineWidth = 3;
+    c.strokeStyle = color;
+    c.shadowColor = color;
+    c.shadowBlur = hover ? 24 : 8;
+    c.stroke();
+    c.restore();
     const left = w.x + 40;
     const right = w.x + w.w - 40;
     const cy = w.y + w.h / 2 + 18;
-    c.fillStyle = 'rgba(255,255,255,0.15)';
-    c.fillRect(left, cy - 6, right - left, 12);
-    c.fillStyle = color;
-    c.fillRect(left, cy - 6, (right - left) * value, 12);
-    c.beginPath();
-    c.arc(left + (right - left) * value, cy, 22, 0, Math.PI * 2);
+    const segments = 24;
+    const gap = 6;
+    const segW = (right - left - gap * (segments - 1)) / segments;
+    for (let i = 0; i < segments; i += 1) {
+      const on = (i + 0.5) / segments <= value;
+      c.fillStyle = on ? mix(color, '#FFFFFF', (i / segments) * 0.5, 1) : 'rgba(255,255,255,0.1)';
+      c.fillRect(left + i * (segW + gap), cy - 9, segW, 18);
+    }
+    const kx = left + (right - left) * value;
+    c.save();
+    c.translate(kx, cy);
+    c.rotate(Math.PI / 4);
     c.fillStyle = '#FFFFFF';
     c.shadowColor = color;
-    c.shadowBlur = 20;
-    c.fill();
-    c.shadowBlur = 0;
+    c.shadowBlur = 22;
+    c.fillRect(-15, -15, 30, 30);
+    c.restore();
     c.textAlign = 'left';
+    c.textBaseline = 'middle';
     c.fillStyle = '#FFFFFF';
-    c.font = `700 30px ${FONT}`;
+    c.font = `800 30px ${FONT}`;
     c.fillText(w.label, w.x + 40, w.y + 34);
     c.textAlign = 'right';
+    c.fillStyle = color;
     c.fillText(`${Math.round(value * 100)}%`, w.x + w.w - 40, w.y + 34);
   }
 
