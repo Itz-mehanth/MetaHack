@@ -61,6 +61,12 @@ throughout (no Marvel or other third-party names/designs).
   alien weapons, PSION props, thrown aliens, the shield (ricochets) and the
   hammer (bounces) collide with the real room. Heavy hits knock living
   aliens back metres (stopped by walls). Hit-stop on blade/hammer/shield hits.
+- Destructible props (every level; PSION gets all 8 to throw): crates,
+  barrels, boulders (break), girders (never), EXPLOSIVE barrels (short fuse,
+  fireball, burning aliens, hurt the player within 1.6 m, chain-react).
+  Bullets, blades, hammer, shield, punches, meteors, explosions and thrown
+  props damage them; non-lethal hits shove them; shards bounce off the real
+  room; destroyed props rebuild after 6-10 s. Hook: __surgeProp(kind).
 - Audio: cinematic synthesised score (music.ts: drums, sub bass, strings,
   brass, choir, bells, per-track lead melody, reverb + echo, 16-bar songs,
   intensity 0 calm / 1 combat / 2 boss) and layered SFX with a hall reverb.

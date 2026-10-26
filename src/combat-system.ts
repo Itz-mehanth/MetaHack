@@ -32,6 +32,7 @@ import { PsiLink } from './combat/telekinesis.js';
 import { CLAP_TIP, Coach, HERO_TIPS, type Tip } from './combat/coach.js';
 import { BloodPools, BloodScreen, captureParts, Gibs, type Part, type PartName, restorePart } from './combat/bodies.js';
 import { Galaxy } from './combat/galaxy.js';
+import { Shards, type ShardStuff } from './combat/shards.js';
 import { createRagdoll, RAG, Room, type Verlet } from './combat/physics.js';
 import { lookFor, transitFor, WORLD_LOOKS } from './combat/worlds.js';
 import { CHAMPIONS, TWIST_INFO, type TwistId, twistFor } from './combat/twists.js';
@@ -258,7 +259,19 @@ interface Throwable {
   home: Vector3;
   t: number;
   bashAt: number;
+  /** Prop kind (crate, barrel, explosive, boulder, girder; 'slot' for lifted aliens). */
+  kind: string;
+  hp: number;
+  /** Explosive barrels: seconds until the blast once lit (-1: not lit). */
+  fuse: number;
+  /** Seconds until a destroyed prop rebuilds (-1: it stays gone). */
+  respawn: number;
+  /** Part of the current level's set. */
+  placed: boolean;
 }
+
+/** Hit points per prop kind; girders cannot break. */
+const PROP_HP: Readonly<Record<string, number>> = { crate: 2, barrel: 2, explosive: 1, boulder: 5, girder: Infinity, slot: Infinity };
 
 type DroneState = 'off' | 'emerging' | 'approach' | 'charge' | 'boss' | 'fly' | 'hold' | 'aim' | 'melee' | 'shot';
 
@@ -507,6 +520,7 @@ export class CombatSystem extends createSystem({
   private yAxis = new Vector3(0, 1, 0);
   private coach = new Coach();
   private gibs!: Gibs;
+  private shards!: Shards;
   private blood = new BloodScreen();
   private gore = new Particles(600, 0.028, false);
   private pools!: BloodPools;
@@ -1185,13 +1199,14 @@ export class CombatSystem extends createSystem({
     // Real models of every arsenal weapon for the armory projector.
     for (const weapon of ARSENAL) this.weaponModels.set(weapon.id, await this.buildWeaponModel(weapon));
     // PSION's props, plus slots that carry lifted aliens.
-    for (const kind of ['crate', 'barrel', 'boulder', 'girder', 'crate', 'boulder'] as const) {
+    for (const kind of ['crate', 'barrel', 'boulder', 'girder', 'crate', 'boulder', 'explosive', 'explosive'] as const) {
       const object = await this.world.assets.instantiate(`debris-${kind}`);
       addOutline(object, 0.03);
       object.visible = false;
       this.root.add(object);
-      this.debris.push(this.makeThrowable(object, (object.userData.radius as number | undefined) ?? 0.3));
+      this.debris.push(this.makeThrowable(object, (object.userData.radius as number | undefined) ?? 0.3, kind));
     }
+    this.shards = new Shards(this.root);
     for (let k = 0; k < 4; k += 1) this.liftSlots.push(this.makeThrowable(new Group(), 0.3));
     this.showMenu('main');
     this.ready = true;
@@ -1291,6 +1306,10 @@ export class CombatSystem extends createSystem({
         this.markHit('blast', drone.object.position, this.v1, undefined, f);
         this.damageDrone(drone, 999, true);
       }
+    };
+    (window as unknown as { __surgeProp: (kind: string) => void }).__surgeProp = (kind: string) => {
+      const item = this.debris.find((d) => d.placed && d.kind === kind && d.state !== 'off');
+      if (item) this.hitProp(item, 99, this.v1.set(0, 0, -1), 3);
     };
     (window as unknown as { __surgeChampion: () => void }).__surgeChampion = () => this.queueSpawn({ kind: 'titan', speed: 0.8, champion: true });
     (window as unknown as { __surgeClear: () => void }).__surgeClear = () => {
@@ -1690,7 +1709,7 @@ export class CombatSystem extends createSystem({
     this.gunHolder = hero === 'havoc' ? (this.profile.settings.leftHanded ? 0 : 1) : -1;
     this.gunLoose.recall = -1;
     this.hideDebris();
-    if (hero === 'psion') this.placeDebris();
+    this.placeDebris();
     this.applyWeaponTier();
     this.teach(HERO_TIPS[hero]);
   }
@@ -3026,6 +3045,13 @@ export class CombatSystem extends createSystem({
         else this.quake(this.v1);
         if (this.hammerState === 'flying') this.hammerVelocity.multiplyScalar(0.8);
       }
+      for (const item of this.debris) {
+        if ((item.state !== 'rest' && item.state !== 'flying') || this.elapsed - item.bashAt < 0.35) continue;
+        if (!this.segmentHits(this.hammerHeadPrev, this.hammerHeadPos, item.object.position, item.radius + HAMMER_HEAD_RADIUS)) continue;
+        item.bashAt = this.elapsed;
+        this.hitProp(item, 3, this.hammerVelocity, 3);
+        this.sfx.thunderHit();
+      }
     }
   }
 
@@ -3131,6 +3157,7 @@ export class CombatSystem extends createSystem({
         this.hitStop = Math.max(this.hitStop, 0.045);
       }
 
+      this.bladeProps(claws.base, claws.tip, hand.prevTip);
       this.checkParry(claws.base, claws.tip);
       if (speed > CRESCENT_MIN_SWING && hand.slashCooldown <= 0) {
         hand.slashCooldown = CRESCENT_COOLDOWN * (1 - 0.12 * this.level('talon-tempo')) * (this.buffRapid > 0 ? 0.5 : 1);
@@ -3178,6 +3205,118 @@ export class CombatSystem extends createSystem({
     if (quiet) return;
     this.flashes.spawn(origin, this.accent, 0.05, 0.35, 0.18);
     this.sfx.crescent();
+  }
+
+  // ---------------------------------------------------------------- props
+
+  /**
+   * A hit on a prop: explosives light a short fuse; others lose hit points
+   * and shatter at zero, or get shoved across the room (girders never break).
+   */
+  private hitProp(item: Throwable, damage: number, direction: Vector3, force: number): void {
+    if (item.state === 'off' || item.state === 'spawn' || item.fuse > 0) return;
+    const at = item.object.position;
+    if (item.kind === 'explosive') {
+      item.fuse = 0.12 + Math.random() * 0.12;
+      this.flashes.spawn(at, ORANGE, 0.1, 0.8, 0.2);
+      this.sfx.sizzle();
+      return;
+    }
+    item.hp -= damage;
+    if (item.hp <= 0) {
+      this.shatterProp(item, direction);
+      return;
+    }
+    if (item.state === 'rest' || item.state === 'flying') {
+      // Still in one piece: the blow shoves it.
+      item.state = 'flying';
+      item.thrown = false;
+      item.t = 0;
+      this.rv.copy(direction);
+      if (this.rv.lengthSq() < 1e-6) this.rv.set(0, 0, -1);
+      this.rv.normalize();
+      item.velocity.addScaledVector(this.rv, Math.min(6, force * 1.2));
+      item.velocity.y += 1 + force * 0.3;
+      item.spin.set((Math.random() - 0.5) * 6 * force, (Math.random() - 0.5) * 6 * force, (Math.random() - 0.5) * 6 * force);
+    }
+    this.particles.burst(at, WHITE, 10, 1.5, 0.25, this.v2);
+    this.sfx.ping();
+  }
+
+  /** A prop breaks apart; an explosive barrel blows up, setting off its neighbours. */
+  private shatterProp(item: Throwable, direction: Vector3 | null): void {
+    const at = this.re.copy(item.object.position);
+    item.state = 'off';
+    item.object.visible = false;
+    item.object.scale.setScalar(1);
+    item.fuse = -1;
+    item.respawn = item.placed ? (this.hero === 'psion' ? 6 : 10) : -1;
+    for (const hand of this.hands) {
+      if (hand.held === item) {
+        hand.held = null;
+        hand.psi.hide();
+      }
+    }
+    this.rv.set(0, 0, 0);
+    if (direction) this.rv.copy(direction).normalize().multiplyScalar(2);
+    this.shards.burst(at, item.kind as ShardStuff, item.kind === 'boulder' ? 8 : 10, item.kind === 'explosive' ? 5 : 2.5, this.rv);
+    this.particles.burst(at, DUST, 18, 1.4, 0.6, this.v2);
+    this.sfx.shatter();
+    if (item.kind !== 'explosive') return;
+    // The blast: fire, shock, burning aliens, the next barrels lit.
+    this.flashes.spawn(at, WHITE, 0.2, 1.4, 0.2);
+    this.flashes.spawn(at, ORANGE, 0.3, 3.2, 0.6);
+    this.particles.burst(at, ORANGE, 70, 4.5, 0.7, this.v2);
+    this.particles.burst(at, EMBER, 40, 3, 1, this.v2);
+    this.sfx.explode(true);
+    for (const drone of this.drones) {
+      if (drone.state !== 'off' && ENEMIES[drone.kind].ground && drone.object.position.distanceTo(at) < 2.2) drone.burn = Math.max(drone.burn, 3);
+    }
+    this.v4.set(this.head.x - at.x, 0, this.head.z - at.z);
+    if (this.v4.length() < 1.6) this.hurtPlayer(1, false, at);
+    if (this.comicCooldown <= 0) {
+      this.comicCooldown = 0.4;
+      this.comic.pop('KA-BOOM!', this.v1.copy(at).setY(at.y + 0.6), ORANGE, 0.8);
+    }
+    this.explodeAt(at, 1.9, 4);
+  }
+
+  /** Props within `radius` of `at` take `damage` (explosions, quakes, meteors, impacts). */
+  private propsNear(at: Vector3, radius: number, damage: number, force: number): void {
+    for (const item of this.debris) {
+      if (item.state === 'off' || item.state === 'spawn') continue;
+      if (item.object.position.distanceTo(at) > radius + item.radius) continue;
+      this.rd.subVectors(item.object.position, at).setY(0.5);
+      this.hitProp(item, damage, this.rd, force);
+    }
+  }
+
+  /** A bolt reaching a prop. */
+  private boltProps(bolt: Bolt): void {
+    for (const item of this.debris) {
+      if (item.state !== 'rest' && item.state !== 'flying' && item.state !== 'held') continue;
+      if (!this.segmentHits(bolt.previous, bolt.position, item.object.position, item.radius + bolt.radius)) continue;
+      this.hitProp(item, bolt.damage, bolt.velocity, bolt.force);
+      if (bolt.blast > 0) this.explodeAt(bolt.position, bolt.blast, 2);
+      if (bolt.kind === 'crescent' && bolt.blast === 0) continue;
+      this.retireBolt(bolt);
+      return;
+    }
+  }
+
+  /** A blade (base..tip, previous tip) cutting into a prop. */
+  private bladeProps(base: Vector3, tip: Vector3, prevTip: Vector3): void {
+    for (const item of this.debris) {
+      if ((item.state !== 'rest' && item.state !== 'flying') || this.elapsed - item.bashAt < 0.3) continue;
+      const r = item.radius * 0.9;
+      const at = item.object.position;
+      if (!this.segmentHits(base, tip, at, r) && !this.segmentHits(prevTip, tip, at, r)) continue;
+      item.bashAt = this.elapsed;
+      this.rd.subVectors(tip, prevTip);
+      this.hitProp(item, 2, this.rd, 1.5);
+      this.sfx.slash();
+      this.hitStop = Math.max(this.hitStop, 0.04);
+    }
   }
 
   // ---------------------------------------------------------------- physics
@@ -3612,6 +3751,7 @@ export class CombatSystem extends createSystem({
       this.markHit('blast', drone.object.position, this.v1.setY(Math.max(this.v1.y, 0.4)), undefined, 5);
       this.damageDrone(drone, damage);
     }
+    this.propsNear(p, radius, damage + 2, 5);
   }
 
   /** GODBREAKER: a ground quake ring that hits everything nearby. */
@@ -3634,6 +3774,7 @@ export class CombatSystem extends createSystem({
       this.markHit('blast', drone.object.position, this.v1.setY(0.6), undefined, 4.5);
       this.damageDrone(drone, 2);
     }
+    this.propsNear(at, 2.2, 2, 4);
   }
 
   /** BURST WEB: the web blooms into a net that catches everyone nearby. */
@@ -3812,6 +3953,8 @@ export class CombatSystem extends createSystem({
       this.markHit('blast', drone.object.position, this.v4.setY(0.5), undefined, 5);
       this.damageDrone(drone, 3);
     }
+    // ...smashes props...
+    this.propsNear(at, 1.1, 5, 5);
     // ...and the player, if they stayed in it.
     this.v4.set(this.head.x - at.x, 0, this.head.z - at.z);
     if (this.v4.length() < 0.75) this.hurtPlayer(1, false, at);
@@ -4211,6 +4354,13 @@ export class CombatSystem extends createSystem({
         if (this.shieldTarget == null) this.shieldState = 'returning';
         break;
       }
+      for (const item of this.debris) {
+        if ((item.state !== 'rest' && item.state !== 'flying') || this.elapsed - item.bashAt < 0.35) continue;
+        if (!this.segmentHits(this.shieldPrev, shield.position, item.object.position, item.radius + 0.22)) continue;
+        item.bashAt = this.elapsed;
+        this.hitProp(item, 3, this.shieldVel, 3);
+        this.sfx.clang();
+      }
       if (this.shieldTime > 3 || shield.position.distanceTo(this.head) > 16) this.shieldState = 'returning';
       return;
     }
@@ -4288,6 +4438,12 @@ export class CombatSystem extends createSystem({
     const speed = this.v2.subVectors(this.v1, hand.prevTip).length() / dt;
     hand.prevTip.copy(this.v1);
     if (speed < 1.6 || !isFist(hand.joints)) return;
+    for (const item of this.debris) {
+      if ((item.state !== 'rest' && item.state !== 'flying') || this.elapsed - item.bashAt < 0.3) continue;
+      if (item.object.position.distanceTo(this.v1) > item.radius + 0.1) continue;
+      item.bashAt = this.elapsed;
+      this.hitProp(item, 1, this.v2, 2.5);
+    }
     for (const drone of this.drones) {
       if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'orb' || this.elapsed - drone.bladeHitAt < 0.3) continue;
       if (drone.object.position.distanceTo(this.v1) > ENEMIES[drone.kind].radius + 0.12) continue;
@@ -4352,6 +4508,7 @@ export class CombatSystem extends createSystem({
         this.damageDrone(drone, damage);
         this.hitStop = Math.max(this.hitStop, 0.045);
       }
+      this.bladeProps(sword.base, sword.tip, hand.prevTip);
       hand.slashCooldown -= dt;
       if (sword.speed > SWORD_WAVE_SPEED && hand.slashCooldown <= 0) {
         hand.slashCooldown = SWORD_WAVE_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
@@ -4418,7 +4575,7 @@ export class CombatSystem extends createSystem({
 
   // ---------------------------------------------------------------- PSION
 
-  private makeThrowable(object: Object3D, radius: number): Throwable {
+  private makeThrowable(object: Object3D, radius: number, kind = 'slot'): Throwable {
     return {
       object,
       drone: null,
@@ -4431,28 +4588,51 @@ export class CombatSystem extends createSystem({
       home: new Vector3(),
       t: 0,
       bashAt: -10,
+      kind,
+      hp: PROP_HP[kind] ?? Infinity,
+      fuse: -1,
+      respawn: -1,
+      placed: false,
     };
   }
 
-  /** Scatters PSION's props across the floor in a front arc. */
+  /**
+   * The level's props in a front arc: PSION gets every prop close by to
+   * throw; everyone else gets two explosive barrels, a crate and a barrel
+   * out between them and the aliens, to shoot, cut or smash.
+   */
   private placeDebris(): void {
     this.v3.set(this.forward.x, 0, this.forward.z);
     if (this.v3.lengthSq() < 1e-4) this.v3.set(0, 0, -1);
     this.v3.normalize();
-    const count = this.debris.length;
-    this.debris.forEach((item, i) => {
-      const angle = (i / Math.max(1, count - 1) - 0.5) * 2.4;
-      const distance = 1.4 + (i % 2) * 0.9;
+    const psion = this.hero === 'psion';
+    const total = psion ? this.debris.length : 4;
+    let crate = false;
+    let barrel = false;
+    let n = 0;
+    for (const item of this.debris) {
+      item.placed = false;
+      let use = psion || item.kind === 'explosive';
+      if (!psion && item.kind === 'crate' && !crate) use = crate = true;
+      if (!psion && item.kind === 'barrel' && !barrel) use = barrel = true;
+      if (!use) continue;
+      const angle = (n / Math.max(1, total - 1) - 0.5) * (psion ? 2.4 : 2.0);
+      const distance = psion ? 1.4 + (n % 2) * 0.9 : 2.6 + (n % 2) * 1.0;
       const c = Math.cos(angle);
       const s = Math.sin(angle);
       item.home.set(this.v3.x * c - this.v3.z * s, 0, this.v3.x * s + this.v3.z * c);
       item.home.multiplyScalar(distance).add(this.head);
       item.home.y = item.radius * 0.8;
+      item.placed = true;
       this.spawnDebris(item);
-    });
+      n += 1;
+    }
   }
 
   private spawnDebris(item: Throwable): void {
+    item.hp = PROP_HP[item.kind] ?? Infinity;
+    item.fuse = -1;
+    item.respawn = -1;
     item.state = 'spawn';
     item.thrown = false;
     item.t = 0;
@@ -4472,8 +4652,12 @@ export class CombatSystem extends createSystem({
     for (const item of this.debris) {
       item.state = 'off';
       item.object.visible = false;
+      item.placed = false;
+      item.fuse = -1;
+      item.respawn = -1;
     }
     for (const slot of this.liftSlots) this.freeSlot(slot);
+    this.shards?.clear();
   }
 
   private freeSlot(slot: Throwable): void {
@@ -4497,6 +4681,18 @@ export class CombatSystem extends createSystem({
   private updatePsion(realDt: number, dt: number, time: number): void {
     const active = this.powersLive && this.hero === 'psion';
     for (const item of this.debris) {
+      if (item.fuse > 0) {
+        // A lit explosive: the lamp strobes, then it goes up.
+        item.fuse -= dt;
+        item.object.scale.setScalar(1 + Math.sin(this.elapsed * 60) * 0.03);
+        if (item.fuse <= 0) this.shatterProp(item, null);
+        continue;
+      }
+      if (item.state === 'off' && item.respawn > 0 && this.run.phase !== 'title') {
+        item.respawn -= realDt;
+        if (item.respawn <= 0) this.spawnDebris(item);
+        continue;
+      }
       if (item.state !== 'spawn') continue;
       item.t += realDt;
       item.object.scale.setScalar(Math.min(1, item.t / 0.5));
@@ -4547,6 +4743,7 @@ export class CombatSystem extends createSystem({
       psi.link(hand.gauntlet.palmPoint, hand.gauntlet.palmNormal, item.object.position, item.radius, time);
     }
     for (const item of this.debris) if (item.state === 'flying') this.updateThrowable(item, dt);
+    this.shards.update(dt, 9.8 * this.gravityScale, this.gibCollide);
     for (const slot of this.liftSlots) if (slot.state === 'flying') this.updateThrowable(slot, dt);
   }
 
@@ -4762,6 +4959,7 @@ export class CombatSystem extends createSystem({
     if (hit) {
       // Bounce off whatever it hit, then fall.
       if (item.thrown) this.psiImpact(position, hit, null);
+      if (item.state === 'off') return;
       item.velocity.multiplyScalar(-0.25);
       item.velocity.y = 2;
       item.thrown = false;
@@ -4772,6 +4970,7 @@ export class CombatSystem extends createSystem({
       if (item.thrown) {
         this.psiImpact(position, null, null);
         item.thrown = false;
+        if (item.state === 'off') return;
       }
       this.room.bounce(item.velocity, 0.35, 0.35);
       item.spin.multiplyScalar(0.5);
@@ -4801,6 +5000,7 @@ export class CombatSystem extends createSystem({
       this.markHit('blast', drone.object.position, this.v1, undefined, 4);
       this.damageDrone(drone, drone === hit ? damage + 2 : damage);
     }
+    this.propsNear(this.impactPoint, radius, 3, 4);
     if (inferno) this.particles.burst(this.impactPoint, ORANGE, 50, 3, 0.7, this.v2);
     const p = this.impactPoint;
     this.flashes.spawn(p, this.accent, 0.2, 1.4 + radius * 0.3, 0.45);
@@ -4918,6 +5118,7 @@ export class CombatSystem extends createSystem({
           break;
         }
       }
+      if (bolt.active) this.boltProps(bolt);
     }
   }
 

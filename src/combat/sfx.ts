@@ -343,6 +343,14 @@ export class Sfx {
     this.noiseSweep('bandpass', 300, 1800, 0.6, 0.15, 0, 0.4, 4, 0.2);
   }
 
+  /** A prop breaking apart: crunching wood and metal. */
+  shatter(): void {
+    this.noiseSweep('bandpass', 1800, 400, 0.25, 0.5, 0, 0.2, 1.2);
+    for (let i = 0; i < 4; i += 1) this.noiseSweep('highpass', 3000, 1500, 0.04, 0.2, 0.03 + Math.random() * 0.15);
+    this.metal(520, 0.3, 0.04, 0.2);
+    this.thump(0.35, 0.2, 140);
+  }
+
   /** Telekinetic lift: a rising hum. */
   lift(): void {
     this.tone('sine', 140, 520, 0.45, 0.14, 0, 0.4);

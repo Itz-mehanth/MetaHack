@@ -67,6 +67,7 @@ export default defineAssets({
   'debris-barrel': createDebris('barrel'),
   'debris-boulder': createDebris('boulder'),
   'debris-girder': createDebris('girder'),
+  'debris-explosive': createDebris('explosive'),
   'alien-grunt': createAlien('grunt'),
   'alien-brute': createAlien('brute'),
   'alien-stalker': createAlien('stalker'),

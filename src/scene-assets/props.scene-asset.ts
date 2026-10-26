@@ -14,7 +14,7 @@ import { bevelBox, makeRandom } from './lib/hardsurface.js';
  * roughly 0.4-0.6 m across. `userData.radius` is the hit radius in metres.
  */
 
-export type DebrisKind = 'crate' | 'barrel' | 'boulder' | 'girder';
+export type DebrisKind = 'crate' | 'barrel' | 'boulder' | 'girder' | 'explosive';
 
 const steel = new MeshStandardMaterial({ color: '#4A505E', roughness: 0.4, metalness: 0.9 });
 const darkSteel = new MeshStandardMaterial({ color: '#23262E', roughness: 0.5, metalness: 0.85 });
@@ -78,6 +78,38 @@ function barrel(): Group {
   return g;
 }
 
+/** Explosive barrel: hazard-striped red drum with a glowing core window and a warning light. */
+function explosive(): Group {
+  const g = new Group();
+  const red = new MeshStandardMaterial({ color: '#B0201A', roughness: 0.45, metalness: 0.6 });
+  const core = new MeshStandardMaterial({ color: '#FF7A1A', emissive: '#FF5A00', emissiveIntensity: 2.2 });
+  const lamp = new MeshStandardMaterial({ color: '#FF2A2A', emissive: '#FF2A2A', emissiveIntensity: 2.5 });
+  g.add(new Mesh(new CylinderGeometry(0.2, 0.2, 0.56, 24), red));
+  for (const y of [-0.25, 0.25]) {
+    const hoop = new Mesh(new TorusGeometry(0.202, 0.014, 6, 28), darkSteel);
+    hoop.rotation.x = Math.PI / 2;
+    hoop.position.y = y;
+    g.add(hoop);
+  }
+  // Hazard band: alternating yellow and black stripes.
+  for (let i = 0; i < 12; i += 1) {
+    const stripe = new Mesh(new CylinderGeometry(0.204, 0.204, 0.1, 4, 1, true, (i / 12) * Math.PI * 2, Math.PI / 6), i % 2 ? darkSteel : hazard);
+    stripe.position.y = 0.12;
+    g.add(stripe);
+  }
+  // A glowing core seen through a window, and a warning lamp on the lid.
+  const porthole = new Mesh(new BoxGeometry(0.1, 0.2, 0.02), core);
+  porthole.position.set(0, -0.08, 0.195);
+  const lid = new Mesh(new CylinderGeometry(0.17, 0.17, 0.02, 20), darkSteel);
+  lid.position.y = 0.285;
+  const light = new Mesh(new CylinderGeometry(0.035, 0.04, 0.05, 12), lamp);
+  light.position.y = 0.32;
+  light.name = 'Lamp';
+  g.add(porthole, lid, light);
+  g.userData.radius = 0.3;
+  return g;
+}
+
 function boulder(): Group {
   const g = new Group();
   const geometry = new IcosahedronGeometry(0.28, 1);
@@ -133,7 +165,8 @@ function girder(): Group {
 }
 
 export function createDebris(kind: DebrisKind): Group {
-  const root = kind === 'crate' ? crate() : kind === 'barrel' ? barrel() : kind === 'boulder' ? boulder() : girder();
+  const root = kind === 'crate' ? crate() : kind === 'barrel' ? barrel() : kind === 'boulder' ? boulder() : kind === 'explosive' ? explosive() : girder();
+  root.userData.kind = kind;
   root.name = `Debris-${kind}`;
   return root;
 }
