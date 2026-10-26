@@ -253,6 +253,20 @@ export class Sfx {
   }
 
   /** A blade cutting flesh: whoosh, wet tear, low hit. */
+  /** A missile leaving the tube: a thump, a hiss and a rising roar. */
+  launch(): void {
+    this.thump(0.9, 0.45, 80);
+    this.noiseSweep('bandpass', 400, 2600, 0.5, 0.4, 0, 0.05, 1.4);
+    this.noiseSweep('lowpass', 900, 150, 0.6, 0.3, 0.1);
+    this.tone('sawtooth', 90, 300, 0.5, 0.12, 0.05, 0.5);
+  }
+
+  /** A blade cutting the air: a short rising whoosh. */
+  swish(): void {
+    this.noiseSweep('bandpass', 700, 3800, 0.14, 0.22, 0, 0, 2);
+    this.noiseSweep('highpass', 2500, 5500, 0.08, 0.1, 0.02);
+  }
+
   slash(): void {
     this.noiseSweep('bandpass', 500, 4500, 0.12, 0.45, 0, 0, 1.5);
     this.noiseSweep('lowpass', 1500, 200, 0.18, 0.35, 0.03);

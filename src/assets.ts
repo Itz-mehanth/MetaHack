@@ -63,6 +63,7 @@ export default defineAssets({
   'gun-smg': createGun('smg'),
   'gun-shotgun': createGun('shotgun'),
   'gun-minigun': createGun('minigun'),
+  'gun-launcher': createGun('launcher'),
   'weapon-psion': createPsiDisplay(),
   'debris-crate': createDebris('crate'),
   'debris-barrel': createDebris('barrel'),

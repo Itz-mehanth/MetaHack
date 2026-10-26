@@ -93,6 +93,12 @@ export class Lightning {
     }
   }
 
+  /** A straight, thin, bright line: sword cuts and clashes. */
+  streak(from: Vector3, to: Vector3, color: Color, duration = 0.14, width = 0.03): void {
+    this.add(from, to, color, duration, width, 0.04, false);
+    this.add(from, to, color, duration * 0.8, width * 0.4, 0.02, true);
+  }
+
   private add(from: Vector3, to: Vector3, color: Color, duration: number, width: number, chaos: number, white: boolean): void {
     const bolt = this.pool[this.next];
     this.next = (this.next + 1) % this.pool.length;

@@ -1,8 +1,10 @@
 import {
   AdditiveBlending,
   AssetManager,
+  BoxGeometry,
   CanvasTexture,
   Color,
+  ConeGeometry,
   createSystem,
   SpriteMaterial,
   Sprite as ThreeSprite,
@@ -407,6 +409,8 @@ interface Drone {
   species: string;
   /** Animated model of a creature (null for humanoids and bosses). */
   creature: CreatureModel | null;
+  /** When it last blocked a cut (duellists only). */
+  guardAt: number;
   /** A walker stepped forward this frame, at `moveSpeed` m/s (picks the walk or run clip). */
   moving: boolean;
   moveSpeed: number;
@@ -421,6 +425,8 @@ interface Pickup {
 
 interface Bolt {
   object: Group;
+  /** HELLFIRE's missile body (shown instead of the bolt glow). */
+  missile: Group;
   bolt: Object3D;
   crescent: Object3D;
   kind: 'bolt' | 'crescent' | 'arrow';
@@ -758,6 +764,8 @@ export class CombatSystem extends createSystem({
   private frameDt = 0;
   private webShots!: WebShots;
   private senseAt = -10;
+  private shieldTrail = 0;
+  private readonly swishArmed = [true, true];
   private readonly haptics = new Haptics();
   private handBeams: BeamFx[] = [];
   private chestBeam!: BeamFx;
@@ -938,6 +946,11 @@ export class CombatSystem extends createSystem({
     boltCore.rotateX(Math.PI / 2);
     const boltMaterial = new MeshBasicMaterial({ color: '#E8FFFF' });
     // Crescent shockwave: an arc centred on local +Y, facing local +Z.
+    const missileBodyGeometry = new CylinderGeometry(0.022, 0.022, 0.26, 10);
+    const missileNoseGeometry = new ConeGeometry(0.022, 0.09, 10);
+    const missileFinGeometry = new BoxGeometry(0.075, 0.004, 0.06);
+    const missileSteel = new MeshBasicMaterial({ color: '#C9CED8', toneMapped: false });
+    const missileRed = new MeshBasicMaterial({ color: '#FF3B1F', toneMapped: false });
     const crescentGeometry = new TorusGeometry(0.22, 0.014, 6, 28, Math.PI * 0.7);
     crescentGeometry.rotateZ(Math.PI / 2 - Math.PI * 0.35);
     const crescentCore = new MeshBasicMaterial({ color: '#FFFFFF', toneMapped: false });
@@ -978,11 +991,31 @@ export class CombatSystem extends createSystem({
       arrowGlow.scale.setScalar(0.12);
       arrowGlow.position.z = 0.05;
       arrow.add(arrowShaft, arrowHead, arrowGlow);
-      object.add(boltVisual, crescent, arrow);
+      // A missile: body, red nose, fins and an exhaust flame.
+      const missile = new Group();
+      missile.visible = false;
+      const missileBody = new Mesh(missileBodyGeometry, missileSteel);
+      missileBody.rotation.x = Math.PI / 2;
+      const missileNose = new Mesh(missileNoseGeometry, missileRed);
+      missileNose.rotation.x = Math.PI / 2;
+      missileNose.position.z = 0.15;
+      missile.add(missileBody, missileNose);
+      for (let f = 0; f < 4; f += 1) {
+        const fin = new Mesh(missileFinGeometry, missileRed);
+        fin.rotation.z = (f / 4) * Math.PI * 2;
+        fin.position.z = -0.07;
+        missile.add(fin);
+      }
+      const flame = createGlowSprite('#FF8A1F', 0.95);
+      flame.scale.setScalar(0.16);
+      flame.position.z = -0.14;
+      missile.add(flame);
+      object.add(boltVisual, crescent, arrow, missile);
       object.visible = false;
       this.root.add(object);
       this.bolts.push({
         object,
+        missile,
         bolt: boltVisual,
         crescent,
         arrow,
@@ -1162,6 +1195,7 @@ export class CombatSystem extends createSystem({
         bowlAt: -10,
         species: '',
         creature: null,
+        guardAt: -10,
         moving: false,
         moveSpeed: 0,
       });
@@ -1192,7 +1226,7 @@ export class CombatSystem extends createSystem({
     this.blasterMuzzle = this.blaster.getObjectByName('Muzzle') ?? this.blaster;
     addOutline(this.blaster, 0.08, (m) => m.name === 'Body');
     this.guns.set('havoc-pistol', this.blaster);
-    for (const [id, asset] of [['havoc-smg', 'gun-smg'], ['havoc-shotgun', 'gun-shotgun'], ['havoc-minigun', 'gun-minigun']] as const) {
+    for (const [id, asset] of [['havoc-smg', 'gun-smg'], ['havoc-shotgun', 'gun-shotgun'], ['havoc-minigun', 'gun-minigun'], ['havoc-launcher', 'gun-launcher']] as const) {
       const gun = await this.world.assets.instantiate(asset);
       gun.visible = false;
       addOutline(gun, 0.08, (m) => m.name === 'Body');
@@ -1239,6 +1273,8 @@ export class CombatSystem extends createSystem({
     this.root.add(this.coach.group, this.erasure.mesh);
     this.shield = await this.world.assets.instantiate('shield');
     this.shield.name = 'VanguardShield';
+    // A shield you can see your own fist behind.
+    this.shield.scale.setScalar(0.85);
     this.shield.visible = false;
     addOutline(this.shield, 0.05, (m) => m.name === 'Body');
     this.root.add(this.shield);
@@ -1374,6 +1410,7 @@ export class CombatSystem extends createSystem({
       bowlAt: -10,
       species: extra.species ?? '',
       creature,
+      guardAt: -10,
       moving: false,
       moveSpeed: 0,
     };
@@ -1631,6 +1668,7 @@ export class CombatSystem extends createSystem({
       if (this.v3.length() < 0.5) {
         if (this.shieldBlocks(object.position)) {
           this.sfx.clang();
+          this.shieldRipple(this.shield!.position);
           this.particles.burst(object.position, GOLD, 24, 2.5, 0.3, this.v2);
           this.comic.pop('BLOCKED!', this.v4.copy(object.position).setY(object.position.y + 0.3), this.weaponColor, 0.4);
           drone.stun = 0.8;
@@ -3465,7 +3503,7 @@ export class CombatSystem extends createSystem({
     if (barrels) barrels.rotation.z += dt * this.gunSpin * 45;
     const pump = gun.getObjectByName('Pump');
     if (pump) pump.position.z = 0.24 - Math.max(0, this.gunCooldown - 0.45) * 0.25;
-    const base = type === 'havoc-smg' ? 0.085 : type === 'havoc-shotgun' ? 0.8 : type === 'havoc-minigun' ? 0.05 : 0.34;
+    const base = type === 'havoc-smg' ? 0.085 : type === 'havoc-shotgun' ? 0.8 : type === 'havoc-minigun' ? 0.05 : type === 'havoc-launcher' ? 1.1 : 0.34;
     const auto = base * (1 - 0.1 * this.level('havoc-rate')) * (this.buffRapid > 0 ? 0.5 : 1);
     const ready = type !== 'havoc-minigun' || this.gunSpin > 0.6;
     if (curled && ready && this.gunCooldown <= 0) {
@@ -3475,12 +3513,50 @@ export class CombatSystem extends createSystem({
     }
   }
 
+  /** HELLFIRE: a homing missile out of the tube with a back-blast, a lock-on within a wide cone, and a big blast. */
+  private fireMissile(): void {
+    const bolt = this.fire(this.v3, this.v4, true);
+    if (bolt == null) return;
+    bolt.target = null;
+    let best = 0.9;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'pod' || drone.kind === 'orb') continue;
+      const cos = this.v2.subVectors(drone.object.position, this.v3).normalize().dot(this.v4);
+      if (cos > best) {
+        best = cos;
+        bolt.target = drone;
+      }
+    }
+    bolt.bolt.visible = false;
+    bolt.missile.visible = true;
+    bolt.speed = 9;
+    bolt.velocity.copy(this.v4).setLength(9);
+    bolt.homing = 2.5;
+    bolt.blast = 1.8;
+    bolt.damage = 4 * (1 + 0.15 * this.level('havoc-damage'));
+    bolt.force = 3;
+    bolt.radius = 0.1;
+    bolt.life = BOLT_LIFE * 1.6;
+    this.gunKick = 3;
+    this.flashes.spawn(this.v3, ORANGE, 0.12, 0.9, 0.2);
+    this.particles.burst(this.v3, EMBER, 30, 2, 0.3, this.v2);
+    // Back-blast out of the rear of the tube.
+    this.v2.copy(this.v3).addScaledVector(this.v4, -0.55);
+    this.particles.burst(this.v2, DUST, 36, 2.5, 0.6, this.v1);
+    this.sfx.launch();
+    this.hitStop = Math.max(this.hitStop, 0.02);
+  }
+
   private shootGun(): void {
     const gun = this.blaster!;
     gun.updateMatrixWorld();
     this.blasterMuzzle!.getWorldPosition(this.v3);
     this.v4.set(0, 0, 1).transformDirection(gun.matrixWorld);
     const type = this.weaponDef.id;
+    if (type === 'havoc-launcher') {
+      this.fireMissile();
+      return;
+    }
     const pellets = type === 'havoc-shotgun' ? 7 : 1;
     const spread = type === 'havoc-shotgun' ? 0.09 : type === 'havoc-smg' ? 0.035 : type === 'havoc-minigun' ? 0.05 : 0;
     const damage = (type === 'havoc-shotgun' ? 1 : type === 'havoc-pistol' ? 1 + Math.floor(this.level('havoc-damage') / 2) : 0.5) * (1 + 0.15 * this.level('havoc-damage'));
@@ -3581,6 +3657,7 @@ export class CombatSystem extends createSystem({
         this.v4.addScaledVector(this.v1, (k % 2 === 1 ? 1 : -1) * 0.07 * Math.ceil(k / 2)).normalize();
       }
       bolt.kind = 'arrow';
+      bolt.missile.visible = false;
       bolt.blast = this.weaponDef.id === 'orion-blast' ? 1.2 : 0;
       bolt.zap = this.weaponDef.id === 'orion-storm';
       bolt.burn = 0;
@@ -4392,6 +4469,7 @@ export class CombatSystem extends createSystem({
     const bolt = this.bolts.find((b) => !b.active);
     if (bolt == null) return null;
     bolt.kind = 'crescent';
+    bolt.missile.visible = false;
     bolt.blast = 0;
     bolt.zap = false;
     bolt.burn = this.weaponDef.id === 'ronin-flame' || this.weaponDef.id === 'talon-molten' ? 3 : 0;
@@ -4410,14 +4488,15 @@ export class CombatSystem extends createSystem({
     bolt.crescent.scale.setScalar(scale);
     bolt.active = true;
     bolt.life = BOLT_LIFE;
-    bolt.position.copy(origin);
-    bolt.previous.copy(origin);
+    // Start a little way out along the swing so the wave never swallows the view.
+    bolt.position.copy(origin).addScaledVector(direction, 0.3 + 0.2 * scale);
+    bolt.previous.copy(bolt.position);
     bolt.velocity.copy(direction).multiplyScalar(CRESCENT_SPEED);
     // Lay the arc along the blade: local up is perpendicular to swing and blade.
     bolt.object.up.crossVectors(direction, bladeDirection);
     if (bolt.object.up.lengthSq() < 1e-6) bolt.object.up.set(0, 1, 0);
     bolt.object.up.normalize();
-    bolt.object.position.copy(origin);
+    bolt.object.position.copy(bolt.position);
     this.v1.copy(origin).add(direction);
     bolt.object.lookAt(this.v1);
     bolt.object.visible = true;
@@ -5673,7 +5752,7 @@ export class CombatSystem extends createSystem({
       this.shieldBasis.makeBasis(this.sx, this.sy, this.sz);
       shield.quaternion.setFromRotationMatrix(this.shieldBasis);
       this.shieldPrev.copy(shield.position);
-      shield.position.copy(this.v1).addScaledVector(this.sz, 0.07).addScaledVector(this.sy, -0.03);
+      shield.position.copy(this.v1).addScaledVector(this.sz, 0.13).addScaledVector(this.sy, -0.03);
       this.shieldNormal.copy(this.sz);
       if (dt > 0) this.shieldVel.lerp(this.v3.subVectors(shield.position, this.shieldPrev).divideScalar(dt), 0.5);
       const speed = this.shieldVel.length();
@@ -5725,6 +5804,12 @@ export class CombatSystem extends createSystem({
       }
       this.v2.set(0, 0, 0);
       this.particles.emit(this.shieldPrev, this.v2, this.weaponColor, 0.3, 0);
+      // A bright streak behind the spinning disc.
+      this.shieldTrail -= dt;
+      if (this.shieldTrail <= 0) {
+        this.shieldTrail = 0.03;
+        this.lightningFx.streak(this.shieldPrev, shield.position, this.weaponColor, 0.22, 0.05);
+      }
       for (const drone of this.drones) {
         if (drone.state === 'off' || drone.state === 'emerging' || drone === this.shieldLast || drone.kind === 'orb') continue;
         if (!this.segmentHits(this.shieldPrev, shield.position, drone.object.position, ENEMIES[drone.kind].radius + 0.22)) continue;
@@ -5767,6 +5852,8 @@ export class CombatSystem extends createSystem({
       this.shieldState = 'worn';
       this.shieldTime = 0;
       this.sfx.catchHammer();
+      this.shieldRipple(this.v1);
+      this.comic.pop('CATCH!', this.v2.copy(this.v1).setY(this.v1.y + 0.2), this.weaponColor, 0.35);
       this.flashes.spawn(this.v1, this.weaponColor, 0.05, 0.4, 0.2);
       return;
     }
@@ -5810,8 +5897,17 @@ export class CombatSystem extends createSystem({
     return best;
   }
 
+  /** A blow lands on the shield: an energy flash, a hex-shard spray, a rumble. */
+  private shieldRipple(at: Vector3): void {
+    this.flashes.spawn(at, this.weaponColor, 0.14, 1.0, 0.25);
+    this.flashes.spawn(at, WHITE, 0.06, 0.5, 0.12);
+    this.particles.burst(at, this.weaponColor, 24, 2.2, 0.3, this.v2);
+    this.haptics.pulse(this.world.renderer.xr.getSession(), 0.7, 120);
+  }
+
   /** A shot hits the shield and flies back at the nearest enemy. */
   private deflect(at: Vector3): void {
+    this.shieldRipple(at);
     this.sfx.clang();
     this.particles.burst(at, GOLD, 20, 2, 0.25, this.v2);
     const target = this.nearestEnemy(at, null, 20);
@@ -5893,9 +5989,24 @@ export class CombatSystem extends createSystem({
         if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < 0.3) continue;
         if (!this.bladeHits(drone, sword.base, sword.tip, hand.prevTip)) continue;
         drone.bladeHitAt = this.elapsed;
+        // Duellists (REAVER-class) sometimes get their own blade up: the cut rings off it.
+        if (drone.kind === 'blade' && drone.stun <= 0 && this.elapsed - drone.guardAt > 0.9 && Math.random() < 0.3) {
+          drone.guardAt = this.elapsed;
+          this.sfx.clang();
+          this.clash(this.hitPoint, sword.base, sword.tip, this.sa.copy(this.hitPoint).addScaledVector(sword.direction, -0.3), this.sb.copy(this.hitPoint).addScaledVector(this.v3.set(0, 1, 0), 0.3));
+          this.comic.pop('BLOCKED!', this.v1.copy(this.hitPoint).setY(this.hitPoint.y + 0.25), WHITE, 0.4);
+          drone.knock.copy(this.v4.subVectors(sword.tip, hand.prevTip)).setY(0).normalize().multiplyScalar(0.8);
+          drone.stagger = 0.25;
+          drone.staggerMax = 0.25;
+          this.hitStop = Math.max(this.hitStop, 0.05);
+          continue;
+        }
         this.sfx.slash();
         this.particles.burst(this.hitPoint, WHITE, 18, 2.5, 0.25, this.v2);
         this.v4.subVectors(sword.tip, hand.prevTip);
+        // The cut: a bright straight streak through the wound.
+        this.v3.copy(this.v4).normalize();
+        this.lightningFx.streak(this.sa.copy(this.hitPoint).addScaledVector(this.v3, -0.55), this.sb.copy(this.hitPoint).addScaledVector(this.v3, 0.55), this.weaponColor, 0.18, 0.035);
         this.v2.crossVectors(this.v4, sword.direction);
         this.markHit('slice', this.hitPoint, this.v4, this.v2);
         if (this.weaponDef.id === 'ronin-flame') drone.burn = Math.max(drone.burn, 3);
@@ -5903,6 +6014,12 @@ export class CombatSystem extends createSystem({
         this.hitStop = Math.max(this.hitStop, 0.045);
       }
       this.bladeProps(sword.base, sword.tip, hand.prevTip);
+      this.deflectShots(sword.base, sword.tip);
+      // A whoosh as the blade picks up speed.
+      if (sword.speed > 3 && this.swishArmed[i]) {
+        this.swishArmed[i] = false;
+        this.sfx.swish();
+      } else if (sword.speed < 1.8) this.swishArmed[i] = true;
       hand.slashCooldown -= dt;
       if (sword.speed > SWORD_WAVE_SPEED * tuning.swing && hand.slashCooldown <= 0) {
         hand.slashCooldown = SWORD_WAVE_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
@@ -6427,6 +6544,7 @@ export class CombatSystem extends createSystem({
       }
     }
     bolt.kind = 'bolt';
+    bolt.missile.visible = false;
     bolt.blast = 0;
     bolt.zap = false;
     bolt.burn = 0;
@@ -6487,7 +6605,7 @@ export class CombatSystem extends createSystem({
       const crescent = bolt.kind === 'crescent';
       this.particles.emit(bolt.previous, this.v2, bolt.blast > 0 ? ORANGE : bolt.zap ? VIOLET : bolt.kind === 'bolt' ? CYAN : this.weaponColor, crescent ? 0.3 : 0.18, 0);
       if (bolt.blast > 0 && bolt.kind === 'bolt') this.particles.emit(bolt.previous, this.v2.set(0, 0.3, 0), DUST, 0.6, 0.5, -0.2);
-      if (crescent) bolt.crescent.scale.setScalar(bolt.scale * (1 + (BOLT_LIFE - bolt.life) * 1.2));
+      if (crescent) bolt.crescent.scale.setScalar(bolt.scale * (1 + (BOLT_LIFE - bolt.life) * 0.7));
 
 
       for (const drone of this.drones) {
@@ -7272,6 +7390,7 @@ export class CombatSystem extends createSystem({
           drone.stun = 1;
           this.sfx.clang();
           this.shield!.getWorldPosition(this.sc);
+          this.shieldRipple(this.sc);
           this.particles.burst(this.sc, GOLD, 30, 2.5, 0.3, this.v2);
           this.comic.pop('BLOCKED!', this.v4.copy(this.sc).setY(this.sc.y + 0.25), this.weaponColor, 0.4);
         } else {
@@ -7301,27 +7420,82 @@ export class CombatSystem extends createSystem({
     drone.eye.scale.setScalar(1 + Math.max(0, raise) * 0.6);
   }
 
+  /**
+   * The weapon an enemy swings, as a segment (A hand end, B tip). Humanoids
+   * with a blade use it; everyone else swings a virtual arm: raised through
+   * the wind-up, then cutting toward the player. False when it is not swinging.
+   */
+  private enemyWeapon(drone: Drone, a: Vector3, b: Vector3): boolean {
+    if (drone.state !== 'melee') return false;
+    const rig = drone.rig;
+    if (rig?.bladeBase && rig.bladeTip) {
+      rig.bladeBase.getWorldPosition(a);
+      rig.bladeTip.getWorldPosition(b);
+      return true;
+    }
+    const windup = drone.kind === 'blade' ? 0.75 : drone.kind === 'swarmer' ? 0.45 : drone.kind === 'titan' ? 0.9 : 0.65;
+    const raise = drone.meleeStage === 1 ? Math.min(1, drone.melee / windup) : drone.meleeStage === 2 ? 1 - Math.min(1, drone.melee / 0.16) : 0;
+    const strike = drone.meleeStage === 2 ? Math.min(1, drone.melee / 0.16) : 0;
+    if (raise <= 0 && strike <= 0) return false;
+    const at = drone.object.position;
+    const size = drone.size;
+    this.sa.set(this.head.x - at.x, 0, this.head.z - at.z).normalize();
+    // Right-hand side of the enemy, as the player sees it.
+    this.sb.set(this.sa.z, 0, -this.sa.x);
+    a.copy(at).addScaledVector(this.sb, 0.3 * size).addScaledVector(this.sa, 0.2 * size);
+    a.y += 0.15 * size;
+    b.copy(a).addScaledVector(this.sa, (0.2 + 0.9 * strike) * size);
+    b.y += 0.9 * raise * size;
+    return true;
+  }
+
   /** A player blade (base..tip) meeting an enemy weapon mid-swing parries it. */
   private checkParry(base: Vector3, tip: Vector3): void {
     for (const drone of this.drones) {
-      if (drone.state !== 'melee' || drone.rig?.bladeBase == null || drone.rig.bladeTip == null) continue;
+      if (drone.state !== 'melee') continue;
       const windup = drone.kind === 'blade' ? 0.75 : drone.kind === 'swarmer' ? 0.45 : drone.kind === 'titan' ? 0.9 : 0.65;
       const open = (drone.meleeStage === 1 && drone.melee > windup * 0.4) || drone.meleeStage === 2;
-      if (!open) continue;
-      drone.rig.bladeBase.getWorldPosition(this.bladeA);
-      drone.rig.bladeTip.getWorldPosition(this.bladeB);
-      if (segmentDistance(base, tip, this.bladeA, this.bladeB, this.sc, this.sa, this.sb, this.v4) > 0.12) continue;
+      if (!open || !this.enemyWeapon(drone, this.bladeA, this.bladeB)) continue;
+      if (segmentDistance(base, tip, this.bladeA, this.bladeB, this.sc, this.sa, this.sb, this.v4) > (drone.rig?.bladeBase ? 0.12 : 0.18)) continue;
       drone.meleeStage = 3;
       drone.melee = 0;
       drone.stun = drone.kind === 'titan' ? 0.8 : 1.3;
       this.sfx.clang();
-      this.flashes.spawn(this.sc, WHITE, 0.1, 0.7, 0.2);
-      this.particles.burst(this.sc, GOLD, 40, 3, 0.35, this.v2);
+      this.clash(this.sc, base, tip, this.bladeA, this.bladeB);
       this.v1.copy(this.sc).setY(this.sc.y + 0.25);
       this.comic.pop('PARRY!', this.v1, GOLD, 0.45);
       this.slowmo = Math.max(this.slowmo, 0.25);
+      this.hitStop = Math.max(this.hitStop, 0.06);
+      this.haptics.pulse(this.world.renderer.xr.getSession(), 0.5, 80);
     }
   }
+
+  /** Two blades meeting: a flash, crossed streaks along both edges and a spray of sparks. */
+  private clash(at: Vector3, baseA: Vector3, tipA: Vector3, baseB: Vector3, tipB: Vector3): void {
+    this.flashes.spawn(at, WHITE, 0.1, 0.9, 0.2);
+    this.particles.burst(at, GOLD, 50, 3.5, 0.35, this.v2);
+    this.particles.burst(at, WHITE, 20, 5, 0.25, this.v2);
+    this.lightningFx.streak(this.v3.copy(at).addScaledVector(this.v2.subVectors(tipA, baseA).normalize(), -0.4), this.v4.copy(at).addScaledVector(this.v2, 0.4), WHITE, 0.16, 0.025);
+    this.lightningFx.streak(this.v3.copy(at).addScaledVector(this.v2.subVectors(tipB, baseB).normalize(), -0.4), this.v4.copy(at).addScaledVector(this.v2, 0.4), GOLD, 0.16, 0.025);
+  }
+
+  /** A blade that crosses an enemy plasma shot sends it back at the aliens. */
+  private deflectShots(base: Vector3, tip: Vector3): void {
+    for (const shot of this.drones) {
+      if (shot.state !== 'shot' && shot.state !== 'fly') continue;
+      this.ra.copy(shot.object.position);
+      if (!this.segmentHits(base, tip, this.ra, 0.2)) continue;
+      this.retireDrone(shot);
+      this.deflect(this.ra);
+      this.flashes.spawn(this.ra, WHITE, 0.06, 0.6, 0.15);
+      this.hitStop = Math.max(this.hitStop, 0.03);
+      if (this.comicCooldown <= 0) {
+        this.comicCooldown = 0.4;
+        this.comic.pop('DEFLECT!', this.v1.copy(this.ra).setY(this.ra.y + 0.2), GOLD, 0.35);
+      }
+    }
+  }
+
 
   /**
    * Blade segment (base..tip, previous tip) against an enemy's body. Walkers

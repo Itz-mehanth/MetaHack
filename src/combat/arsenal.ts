@@ -50,6 +50,7 @@ export const ARSENAL: readonly WeaponDef[] = [
   W('havoc-smg', 'havoc', 'VIPER SMG', 'Bullet hose, hold the trigger', 500, 1, '#3DFF8A'),
   W('havoc-shotgun', 'havoc', 'BREACHER', 'Pump shotgun, six-pellet blast', 800, 1, '#FF3B5C'),
   W('havoc-minigun', 'havoc', 'HAILSTORM', 'Spin-up minigun', 1400, 2, '#FFD23F'),
+  W('havoc-launcher', 'havoc', 'HELLFIRE LAUNCHER', 'Homing missiles that level a crowd', 1000, 2, '#FF5A1F'),
   W('ronin-katana', 'ronin', 'KATANA', 'Twin energy katanas', 0, 0),
   W('ronin-flame', 'ronin', 'FLAME FANGS', 'Burning blades, burning wounds', 700, 1, '#FF6A1A'),
   W('ronin-void', 'ronin', 'VOID EDGE', 'Longer blades that tear space', 1300, 2, '#B04DFF'),

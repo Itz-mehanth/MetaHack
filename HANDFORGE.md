@@ -77,6 +77,16 @@ throughout (no Marvel or other third-party names/designs).
   pooled; each has an ink outline, species-coloured ichor and a death clip
   (flyers tumble out of the sky). Champions become giant creatures. Hooks:
   __surgeSpawn(kind, n), enemies listed as kind/species in __surge().
+- Duels and weapons: RONIN (and every blade) clashes with ANY enemy's
+  weapon (virtual swing arm for creatures), deflects plasma shots back,
+  cuts leave straight bright streaks, duellists sometimes block. ORION's
+  bow is a recurve with armoured limbs, blade tips, fletched arrow and a
+  draw glow (same model in the armory). HAVOC's HELLFIRE LAUNCHER fires
+  homing missiles (lock-on cone, back-blast, big blast). ARC's PROTON BEAM
+  and UNI-BEAM (palm to chest, push out; 3.5 s, follows the hand) use
+  beamfx.ts. VANGUARD's shield is smaller, has a real inside (lining,
+  straps), ripples on blocks, trails when thrown and is caught with a pop.
+  haptics.ts rumbles controllers/phones on hits (a headset has no motor).
 - Hands push the world: a fast palm slaps enemy shots back at the aliens
   (SLAP!); free hands shove aliens (knockback) and props.
 - WEAVER's webs are bullets (webshot.ts): a spinning web net per shot, fired

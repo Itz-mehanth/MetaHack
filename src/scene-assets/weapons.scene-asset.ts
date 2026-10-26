@@ -1,15 +1,20 @@
 import {
+  BackSide,
   BoxGeometry,
   CapsuleGeometry,
+  Color,
   ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
   MeshStandardMaterial,
   OctahedronGeometry,
+  Quaternion,
   SphereGeometry,
   TorusGeometry,
+  Vector3,
 } from '@iwsdk/core';
+import { Bow } from '../combat/bow.js';
 import { band, forge, piece, ringOf, tube } from './lib/forge.js';
 import { bevelBox } from './lib/hardsurface.js';
 
@@ -68,28 +73,10 @@ export function createClawDisplay(): Group {
 export function createBowDisplay(): Group {
   const root = new Group();
   root.name = 'Weapon-orion';
-  const f = forge('#5DFFB0');
-  const half = 0.75;
-  const radius = 0.38 / Math.sin(half);
-  const arc = (r: number, tubeR: number, material: MeshStandardMaterial) => {
-    const m = new Mesh(new TorusGeometry(r, tubeR, 6, 48, half * 2), material);
-    m.geometry.rotateZ(-half);
-    m.geometry.translate(-r, 0, 0);
-    root.add(m);
-    return m;
-  };
-  arc(radius, 0.011, f.metal);
-  arc(radius + 0.012, 0.004, f.energy);
-  arc(radius - 0.012, 0.003, f.trim);
-  const tipX = -radius * (1 - Math.cos(half));
-  for (const side of [-1, 1]) {
-    piece(root, new OctahedronGeometry(0.016, 0), f.core, tipX, side * 0.38, 0);
-    piece(root, new ConeGeometry(0.008, 0.06, 4), f.trim, tipX - 0.01, side * 0.41, 0, 0, 0, side * 0.6);
-  }
-  piece(root, bevelBox(0.03, 0.15, 0.03, 0.006), f.metal, 0, 0, 0);
-  piece(root, new CylinderGeometry(0.019, 0.019, 0.08, 12), f.dark, 0, 0, 0);
-  piece(root, new SphereGeometry(0.014, 12, 8), f.core, 0.02, 0.05, 0);
-  piece(root, new CylinderGeometry(0.0025, 0.0025, 0.76, 4), f.energy, tipX, 0, 0);
+  // The very bow the archer holds: recurve limbs, armoured riser, energy string.
+  const bow = new Bow(new Color('#5DFFB0'));
+  bow.showFree(new Vector3(), new Quaternion());
+  root.add(bow.group);
   root.rotation.y = Math.PI / 2;
   return root;
 }
@@ -175,7 +162,7 @@ export function createPsiDisplay(): Group {
   return root;
 }
 
-export type GunType = 'smg' | 'shotgun' | 'minigun';
+export type GunType = 'smg' | 'shotgun' | 'minigun' | 'launcher';
 
 /**
  * HAVOC's guns, held like the pistol: origin at the grip, barrel along +Z,
@@ -185,7 +172,7 @@ export type GunType = 'smg' | 'shotgun' | 'minigun';
 export function createGun(type: GunType): Group {
   const root = new Group();
   root.name = `Gun-${type}`;
-  const accent = type === 'smg' ? '#3DFF8A' : type === 'shotgun' ? '#FF3B5C' : '#FFD23F';
+  const accent = type === 'smg' ? '#3DFF8A' : type === 'shotgun' ? '#FF3B5C' : type === 'launcher' ? '#FF5A1F' : '#FFD23F';
   const f = forge(accent);
   // Pistol grip with grooves and a trigger guard.
   piece(root, bevelBox(0.03, 0.1, 0.045, 0.006), f.dark, 0, 0, 0, 0.25);
@@ -228,7 +215,26 @@ export function createGun(type: GunType): Group {
     for (let i = 0; i < 5; i += 1) piece(root, new CylinderGeometry(0.008, 0.008, 0.032, 10), f.energy, 0.027, 0.07, -0.03 + i * 0.02);
     piece(root, new BoxGeometry(0.008, 0.01, 0.01), f.energy, 0, 0.1, 0.56);
     muzzle.position.set(0, 0.08, 0.57);
+  } else if (type === 'launcher') {
+    // Shoulder-style missile launcher: a fat launch tube with a flared muzzle (the warhead peeking out),
+    // a vented rear cone, energy bands, an optic on a rail and a side ammo cell.
+    tube(root, 0.052, 0.056, 0.52, f.metal, 0, 0.09, 0.18, 22).name = 'Body';
+    tube(root, 0.066, 0.056, 0.06, f.trim, 0, 0.09, 0.47, 22);
+    tube(root, 0.06, 0.07, 0.1, f.dark, 0, 0.09, -0.12, 22);
+    for (const z of [0.0, 0.14, 0.28, 0.4]) band(root, 0.057, 0.004, z, z === 0.14 ? f.energy : f.trim, 0.09);
+    piece(root, new ConeGeometry(0.03, 0.09, 14), f.core, 0, 0.09, 0.45, Math.PI / 2);
+    for (let i = 0; i < 4; i += 1) piece(root, new BoxGeometry(0.004, 0.03, 0.04), f.energy, Math.cos((i / 4) * Math.PI * 2) * 0.034, 0.09 + Math.sin((i / 4) * Math.PI * 2) * 0.034, 0.41, 0, 0, (i / 4) * Math.PI * 2);
+    for (let i = 0; i < 6; i += 1) piece(root, new BoxGeometry(0.02, 0.006, 0.012), f.dark, 0, 0.15, -0.12 + i * 0.03);
+    piece(root, bevelBox(0.03, 0.02, 0.28, 0.004), f.trim, 0, 0.155, 0.18);
+    piece(root, bevelBox(0.034, 0.045, 0.08, 0.005), f.dark, 0, 0.19, 0.12);
+    piece(root, new TorusGeometry(0.016, 0.003, 6, 18), f.trim, 0, 0.195, 0.165);
+    piece(root, new SphereGeometry(0.006, 8, 6), f.core, 0, 0.195, 0.166);
+    piece(root, bevelBox(0.04, 0.07, 0.12, 0.006), f.metal, 0.06, 0.07, 0.14);
+    for (let i = 0; i < 3; i += 1) piece(root, new BoxGeometry(0.006, 0.012, 0.09), f.energy, 0.083, 0.045 + i * 0.022, 0.14);
+    piece(root, bevelBox(0.03, 0.055, 0.05, 0.005), f.dark, 0, 0.0, 0.2);
+    muzzle.position.set(0, 0.09, 0.52);
   } else {
+
     // Minigun: motor housing, six barrels on a spinning axis, ammo drum, carry handle.
     tube(root, 0.06, 0.066, 0.2, f.metal, 0, 0.07, 0.07, 18).name = 'Body';
     for (const z of [0.0, 0.14]) band(root, 0.066, 0.005, z, f.trim, 0.07);
@@ -280,6 +286,11 @@ export function createShield(color: string): Group {
   };
   const surface = (rho: number) => Math.sqrt(R * R - rho * rho) + C;
   face(R, 0.42, f.metal).name = 'Body';
+  // The inside of the dish: what the wearer sees, with the straps and grip in front of it.
+  const lining = f.dark.clone();
+  lining.side = BackSide;
+  lining.name = 'dark';
+  face(R - 0.004, 0.42, lining);
   face(R + 0.003, 0.3, paint);
   face(R + 0.006, 0.2, f.metal);
   face(R + 0.009, 0.11, paint);
@@ -299,8 +310,13 @@ export function createShield(color: string): Group {
   piece(root, new CylinderGeometry(0.06, 0.06, 0.012, 6), f.trim, 0, 0, surface(0) + 0.006, Math.PI / 2);
   piece(root, new CylinderGeometry(0.05, 0.05, 0.014, 6), f.energy, 0, 0, surface(0) + 0.009, Math.PI / 2);
   piece(root, new CylinderGeometry(0.026, 0.026, 0.018, 6), f.core, 0, 0, surface(0) + 0.012, Math.PI / 2);
-  // Straps and grip on the back.
-  for (const y of [-0.05, 0.06]) piece(root, new BoxGeometry(0.2, 0.03, 0.012), f.dark, 0, y, -0.07);
-  piece(root, new CylinderGeometry(0.014, 0.014, 0.12, 10), f.dark, 0, 0, -0.085, 0, 0, Math.PI / 2);
+  // Straps and grip on the back, with a padded rim and buckles.
+  for (const y of [-0.05, 0.06]) {
+    piece(root, new BoxGeometry(0.2, 0.034, 0.012), f.dark, 0, y, -0.07);
+    for (const x of [-0.08, 0.08]) piece(root, new BoxGeometry(0.02, 0.04, 0.016), f.trim, x, y, -0.072);
+  }
+  piece(root, new CylinderGeometry(0.016, 0.016, 0.13, 10), f.dark, 0, 0, -0.088, 0, 0, Math.PI / 2);
+  for (const x of [-0.07, 0.07]) piece(root, new BoxGeometry(0.012, 0.03, 0.034), f.trim, x, 0, -0.07);
+  piece(root, new TorusGeometry(0.2445, 0.01, 6, 48), f.dark, 0, 0, -0.004);
   return root;
 }
