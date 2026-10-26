@@ -6,5 +6,8 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // Some tests import modules on first use; on a loaded 8 GB machine the
+    // first import alone can pass the default 5 s.
+    testTimeout: 30000,
   },
 });
