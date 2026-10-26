@@ -32,7 +32,7 @@ import { applyRealism, loadSurfaceMaps } from './combat/materials.js';
 import { Claws } from './combat/claws.js';
 import { segmentDistance, Sword } from './combat/sword.js';
 import { PsiLink } from './combat/telekinesis.js';
-import { CLAP_TIP, Coach, HERO_TIPS, type Tip } from './combat/coach.js';
+import { CLAP_TIP, Coach, HERO_TIPS, SCREEN_TIPS, type Tip } from './combat/coach.js';
 import { BloodPools, BloodScreen, captureParts, Gibs, type Part, type PartName, restorePart } from './combat/bodies.js';
 import { Galaxy } from './combat/galaxy.js';
 import { Shards, type ShardStuff } from './combat/shards.js';
@@ -73,6 +73,10 @@ import { GameMenus, wrap } from './combat/menus.js';
 import { ENEMIES, type EnemyKind } from './combat/missions.js';
 import { Music } from './combat/music.js';
 import { Panel } from './combat/panel-ui.js';
+import { newView, Pilot } from './combat/pilot.js';
+import { AttractBot, Director, REEL_CROWD, REEL_KINDS, SHOT_SECONDS, SHOWCASE } from './combat/attract.js';
+import { ScreenInput } from './combat/screen-input.js';
+import { shell } from './shell.js';
 import {
   DIFFICULTY,
   ENEMY_COINS,
@@ -93,7 +97,7 @@ import { chapterFor, chapterForWorld, type Line, type LevelStory, levelStory } f
 import { createCocoon, WebStrand } from './combat/web.js';
 import { WristButton } from './combat/wrist.js';
 import { Hud } from './combat/hud.js';
-import { type Phase, Run, type SpawnOrder } from './combat/run.js';
+import { FIRST_INTRO_SECONDS, type Phase, Run, type SpawnOrder } from './combat/run.js';
 import { Sfx } from './combat/sfx.js';
 import { createGlowSprite, Flashes, getGlowTexture, Particles } from './combat/vfx.js';
 
@@ -220,8 +224,13 @@ interface HandState {
   webCooldown: number;
   wristPrev: Vector3;
   indexTip?: Vector3;
+  /** Katana tip last frame (each blade weapon keeps its own, or they reset each other). */
   prevTip: Vector3;
   hasPrevTip: boolean;
+  clawPrev: Vector3;
+  hasClawPrev: boolean;
+  /** Knuckles last frame, for VANGUARD's punch speed. */
+  punchPrev: Vector3;
   slashCooldown: number;
   sword: Sword;
   /** Enemy skewered on this hand's blade, if any. */
@@ -722,6 +731,32 @@ export class CombatSystem extends createSystem({
   private v2 = new Vector3();
   private v3 = new Vector3();
   private v4 = new Vector3();
+  /** Screen play (phone, tablet, monitor): puppet hands driven by taps and swipes. */
+  private screen!: ScreenInput;
+  private readonly pilot = new Pilot();
+  private readonly pilotView = newView();
+  private puppetPoses: [HandPose, HandPose] | null = null;
+  private readonly screenEuler = new Euler(0, 0, 0, 'YXZ');
+  private readonly screenRay = new Vector3();
+  /** No headset session: the page is played on a flat screen. */
+  private flat = true;
+  private frameDt = 0;
+  private screenTipHero = '';
+  private screenTipIndex = -1;
+  /** Pointer driving the hands this frame: the player's, or the reel bot's. */
+  private aimNdc: { x: number; y: number } = { x: 0, y: 0 };
+  /** The attract reel playing behind the landing page (see attract.ts). */
+  private attract = false;
+  private readonly noReel = new URLSearchParams(window.location.search).get('reel') === '0';
+  private readonly bot = new AttractBot();
+  private readonly director = new Director();
+  private shotIndex = -1;
+  private shotTime = 0;
+  private reelYaw = Number.NaN;
+  private readonly reelTargets = new Float32Array(16);
+  private readonly reelDepths = new Float32Array(8);
+  private reelSound = false;
+  private screenAspect = 0;
 
   init(): void {
     this.root = new Group();
@@ -827,6 +862,9 @@ export class CombatSystem extends createSystem({
         wristPrev: new Vector3(),
         prevTip: new Vector3(),
         hasPrevTip: false,
+        clawPrev: new Vector3(),
+        hasClawPrev: false,
+        punchPrev: new Vector3(),
         slashCooldown: 0,
         sword,
         skewer: null,
@@ -953,6 +991,7 @@ export class CombatSystem extends createSystem({
 
     const xr = this.world.renderer.xr;
     const onSessionStart = () => {
+      if (this.attract) this.stopAttract();
       this.sfx.unlock();
       this.hudPlaced = false;
       if (this.panel.visible) this.replaceMenuAt = this.elapsed + 0.6;
@@ -962,11 +1001,16 @@ export class CombatSystem extends createSystem({
     };
     xr.addEventListener('sessionstart', onSessionStart);
     const canvas = this.world.renderer.domElement;
-    const onPointer = (event: PointerEvent) => this.desktopFire(event);
-    canvas.addEventListener('pointerdown', onPointer);
+    this.screen = new ScreenInput(canvas);
+    this.screen.onPause = () => this.wristPressed();
+    this.aimNdc = this.screen.ndc;
+    shell.unlockAudio = () => this.sfx.unlock();
+    const unlock = () => this.sfx.unlock();
+    canvas.addEventListener('pointerdown', unlock);
     this.cleanupFuncs.push(
       () => xr.removeEventListener('sessionstart', onSessionStart),
-      () => canvas.removeEventListener('pointerdown', onPointer),
+      () => canvas.removeEventListener('pointerdown', unlock),
+      () => this.screen.dispose(),
     );
 
     void this.loadModels();
@@ -1310,7 +1354,39 @@ export class CombatSystem extends createSystem({
       panel: this.panel.visible,
       live: this.powersLive,
       enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}:${d.state}`),
+      kills: this.run.kills,
+      hands: this.hands.map((h) => h.tracked),
+      debug: {
+        bow: [this.bowHolder, this.drawing],
+        held: this.hands.map((h) => (h.held ? (h.held.drone ? 'alien' : h.held.kind) : h.aimDrone ? 'aim-alien' : h.aimObject ? 'aim-prop' : '')),
+        bolts: this.bolts.filter((b) => b.active).map((b) => b.kind),
+        hammer: this.hammerState,
+        shield: this.shieldState,
+        claws: this.hands.map((h) => [Math.round(h.claws.extension * 10) / 10, Math.round(h.tipVel.length() * 10) / 10, isFist(h.joints)]),
+        moves: [this.pilot.busy(0), this.pilot.busy(1)],
+      },
     });
+    // Test hook: where a panel button is on screen (NDC), to tap it like a player.
+    (window as unknown as { __surgeWidget: (id: string) => number[] | null }).__surgeWidget = (id: string) => {
+      const point = this.panel.visible ? this.panel.widgetPoint(id, new Vector3()) : null;
+      return point ? point.project(this.world.camera).toArray().slice(0, 2) : null;
+    };
+    // Test hook: live projectiles (kind, position, velocity, target position).
+    (window as unknown as { __surgeBolts: () => object[] }).__surgeBolts = () =>
+      this.bolts
+        .filter((b) => b.active)
+        .map((b) => ({
+          kind: b.kind,
+          at: b.position.toArray().map((v) => Math.round(v * 100) / 100),
+          vel: b.velocity.toArray().map((v) => Math.round(v * 10) / 10),
+          target: b.target ? b.target.object.position.toArray().map((v) => Math.round(v * 100) / 100) : null,
+          head: this.head.toArray().map((v) => Math.round(v * 100) / 100),
+        }));
+    // Test hook: enemies on screen (NDC x, y, depth), for driving taps and swipes.
+    (window as unknown as { __surgeTargets: () => number[][] }).__surgeTargets = () =>
+      this.drones
+        .filter((d) => d.state !== 'off' && d.state !== 'emerging' && d.state !== 'shot' && d.kind !== 'pod')
+        .map((d) => d.object.position.clone().project(this.world.camera).toArray());
     // Test hook: set the boss to a health fraction (e.g. to reach CONVERGENCE).
     (window as unknown as { __surgeBoss: (f: number) => void }).__surgeBoss = (f: number) => {
       const boss = this.findBoss();
@@ -1370,13 +1446,16 @@ export class CombatSystem extends createSystem({
   }
 
   private lastErrorAt = -10;
+  /** Longest frame step; headless tests raise it (?dtmax=) to run at real time on a slow renderer. */
+  private readonly maxDt = Math.min(0.25, Number(new URLSearchParams(window.location.search).get('dtmax')) || 0.05);
 
   private frame(delta: number, time: number): void {
     if (!this.ready) return;
     if (this.arena) this.arena.visible = !this.isPassthrough();
     if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) return;
-    const realDt = Math.min(delta, 0.05);
+    const realDt = Math.min(delta, this.maxDt);
     this.elapsed = time;
+    this.frameDt = realDt;
     if (this.slowmo > 0) this.slowmo -= realDt;
     let dt = this.slowmo > 0 ? realDt * SLOWMO_SCALE : realDt;
     // Hit-stop: the world nearly freezes for a blink when a heavy blow lands.
@@ -1385,6 +1464,7 @@ export class CombatSystem extends createSystem({
       dt *= 0.08;
     }
 
+    this.updateScreen(realDt);
     this.world.camera.getWorldPosition(this.head);
     this.headTriple[0] = this.head.x;
     this.headTriple[1] = this.head.y;
@@ -1400,7 +1480,9 @@ export class CombatSystem extends createSystem({
     for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
     this.updateHandMotion(realDt);
     this.updateHandDebug(realDt);
-    if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.wristPressed();
+    // On a flat screen the pause button replaces the wrist button.
+    if (this.flat) this.wrist.group.visible = false;
+    else if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.wristPressed();
 
     this.tips.length = 0;
     for (const hand of this.hands) {
@@ -1438,7 +1520,7 @@ export class CombatSystem extends createSystem({
 
     if (!this.paused) {
       const order = this.run.update(dt);
-      if (order) this.queueSpawn(order);
+      if (order && !(this.attract && this.reelCrowd() >= REEL_CROWD)) this.queueSpawn(order);
       this.updatePending(dt);
       this.updateDrones(dt, time);
       this.updateBlobs();
@@ -1503,6 +1585,10 @@ export class CombatSystem extends createSystem({
     for (const hand of this.hands) {
       hand.tracked = false;
       hand.pose.tracked = false;
+    }
+    if (!xr.isPresenting) {
+      this.readPuppets();
+      return;
     }
     const frame = xr.getFrame();
     const space = xr.getReferenceSpace();
@@ -1604,23 +1690,303 @@ export class CombatSystem extends createSystem({
     }
   }
 
-  private desktopFire(event: PointerEvent): void {
+  /**
+   * Screen play (no headset): the view follows the look controls, the
+   * on-screen buttons follow the game, and taps in menus press buttons.
+   */
+  private updateScreen(dt: number): void {
+    this.flat = !this.world.renderer.xr.isPresenting;
+    const intent = this.screen.frame(dt);
+    if (!this.flat) {
+      this.screen.show(false, false);
+      this.pilot.active = false;
+      this.menus.flat = false;
+      return;
+    }
+    const camera = this.world.camera;
+    this.menus.flat = true;
+    // Portrait screens see more with a taller field of view.
+    if (camera.aspect !== this.screenAspect) {
+      this.screenAspect = camera.aspect;
+      camera.fov = camera.aspect < 1 ? 70 + (1 - camera.aspect) * 45 : 70;
+      camera.updateProjectionMatrix();
+    }
+    const reel = shell.landing && this.ready && !this.noReel;
+    if (reel !== this.attract) {
+      if (reel) this.startAttract();
+      else this.stopAttract();
+    }
+    if (this.attract) {
+      this.director.update(dt, this.reelYaw);
+      this.screenEuler.set(this.director.pitch, this.director.yaw, this.director.roll, 'YXZ');
+    } else this.screenEuler.set(this.screen.pitch, this.screen.yaw, 0, 'YXZ');
+    camera.quaternion.setFromEuler(this.screenEuler);
+    camera.updateMatrixWorld();
+    if (this.attract) this.updateReel(dt);
+    shell.playing = !shell.landing && this.run.phase !== 'title';
+    const page = !shell.landing;
+    const playing = page && this.ready && !this.paused && !this.panel.visible && this.run.phase !== 'title';
+    this.pilot.active = playing || this.attract;
+    this.aimNdc = this.attract ? this.bot.ndc : this.screen.ndc;
+    this.screen.show(page, playing);
+    if (playing) {
+      const clap = hasUnlock(this.profile, `overdrive-${this.hero}`) && this.overdrive >= 1;
+      this.screen.setSpecial(clap ? 'CLAP!' : this.hero === 'ronin' && this.xCooldown <= 0 ? 'X-STRIKE' : '');
+    } else intent.special = false;
+    if (page && this.screen.clicked && !playing) this.screenClick();
+  }
+
+  /** A tap in the menus: a panel button, or a planet on the galaxy map. */
+  private screenClick(): void {
     this.sfx.unlock();
-    if (!this.ready || this.world.visibilityState.peek() !== VisibilityState.NonImmersive) return;
-    const rect = this.world.renderer.domElement.getBoundingClientRect();
-    this.v3
-      .set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1, 0.5)
-      .unproject(this.world.camera);
-    this.world.camera.getWorldPosition(this.v4);
-    this.v3.sub(this.v4).normalize();
-    const panelEvent = this.panel.click(this.v4, this.v3);
+    if (!this.ready) return;
+    this.world.camera.getWorldPosition(this.head);
+    this.screenAim(this.v3);
+    const panelEvent = this.panel.visible ? this.panel.click(this.head, this.v3) : null;
     if (panelEvent) {
       this.onPanelEvent(panelEvent.point, () => this.menus.handle(panelEvent));
       return;
     }
-    if (this.panel.visible || this.paused || this.run.phase === 'title') return;
-    this.v4.addScaledVector(this.v3, 0.3);
-    this.fire(this.v4, this.v3);
+    if (this.galaxy.visible) {
+      const index = this.galaxy.pick(this.head, this.v3);
+      if (index !== -2) this.galaxyChoose(index, this.head);
+    }
+  }
+
+  /** World direction from the camera through the pointer (the reel bot's while it plays). */
+  private screenAim(out: Vector3): Vector3 {
+    const camera = this.world.camera;
+    camera.getWorldPosition(this.v4);
+    return out.set(this.aimNdc.x, this.aimNdc.y, 0.5).unproject(camera).sub(this.v4).normalize();
+  }
+
+  /** Starts the attract reel behind the landing page. */
+  private startAttract(): void {
+    this.attract = true;
+    this.endScript();
+    this.tx = null;
+    this.paused = false;
+    this.resultTimer = -1;
+    this.panel.hide();
+    this.syncCarousel();
+    this.syncMap();
+    this.syncArmory();
+    this.syncGalaxy();
+    this.shotIndex = -1;
+    this.reelSound = false;
+    this.sfx.setVolumes(0, 0);
+    this.music.play('oblivion');
+    this.nextShot();
+  }
+
+  /** Cuts to the next hero of the reel, in that hero's world. */
+  private nextShot(): void {
+    this.shotIndex = (this.shotIndex + 1) % SHOWCASE.length;
+    this.shotTime = 0;
+    const shot = SHOWCASE[this.shotIndex];
+    const chapter = chapterFor(shot.hero);
+    const base = STAGES.find((st) => st.world.id === chapter.worldId) ?? STAGES[0];
+    const stage: Stage = { ...base, id: `reel-${shot.hero}`, waves: [{ count: 9999, interval: 1.1, speed: 1, kinds: REEL_KINDS, burst: 2 }] };
+    this.story = null;
+    this.setTwist('none');
+    this.equipHero(shot.hero);
+    const weapon = ARSENAL.find((w) => w.id === shot.weapon);
+    if (weapon) {
+      this.weaponDef = weapon;
+      this.applySkin();
+      this.applyArsenal();
+    }
+    this.tipQueue = [];
+    this.coach.hide();
+    this.setTheme(chapter.worldId);
+    this.erasure.setLook(lookFor(base.id, base.world.id));
+    this.run.start(stage, { maxHealth: 99, speedScale: 0.9, spawnScale: 1 });
+    // Straight into the fight: no countdown in a trailer.
+    this.run.update(FIRST_INTRO_SECONDS);
+    this.lastPhase = 'fighting';
+    this.bot.reset(shot.hero);
+    this.director.reset();
+    shell.showcase = shot.hero;
+    shell.cut += 1;
+  }
+
+  /** Leaves the reel: clears the field and opens the main menu. */
+  private stopAttract(): void {
+    this.attract = false;
+    shell.showcase = '';
+    for (const drone of this.drones) {
+      if (drone.state !== 'off') this.retireDrone(drone);
+      // Bodies still falling or lying from the reel go too.
+      if (drone.dying >= 0) this.endDeath(drone);
+    }
+    this.shards.clear();
+    for (const bolt of this.bolts) if (bolt.active) this.retireBolt(bolt);
+    for (const pickup of this.pickups) this.retirePickup(pickup);
+    for (const hand of this.hands) {
+      hand.web.hide();
+      hand.webState = 'idle';
+      hand.webTarget = null;
+      if (hand.held) this.releaseHeld(this.hands.indexOf(hand), false);
+    }
+    this.hideDebris();
+    this.pools.clear();
+    this.run.toTitle();
+    this.lastPhase = 'title';
+    this.pilot.active = false;
+    // Back to the player's own hero and gear.
+    this.hero = this.menus.hero;
+    this.weaponDef = equippedWeapon(this.profile, this.hero);
+    this.applySkin();
+    this.applyArsenal();
+    this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
+    this.screen.lookAt(0, -0.2);
+    this.world.camera.getWorldPosition(this.head);
+    this.world.camera.getWorldDirection(this.forward);
+    this.showMenu('main');
+    if (!this.flat) this.replaceMenuAt = this.elapsed + 0.6;
+  }
+
+  /** One frame of the reel: what the bot aims at, its input, the cuts and the sound switch. */
+  private updateReel(dt: number): void {
+    const camera = this.world.camera;
+    camera.getWorldPosition(this.v3);
+    // Enemies on screen, nearest first (insertion into a small fixed list).
+    const targets = this.reelTargets;
+    let count = 0;
+    const depths = this.reelDepths;
+    this.reelYaw = Number.NaN;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.state === 'shot' || drone.kind === 'pod' || drone.kind === 'orb') continue;
+      this.v1.copy(drone.object.position).project(camera);
+      if (this.v1.z > 1 || Math.abs(this.v1.x) > 0.92 || Math.abs(this.v1.y) > 0.92) continue;
+      const depth = drone.object.position.distanceTo(this.v3);
+      let k = Math.min(count, 7);
+      while (k > 0 && depths[k - 1] > depth) {
+        if (k < 8) {
+          depths[k] = depths[k - 1];
+          targets[k * 2] = targets[(k - 1) * 2];
+          targets[k * 2 + 1] = targets[(k - 1) * 2 + 1];
+        }
+        k -= 1;
+      }
+      if (k < 8) {
+        depths[k] = depth;
+        targets[k * 2] = this.v1.x;
+        targets[k * 2 + 1] = this.v1.y;
+        if (k === 0) this.reelYaw = Math.atan2(-(drone.object.position.x - this.v3.x), -(drone.object.position.z - this.v3.z));
+      }
+      count = Math.min(8, count + 1);
+    }
+    const tethered = this.hands[0].webState === 'tethered' || this.hands[1].webState === 'tethered';
+    const special = (hasUnlock(this.profile, `overdrive-${this.hero}`) && this.overdrive >= 1) || (this.hero === 'ronin' && this.xCooldown <= 0);
+    this.bot.update(dt, targets, count, tethered, special);
+    this.shotTime += dt;
+    if (this.shotTime > SHOT_SECONDS) this.nextShot();
+    if (shell.sound !== this.reelSound) {
+      this.reelSound = shell.sound;
+      this.sfx.setVolumes(shell.sound ? this.profile.settings.sfx : 0, shell.sound ? this.profile.settings.music : 0);
+    }
+  }
+
+  /** Walkers on the field during the reel. */
+  private reelCrowd(): number {
+    let n = 0;
+    for (const drone of this.drones) if (drone.state !== 'off' && drone.kind !== 'orb' && drone.kind !== 'pod') n += 1;
+    return n;
+  }
+
+  /** Screen play: the pilot poses both hands from taps, holds and swipes. */
+  private readPuppets(): void {
+    if (!this.pilot.active) {
+      this.pilot.update(this.frameDt, this.screen.intent, this.pilotView, this.head, this.camQuat, (this.puppetPoses ??= [this.hands[0].pose, this.hands[1].pose]));
+      return;
+    }
+    this.fillPilotView();
+    this.world.camera.getWorldQuaternion(this.camQuat);
+    const intent = this.attract ? this.bot.intent : this.screen.intent;
+    this.pilot.update(this.frameDt, intent, this.pilotView, this.head, this.camQuat, (this.puppetPoses ??= [this.hands[0].pose, this.hands[1].pose]));
+    for (let index = 0; index < 2; index += 1) {
+      const hand = this.hands[index];
+      const pose = hand.pose;
+      if (!pose.tracked) continue;
+      for (const [slot, joint] of this.handSlots[index]) {
+        slot[0] = pose.positions[joint * 3];
+        slot[1] = pose.positions[joint * 3 + 1];
+        slot[2] = pose.positions[joint * 3 + 2];
+      }
+      hand.tracked = true;
+    }
+  }
+
+  /** What the pilot needs: the aim point (snapped to the enemy under the pointer) and each weapon's state. */
+  private fillPilotView(): void {
+    const view = this.pilotView;
+    view.hero = this.hero;
+    this.screenAim(this.screenRay);
+    const camera = this.world.camera;
+    const canvas = this.world.renderer.domElement;
+    const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
+    const ndc = this.screen.ndc;
+    let best: Object3D | null = null;
+    let closest = 0.17;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.state === 'shot') continue;
+      this.v1.copy(drone.object.position).project(camera);
+      if (this.v1.z > 1) continue;
+      const d = Math.hypot((this.v1.x - ndc.x) * aspect, this.v1.y - ndc.y);
+      if (d < closest) {
+        closest = d;
+        best = drone.object;
+      }
+    }
+    if (this.hero === 'psion') {
+      for (const item of this.debris) {
+        if (item.state !== 'rest') continue;
+        this.v1.copy(item.object.position).project(camera);
+        if (this.v1.z > 1) continue;
+        const d = Math.hypot((this.v1.x - ndc.x) * aspect, this.v1.y - ndc.y);
+        if (d < closest) {
+          closest = d;
+          best = item.object;
+        }
+      }
+    }
+    if (best) {
+      view.target.copy(best.position);
+      view.range = view.target.distanceTo(this.head);
+    } else {
+      view.target.copy(this.head).addScaledVector(this.screenRay, 7);
+      view.range = 7;
+    }
+    view.hammerState = this.hammerState;
+    view.hammerHand = this.hammerHand;
+    view.hammerTime = this.hammerTime;
+    if (this.hammer) view.hammerAt.copy(this.hammer.position);
+    view.bowHolder = this.bowHolder;
+    view.bowAt.copy(this.bowLoose.position);
+    view.nock.copy(this.bow.restNock);
+    view.drawing = this.drawing;
+    view.gunHolder = this.gunHolder;
+    view.gunAt.copy(this.gunLoose.position);
+    view.shieldHand = this.profile.settings.leftHanded ? 1 : 0;
+    view.shieldWorn = this.shieldState === 'worn';
+    for (let i = 0; i < 2; i += 1) {
+      view.held[i] = this.hands[i].held != null;
+      view.tethered[i] = this.hands[i].webState === 'tethered';
+    }
+    view.overdrive = hasUnlock(this.profile, `overdrive-${this.hero}`) && this.overdrive >= 1;
+  }
+
+  /** Screen play: turns the view to the menu that just opened. */
+  private frameMenu(): void {
+    if (!this.flat) return;
+    this.v1.subVectors(this.panel.group.position, this.head);
+    const screen = this.menus.screen;
+    // Pitch that frames the panel with the 3D content above it (heroes,
+    // weapon) or below it (galaxy); otherwise straight at the panel.
+    const pitch =
+      screen === 'heroes' ? -0.42 : screen === 'garage' ? -0.38 : screen === 'galaxy' ? -0.2 : Math.atan2(this.v1.y, Math.hypot(this.v1.x, this.v1.z));
+    this.screen.lookAt(Math.atan2(-this.v1.x, -this.v1.z), pitch);
   }
 
 
@@ -1740,6 +2106,7 @@ export class CombatSystem extends createSystem({
     this.tipQueue = tips;
     this.tipIndex = 0;
     this.tipTimer = 0;
+    this.screenTipIndex = -1;
   }
 
   private applySkin(): void {
@@ -1812,6 +2179,7 @@ export class CombatSystem extends createSystem({
     this.panel.setContent(this.menus.content());
     this.placePanel();
     this.panel.show();
+    this.frameMenu();
     this.syncCarousel();
     this.syncMap();
     this.syncArmory();
@@ -1821,6 +2189,14 @@ export class CombatSystem extends createSystem({
 
   /** The hero screen sits low and close so the 3D heroes stay in view. */
   private placePanel(): void {
+    if (this.flat) {
+      // Flat screen: the panel and any 3D content fit one view (see frameMenu).
+      const screen = this.menus.screen;
+      if (screen === 'heroes' || screen === 'garage') this.panel.place(this.head, this.forward, 0.62, 0.42);
+      else if (screen === 'galaxy') this.panel.place(this.head, this.forward, 1.0, -0.1);
+      else this.panel.place(this.head, this.forward, 0.62, 0.02);
+      return;
+    }
     if (this.menus.screen === 'heroes') this.panel.place(this.head, this.forward, 0.42, 0.58);
     else if (this.menus.screen === 'map') this.panel.place(this.head, this.forward, 0.55, 0.02);
     else if (this.menus.screen === 'garage') this.panel.place(this.head, this.forward, 0.42, 0.58);
@@ -1863,7 +2239,7 @@ export class CombatSystem extends createSystem({
     });
     this.galaxy.build(nodes, finaleUnlocked(p), anchorsRecovered(p).length);
     this.galaxy.selected = this.menus.galaxyIndex;
-    if (!this.galaxy.visible) this.galaxy.show(this.head, this.forward);
+    if (!this.galaxy.visible) this.galaxy.show(this.head, this.forward, this.flat ? 0.85 : 0.5, this.flat ? 0.5 : 0.38);
   }
 
   /** Poking a planet picks that hero's front; the core starts the finale. */
@@ -1873,14 +2249,20 @@ export class CombatSystem extends createSystem({
     const index = this.galaxy.poked(this.tips);
     if (index === -2 || index === this.menus.galaxyIndex) return;
     this.galaxyPokeCooldown = 0.4;
+    this.galaxyChoose(index, this.tips[0] ?? this.head);
+  }
+
+  /** A planet (or the core, -1) picked on the galaxy map. */
+  private galaxyChoose(index: number, at: Vector3): void {
     if (index === -1) {
       if (finaleUnlocked(this.profile)) this.startStage('arc', FINALE);
       else this.sfx.denied();
       return;
     }
+    if (index === this.menus.galaxyIndex) return;
     this.menus.galaxyIndex = index;
     this.galaxy.selected = index;
-    this.v1.copy(this.tips[0] ?? this.head);
+    this.v1.copy(at);
     this.flashes.spawn(this.v1, this.accent, 0.02, 0.2, 0.25);
     this.sfx.swap();
     this.panel.setContent(this.menus.content());
@@ -3152,15 +3534,15 @@ export class CombatSystem extends createSystem({
       hand.slashCooldown -= dt;
       if (out && !wasOut && claws.extension > 0.5) this.sfx.shing();
       if (claws.extension < 0.8 || dt <= 0) {
-        hand.hasPrevTip = false;
+        hand.hasClawPrev = false;
         continue;
       }
-      if (!hand.hasPrevTip) {
-        hand.prevTip.copy(claws.tip);
-        hand.hasPrevTip = true;
+      if (!hand.hasClawPrev) {
+        hand.clawPrev.copy(claws.tip);
+        hand.hasClawPrev = true;
         continue;
       }
-      const speed = this.v3.subVectors(claws.tip, hand.prevTip).length() / dt;
+      const speed = this.v3.subVectors(claws.tip, hand.clawPrev).length() / dt;
       hand.tipVel.copy(this.v3).divideScalar(dt);
       const index = this.hands.indexOf(hand);
       if (hand.skewer == null) this.tryImpale(index, claws.base, claws.tip, claws.direction);
@@ -3168,10 +3550,10 @@ export class CombatSystem extends createSystem({
 
       for (const drone of this.drones) {
         if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < 0.25) continue;
-        if (!this.bladeHits(drone, claws.base, claws.tip, hand.prevTip)) continue;
+        if (!this.bladeHits(drone, claws.base, claws.tip, hand.clawPrev)) continue;
         drone.bladeHitAt = this.elapsed;
         this.sfx.slash();
-        this.v4.subVectors(claws.tip, hand.prevTip);
+        this.v4.subVectors(claws.tip, hand.clawPrev);
         this.v2.crossVectors(this.v4, claws.direction);
         this.markHit('slice', this.hitPoint, this.v4, this.v2);
         if (this.weaponDef.id === 'talon-molten') drone.burn = Math.max(drone.burn, 3);
@@ -3179,21 +3561,47 @@ export class CombatSystem extends createSystem({
         this.hitStop = Math.max(this.hitStop, 0.045);
       }
 
-      this.bladeProps(claws.base, claws.tip, hand.prevTip);
+      this.bladeProps(claws.base, claws.tip, hand.clawPrev);
       this.checkParry(claws.base, claws.tip);
       if (speed > CRESCENT_MIN_SWING * tuning.swing && hand.slashCooldown <= 0) {
         hand.slashCooldown = CRESCENT_COOLDOWN * (1 - 0.12 * this.level('talon-tempo')) * (this.buffRapid > 0 ? 0.5 : 1);
-        this.v4.subVectors(claws.tip, hand.prevTip).normalize();
-        this.fireCrescent(claws.tip, this.v4, claws.direction);
+        this.v4.subVectors(claws.tip, hand.clawPrev).normalize();
+        const target = this.aimWave(this.v4);
+        const wave = this.fireCrescent(claws.tip, this.v4, claws.direction);
+        if (wave && target) wave.target = target;
       }
-      hand.prevTip.copy(claws.tip);
+      hand.clawPrev.copy(claws.tip);
     }
   }
 
+  /**
+   * Slash waves follow the swing but fly out ahead: a chop or a sweep across
+   * the body still sends the wave at the enemies in front instead of into
+   * the floor or off to the side. Bends `swing` in place; returns the enemy
+   * nearest that line for aim assist.
+   */
+  private aimWave(swing: Vector3): Drone | null {
+    this.v1.set(this.forward.x, 0, this.forward.z).normalize();
+    swing.addScaledVector(this.v1, 1.2).normalize();
+    if (swing.y < -0.25) swing.setY(-0.25).normalize();
+    if (!this.profile.settings.aimAssist) return null;
+    let best = 0.8;
+    let target: Drone | null = null;
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.state === 'shot' || drone.kind === 'pod') continue;
+      const cos = this.v1.subVectors(drone.object.position, this.head).normalize().dot(swing);
+      if (cos > best) {
+        best = cos;
+        target = drone;
+      }
+    }
+    return target;
+  }
+
   /** Slash wave; radius/damage/scale default to TALON's (with upgrades). */
-  private fireCrescent(origin: Vector3, direction: Vector3, bladeDirection: Vector3, radius?: number, damage?: number, scale = 1, quiet = false): void {
+  private fireCrescent(origin: Vector3, direction: Vector3, bladeDirection: Vector3, radius?: number, damage?: number, scale = 1, quiet = false): Bolt | null {
     const bolt = this.bolts.find((b) => !b.active);
-    if (bolt == null) return;
+    if (bolt == null) return null;
     bolt.kind = 'crescent';
     bolt.blast = 0;
     bolt.zap = false;
@@ -3224,9 +3632,10 @@ export class CombatSystem extends createSystem({
     this.v1.copy(origin).add(direction);
     bolt.object.lookAt(this.v1);
     bolt.object.visible = true;
-    if (quiet) return;
+    if (quiet) return bolt;
     this.flashes.spawn(origin, this.accent, 0.05, 0.35, 0.18);
     this.sfx.crescent();
+    return bolt;
   }
 
   // ---------------------------------------------------------------- hands
@@ -4209,7 +4618,16 @@ export class CombatSystem extends createSystem({
           else this.tipQueue = [];
         }
       }
-      if (this.tipQueue.length > 0) {
+      if (this.tipQueue.length > 0 && this.flat) {
+        // Flat screen: the same lessons as taps and swipes, at the bottom of the screen.
+        this.coach.hide();
+        const tips = SCREEN_TIPS[this.hero];
+        if (this.tipIndex < tips.length && (this.screenTipHero !== this.hero || this.screenTipIndex !== this.tipIndex)) {
+          this.screenTipHero = this.hero;
+          this.screenTipIndex = this.tipIndex;
+          this.screen.showTip(tips[this.tipIndex].title, tips[this.tipIndex].sub, TIP_SECONDS);
+        }
+      } else if (this.tipQueue.length > 0) {
         const n = this.tipQueue.length;
         this.coach.show(this.tipQueue[this.tipIndex], this.accentHex, n > 1 ? `${this.tipIndex + 1} / ${n}` : '');
       } else this.coach.hide();
@@ -4624,8 +5042,8 @@ export class CombatSystem extends createSystem({
   private updatePunch(hand: HandState, dt: number, force: number): void {
     if (!hand.tracked || dt <= 0) return;
     hand.pose.position(J.middleProx, this.v1);
-    const speed = this.v2.subVectors(this.v1, hand.prevTip).length() / dt;
-    hand.prevTip.copy(this.v1);
+    const speed = this.v2.subVectors(this.v1, hand.punchPrev).length() / dt;
+    hand.punchPrev.copy(this.v1);
     if (speed < 1.6 * tuning.swing || !isFist(hand.joints)) return;
     for (const item of this.debris) {
       if ((item.state !== 'rest' && item.state !== 'flying') || this.elapsed - item.bashAt < 0.3) continue;
@@ -4703,7 +5121,9 @@ export class CombatSystem extends createSystem({
         hand.slashCooldown = SWORD_WAVE_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
         const wave = this.level('ronin-wave');
         this.v4.subVectors(sword.tip, hand.prevTip).normalize();
-        this.fireCrescent(sword.tip, this.v4, sword.direction, 0.3 + 0.04 * wave, 2 + Math.ceil(wave / 2), 1.5 + 0.12 * wave);
+        const target = this.aimWave(this.v4);
+        const bolt = this.fireCrescent(sword.tip, this.v4, sword.direction, 0.3 + 0.04 * wave, 2 + Math.ceil(wave / 2), 1.5 + 0.12 * wave);
+        if (bolt && target) bolt.target = target;
       }
       // Weapon tier (and the flame blade): flames lick up the blade.
       const flame = this.weaponDef.id === 'ronin-flame';
@@ -5570,6 +5990,11 @@ export class CombatSystem extends createSystem({
       if (this.v2.length() > 0.05) object.position.addScaledVector(this.v2.normalize(), 0.35 * dt);
       object.rotation.y += dt * 2;
       object.scale.setScalar(1 + Math.sin(time * 5) * 0.1);
+      // Flat screen: it is yours once it reaches you.
+      if (this.flat && object.position.distanceTo(this.head) < 0.75) {
+        this.collect(pickup);
+        continue;
+      }
       for (const hand of this.hands) {
         if (!hand.tracked) continue;
         if (hand.gauntlet.palmPoint.distanceTo(object.position) > 0.16 && (hand.indexTip?.distanceTo(object.position) ?? 1) > 0.12) continue;
@@ -5813,6 +6238,8 @@ export class CombatSystem extends createSystem({
   }
 
   private hurtPlayer(damage: number, counted: boolean, from?: Vector3): void {
+    // The attract reel's hero is untouchable.
+    if (this.attract) return;
     // The prologue teaches; it never kills.
     if (this.script === 'prologue') damage = 0;
     // Blood on the side of the view the hit came from.
@@ -6596,7 +7023,7 @@ export class CombatSystem extends createSystem({
           hint = TWIST_INFO[this.twist].name ? `TWIST: ${TWIST_INFO[this.twist].name}  |  ${TWIST_INFO[this.twist].hint}` : `${run.stage.name}  |  ${run.stage.objective}`;
         } else if (run.wave === 0) {
           message = String(Math.max(1, 3 - Math.floor(run.elapsedInPhase - 1)));
-          hint = 'Get ready  |  left wrist = pause';
+          hint = this.flat ? 'Get ready' : 'Get ready  |  left wrist = pause';
         } else {
           message = `WAVE ${run.wave + 1}`;
           const villain = chapterForWorld(run.stage.world.id)?.villain.name;
@@ -6621,7 +7048,7 @@ export class CombatSystem extends createSystem({
       hint = this.pending.champion ? `CHAMPION INCOMING: ${CHAMPIONS[run.stage.id] ?? 'ELITE'}` : 'BOSS INCOMING';
     }
     if (this.paused) message = 'PAUSED';
-    this.hud.mesh.visible = run.phase !== 'title' && !(this.panel.visible && !this.paused);
+    this.hud.mesh.visible = !this.attract && run.phase !== 'title' && !(this.panel.visible && !this.paused);
     const boss = this.drones.find((d) => (d.kind === 'boss' || d.champion !== '') && d.state !== 'off' && d.state !== 'hold');
     this.hud.extras.boss = boss
       ? { name: boss.champion || (boss.world === 'oblivion' ? OBLIVAX.name : chapterForWorld(boss.world)?.villain.name ?? 'BOSS'), fraction: Math.max(0, boss.hp / boss.maxHp) }
@@ -6654,7 +7081,8 @@ export class CombatSystem extends createSystem({
     if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
     this.v1.normalize();
     this.v2.copy(this.head).addScaledVector(this.v1, 1.6);
-    this.v2.y = this.head.y + 0.42;
+    // Lower on a flat screen, so the whole board stays in view.
+    this.v2.y = this.head.y + (this.flat ? 0.3 : 0.42);
     const mesh = this.hud.mesh;
     if (!this.hudPlaced) {
       mesh.position.copy(this.v2);

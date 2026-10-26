@@ -106,6 +106,8 @@ function totalStars(profile: Profile): number {
 export class GameMenus {
   screen: Screen = 'main';
   hero: HeroId = 'arc';
+  /** Played on a flat screen (taps instead of pokes and wrist buttons). */
+  flat = false;
   /** Hero under the carousel spotlight. */
   heroFocus = 0;
   /** Planet (hero index) selected on the galaxy map. */
@@ -282,7 +284,7 @@ export class GameMenus {
               y: 830,
               w: 896,
               h: 80,
-              label: 'Poke buttons with a fingertip. Left wrist button pauses a fight.',
+              label: this.flat ? 'Tap the buttons. The II button pauses a fight.' : 'Poke buttons with a fingertip. Left wrist button pauses a fight.',
               size: 30,
               color: 'rgba(233,252,255,0.6)',
             },
@@ -301,7 +303,7 @@ export class GameMenus {
     const color = equippedColor(p, hero.id);
     return {
       title: 'THE ANCHOR WAR',
-      subtitle: `Anchors ${anchors}/9. Poke a planet below to choose a front.`,
+      subtitle: `Anchors ${anchors}/9. ${this.flat ? 'Tap' : 'Poke'} a planet below to choose a front.`,
       coins: p.coins,
       accent: color,
       widgets: [
@@ -371,7 +373,7 @@ export class GameMenus {
     const pick = !playable ? 'COMING SOON' : hero.id === this.hero ? 'SELECTED - TAP TO PLAY' : owned ? 'SELECT HERO' : `UNLOCK FOR ${price} C`;
     return {
       title: 'CHOOSE YOUR HERO',
-      subtitle: 'Swipe an open hand sideways (one hero per swipe), or poke the arrows',
+      subtitle: this.flat ? 'Tap the arrows to meet each hero' : 'Swipe an open hand sideways (one hero per swipe), or poke the arrows',
       coins: this.profile.coins,
       accent: color,
       widgets: [
@@ -643,7 +645,7 @@ export class GameMenus {
   }
 
   private howtoScreen(accent: string): PanelContent {
-    const lines = HEROES.map((h) => `${h.name.padEnd(8)} ${h.power} - ${h.how}`).join('\n');
+    const lines = HEROES.map((h) => `${h.name.padEnd(8)} ${h.power} - ${this.flat ? h.tap : h.how}`).join('\n');
     return {
       title: 'HOW TO PLAY',
       subtitle: 'Enemies breach your space. Stop them before they reach you.',
@@ -661,7 +663,7 @@ export class GameMenus {
           w: 1440,
           h: 200,
           label:
-            'Chain kills for a combo multiplier. Free hostages and keep your shield for 3 stars.\nLeft wrist button: pause. Clap when OVERDRIVE is full.\nIcons: game-icons.net (Lorc, Delapouite), CC BY 3.0.',
+            `Chain kills for a combo multiplier. Free hostages and keep your shield for 3 stars.\n${this.flat ? 'II button: pause. Press CLAP! when OVERDRIVE is full.' : 'Left wrist button: pause. Clap when OVERDRIVE is full.'}\nIcons: game-icons.net (Lorc, Delapouite), CC BY 3.0.`,
           size: 32,
           color: 'rgba(233,252,255,0.7)',
         },

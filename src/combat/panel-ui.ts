@@ -263,6 +263,14 @@ export class Panel {
     this.local.y = (0.5 - this.local.y / HEIGHT_M) * PANEL_PX_H;
   }
 
+  /** World position of widget `id`'s centre, or null if the panel has none (tests aim taps with it). */
+  widgetPoint(id: string, out: Vector3): Vector3 | null {
+    const w = this.content.widgets.find((x) => x.id === id);
+    if (w == null) return null;
+    out.set(((w.x + w.w / 2) / PANEL_PX_W - 0.5) * WIDTH_M, (0.5 - (w.y + w.h / 2) / PANEL_PX_H) * HEIGHT_M, 0);
+    return this.face.localToWorld(out);
+  }
+
   /** Handles fingertip pokes; returns a press event or null. */
   update(dt: number, tips: readonly Vector3[]): PanelEvent | null {
     if (!this.visible) return null;

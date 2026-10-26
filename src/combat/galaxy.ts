@@ -207,12 +207,12 @@ export class Galaxy {
   }
 
   /** Floats the galaxy at chest height in front of the player, within reach. */
-  show(head: Vector3, forward: Vector3): void {
+  show(head: Vector3, forward: Vector3, distance = 0.5, drop = 0.38): void {
     this.flat.set(forward.x, 0, forward.z);
     if (this.flat.lengthSq() < 1e-4) this.flat.set(0, 0, -1);
     this.flat.normalize();
-    this.group.position.copy(head).addScaledVector(this.flat, 0.5);
-    this.group.position.y = head.y - 0.38;
+    this.group.position.copy(head).addScaledVector(this.flat, distance);
+    this.group.position.y = head.y - drop;
     this.group.rotation.set(0, Math.atan2(this.flat.x, this.flat.z) + Math.PI, 0);
     this.visible = true;
     this.group.visible = true;
@@ -221,6 +221,30 @@ export class Galaxy {
   hide(): void {
     this.visible = false;
     this.group.visible = false;
+  }
+
+  /** Planet index along a ray (screen play: a tap), -1 for the core, or -2 for nothing. */
+  pick(origin: Vector3, direction: Vector3): number {
+    if (!this.visible) return -2;
+    let best = -2;
+    let closest = Infinity;
+    const test = (index: number, radius: number) => {
+      this.p.sub(origin);
+      const along = this.p.dot(direction);
+      if (along <= 0) return;
+      const miss = Math.sqrt(Math.max(0, this.p.lengthSq() - along * along));
+      if (miss < radius && along < closest) {
+        closest = along;
+        best = index;
+      }
+    };
+    this.core.getWorldPosition(this.p);
+    test(-1, 0.07);
+    for (let i = 0; i < this.planets.length; i += 1) {
+      this.planets[i].body.getWorldPosition(this.p);
+      test(i, 0.055);
+    }
+    return best;
   }
 
   /** Planet index under a fingertip, -1 for the core, or -2 for nothing. */

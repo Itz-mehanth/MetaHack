@@ -10,5 +10,8 @@ World.create(
 ).then((world) => {
   world.registerSystem(CombatSystem);
   world.registerSystem(PanelSystem);
+  // Phones report 3x pixel density; cap it so the page stays smooth (XR sets its own resolution).
+  const touch = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  world.renderer.setPixelRatio(Math.min(window.devicePixelRatio, touch ? 1.5 : 2));
   setupLanding(world);
 });

@@ -70,6 +70,40 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
 
 export const CLAP_TIP: Tip = { gesture: 'clap', title: 'CLAP YOUR HANDS!', sub: 'Every hero fires at once.' };
 
+/** The same lessons for playing on a phone or a monitor (tap, hold, swipe). */
+export const SCREEN_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
+  arc: [
+    { gesture: 'palm', title: 'TAP OR HOLD ON ENEMIES', sub: 'Your palm turns and fires where you point.' },
+    { gesture: 'palm', title: 'KEEP HOLDING', sub: 'After a second both hands fire.' },
+  ],
+  talon: [
+    { gesture: 'fist', title: 'TAP TO STRIKE', sub: 'Claws rake what you tap. Hold to keep slashing.' },
+    { gesture: 'swing', title: 'SWIPE TO SLASH', sub: 'Fast swipes throw slash waves.' },
+  ],
+  tempest: [
+    { gesture: 'throw', title: 'TAP TO THROW THE HAMMER', sub: 'It flies at what you tap, then comes back.' },
+    { gesture: 'palm', title: 'TAP AGAIN TO RECALL', sub: 'It also returns by itself.' },
+  ],
+  orion: [{ gesture: 'pinch', title: 'HOLD TO DRAW, LET GO TO SHOOT', sub: 'Drag to aim. A full draw hits harder.' }],
+  weaver: [
+    { gesture: 'web', title: 'TAP TO SHOOT A WEB', sub: 'It sticks like a bullet and holds them.' },
+    { gesture: 'throw', title: 'SWIPE TO THROW THEM', sub: 'Swipe down instead to rip them apart.' },
+  ],
+  havoc: [{ gesture: 'trigger', title: 'HOLD TO FIRE', sub: 'The gun follows your finger.' }],
+  ronin: [
+    { gesture: 'fist', title: 'TAP TO CUT, SWIPE TO SLASH', sub: 'Hard swipes send slash waves.' },
+    { gesture: 'cross', title: 'X-STRIKE', sub: 'Press X-STRIKE (or a second finger) to cross both blades.' },
+  ],
+  vanguard: [
+    { gesture: 'throw', title: 'TAP TO THROW THE SHIELD', sub: 'It bounces between enemies and comes back.' },
+    { gesture: 'fist', title: 'HOLD TO BLOCK', sub: 'Shots bounce off it. Tap close enemies to punch.' },
+  ],
+  psion: [
+    { gesture: 'palm', title: 'PRESS ON A CRATE OR ALIEN', sub: 'Keep holding: you lift it with your mind.' },
+    { gesture: 'throw', title: 'DRAG, THEN LET GO', sub: 'It flies at whatever you point at.' },
+  ],
+};
+
 const W = 1024;
 const H = 400;
 const FONT = "'Bangers', 'Impact', sans-serif";
