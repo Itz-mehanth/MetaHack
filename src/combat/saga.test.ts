@@ -103,3 +103,18 @@ describe('finishes', () => {
     expect(p.coins).toBe(1400);
   });
 });
+
+describe('gesture sensitivity', () => {
+  it('loosens and tightens the thresholds, and resets', async () => {
+    const g = await import('./gestures.js');
+    g.setSensitivity('high');
+    expect(g.tuning.fist).toBeGreaterThan(g.FIST_RATIO);
+    expect(g.tuning.open).toBeLessThan(g.OPEN_RATIO);
+    expect(g.tuning.swing).toBeLessThan(1);
+    g.setSensitivity('low');
+    expect(g.tuning.fist).toBeLessThan(g.FIST_RATIO);
+    expect(g.tuning.swing).toBeGreaterThan(1);
+    g.setSensitivity('normal');
+    expect(g.tuning).toEqual({ fist: g.FIST_RATIO, open: g.OPEN_RATIO, swing: 1 });
+  });
+});

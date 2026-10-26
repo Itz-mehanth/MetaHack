@@ -67,6 +67,13 @@ throughout (no Marvel or other third-party names/designs).
   Bullets, blades, hammer, shield, punches, meteors, explosions and thrown
   props damage them; non-lethal hits shove them; shards bounce off the real
   room; destroyed props rebuild after 6-10 s. Hook: __surgeProp(kind).
+- Hands push the world: a fast palm slaps enemy shots back at the aliens
+  (SLAP!); free hands shove aliens (knockback) and props. WEAVER's tether
+  is a simulated rope (sags, swings with the hand).
+- Tuning on device: Settings > GESTURES (NORMAL / VERY SENSITIVE / STRICT:
+  fist and open-palm ratios, swing/throw speed multiplier, gestures.ts
+  `tuning`), Settings > HAND DEBUG (finger ratios I/M/R/P, detected gesture,
+  palm speed and pinch distance floating over each wrist).
 - Audio: cinematic synthesised score (music.ts: drums, sub bass, strings,
   brass, choir, bells, per-track lead melody, reverb + echo, 16-bar songs,
   intensity 0 calm / 1 combat / 2 boss) and layered SFX with a hall reverb.

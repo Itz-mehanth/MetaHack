@@ -612,6 +612,8 @@ export class GameMenus {
         BACK,
         { id: 'music', kind: 'slider', x: 64, y: 230, w: 1000, h: 110, label: 'MUSIC', value: s.music },
         { id: 'sfx', kind: 'slider', x: 64, y: 370, w: 1000, h: 110, label: 'SOUND EFFECTS', value: s.sfx },
+        { id: 'gestures', x: 1100, y: 230, w: 436, h: 110, label: 'GESTURES', sub: s.gestures === 'high' ? 'VERY SENSITIVE' : s.gestures === 'low' ? 'STRICT' : 'NORMAL', selected: s.gestures !== 'normal' },
+        { id: 'handdebug', x: 1100, y: 370, w: 436, h: 110, label: 'HAND DEBUG', sub: s.handDebug ? 'ON: VALUES ON HANDS' : 'OFF', selected: s.handDebug },
         { id: 'aim', x: 64, y: 530, w: 460, h: 110, label: 'AIM ASSIST', sub: s.aimAssist ? 'ON' : 'OFF', selected: s.aimAssist },
         { id: 'difficulty', x: 544, y: 530, w: 460, h: 110, label: 'DIFFICULTY', sub: s.difficulty.toUpperCase() },
         { id: 'lefty', x: 1024, y: 530, w: 512, h: 110, label: 'BOW HAND', sub: s.leftHanded ? 'RIGHT HAND' : 'LEFT HAND' },
@@ -869,6 +871,14 @@ export class GameMenus {
         return;
       case 'spawns':
         p.settings.allAround = !p.settings.allAround;
+        this.actions.changed();
+        return;
+      case 'gestures':
+        p.settings.gestures = p.settings.gestures === 'normal' ? 'high' : p.settings.gestures === 'high' ? 'low' : 'normal';
+        this.actions.changed();
+        return;
+      case 'handdebug':
+        p.settings.handDebug = !p.settings.handDebug;
         this.actions.changed();
         return;
       case 'lefty':

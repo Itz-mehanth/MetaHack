@@ -12,6 +12,7 @@ import {
   type Sprite,
   Vector3,
 } from '@iwsdk/core';
+import { createRope, layRope, type Room } from './physics.js';
 import { createGlowSprite } from './vfx.js';
 
 const POINTS = 16;
@@ -27,6 +28,9 @@ export class WebStrand {
   private readonly materials: LineBasicMaterial[] = [];
   private readonly blob: Sprite;
   private readonly p = new Vector3();
+  /** A real rope while tethered: it sags, swings with the hand and drags. */
+  private readonly rope = createRope(POINTS - 1, 0.01);
+  private roped = false;
 
   constructor(parent: Object3D, color: Color) {
     for (let k = 0; k < 2; k += 1) {
@@ -63,10 +67,42 @@ export class WebStrand {
   hide(): void {
     for (const line of this.lines) line.visible = false;
     this.blob.visible = false;
+    this.roped = false;
+  }
+
+  /** Tethered: simulates the strand as a rope pinned at `origin` and `this.head`. */
+  drawRope(origin: Vector3, dt: number, room: Room, time: number): void {
+    const rope = this.rope;
+    const last = POINTS - 1;
+    if (!this.roped) {
+      layRope(rope, origin, this.head, 1.06);
+      this.roped = true;
+    }
+    rope.step(Math.max(dt, 1e-4), 9.8, room, 6, 0.3, 0.1);
+    rope.setPoint(0, origin.x, origin.y, origin.z);
+    rope.setPoint(last, this.head.x, this.head.y, this.head.z);
+    for (let k = 0; k < 2; k += 1) {
+      const positions = this.positions[k];
+      for (let i = 0; i < POINTS; i += 1) {
+        this.p.fromArray(rope.pos, i * 3);
+        // The second strand shimmers around the first.
+        if (k === 1) {
+          const envelope = Math.sin((Math.PI * i) / last);
+          this.p.x += Math.sin(time * 30 + i * 1.7) * 0.006 * envelope;
+          this.p.z -= Math.sin(time * 30 + i * 1.7) * 0.006 * envelope;
+        }
+        this.p.toArray(positions, i * 3);
+      }
+      this.lines[k].geometry.attributes.position.needsUpdate = true;
+      this.lines[k].visible = true;
+    }
+    this.blob.position.copy(this.head);
+    this.blob.visible = true;
   }
 
   /** Draws the strand from `origin` to `this.head`. */
   draw(origin: Vector3, time: number, taut: number): void {
+    this.roped = false;
     const length = origin.distanceTo(this.head);
     for (let k = 0; k < 2; k += 1) {
       const positions = this.positions[k];

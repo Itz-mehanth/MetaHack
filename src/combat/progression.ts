@@ -225,6 +225,10 @@ export interface Settings {
   leftHanded: boolean;
   /** Enemies come from every wall in the room, not just ahead. */
   allAround: boolean;
+  /** Gesture sensitivity (finger and swing thresholds). */
+  gestures: 'low' | 'normal' | 'high';
+  /** Live readout of finger values and detected gestures above each hand. */
+  handDebug: boolean;
 }
 
 export interface Profile {
@@ -261,7 +265,7 @@ export function defaultProfile(): Profile {
     loadout: {},
     finishes: [],
     finish: {},
-    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false },
+    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false },
   };
 }
 

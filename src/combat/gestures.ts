@@ -55,14 +55,29 @@ export function palmCenter(hand: HandJoints): [number, number, number] {
 export const OPEN_RATIO = 1.65;
 export const FIST_RATIO = 1.4;
 
+/**
+ * Live thresholds, adjustable in Settings because hand sizes and tracking
+ * vary: finger ratios for a fist and an open palm, and a multiplier on the
+ * swing and throw speeds the powers need.
+ */
+export const tuning = { fist: FIST_RATIO, open: OPEN_RATIO, swing: 1 };
+
+export type Sensitivity = 'low' | 'normal' | 'high';
+
+export function setSensitivity(level: Sensitivity): void {
+  tuning.fist = level === 'high' ? 1.5 : level === 'low' ? 1.32 : FIST_RATIO;
+  tuning.open = level === 'high' ? 1.55 : level === 'low' ? 1.72 : OPEN_RATIO;
+  tuning.swing = level === 'high' ? 0.8 : level === 'low' ? 1.15 : 1;
+}
+
 export function isOpenPalm(hand: HandJoints): boolean {
   const e = fingerExtension(hand);
-  return e[0] > OPEN_RATIO && e[1] > OPEN_RATIO && e[2] > OPEN_RATIO;
+  return e[0] > tuning.open && e[1] > tuning.open && e[2] > tuning.open;
 }
 
 export function isFist(hand: HandJoints): boolean {
   const e = fingerExtension(hand);
-  return e[0] < FIST_RATIO && e[1] < FIST_RATIO && e[2] < FIST_RATIO && e[3] < FIST_RATIO;
+  return e[0] < tuning.fist && e[1] < tuning.fist && e[2] < tuning.fist && e[3] < tuning.fist;
 }
 
 /**
@@ -90,5 +105,5 @@ export function isBlastPose(
  */
 export function isWebPose(hand: HandJoints): boolean {
   const e = fingerExtension(hand);
-  return e[0] > OPEN_RATIO && e[3] > OPEN_RATIO - 0.1 && e[1] < FIST_RATIO && e[2] < FIST_RATIO;
+  return e[0] > tuning.open && e[3] > tuning.open - 0.1 && e[1] < tuning.fist && e[2] < tuning.fist;
 }

@@ -1,7 +1,10 @@
 import {
   AdditiveBlending,
+  CanvasTexture,
   Color,
   createSystem,
+  SpriteMaterial,
+  Sprite as ThreeSprite,
   IcosahedronGeometry,
   type Light,
   PointLight,
@@ -62,7 +65,7 @@ import {
 } from './combat/saga.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
-import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose } from './combat/gestures.js';
+import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isWebPose, setSensitivity, tuning } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { HoloMap } from './combat/holomap.js';
@@ -223,6 +226,14 @@ interface HandState {
   sword: Sword;
   /** Enemy skewered on this hand's blade, if any. */
   skewer: Drone | null;
+  /** Palm velocity (m/s, smoothed) for slaps and shoves. */
+  palmVel: Vector3;
+  palmPrev: Vector3;
+  palmValid: boolean;
+  /** HAND DEBUG readout above the wrist. */
+  debug: Sprite;
+  debugCanvas: HTMLCanvasElement;
+  debugTexture: CanvasTexture;
   /** Blade tip velocity this frame (swords and claws). */
   tipVel: Vector3;
   /** Seconds the sword stays lit after the fist last read as closed. */
@@ -571,6 +582,8 @@ export class CombatSystem extends createSystem({
   private hitForce = 1;
   /** Seconds of hit-stop left: the world nearly freezes when a heavy blow lands. */
   private hitStop = 0;
+  private debugTimer = 0;
+  private shoveAt = -10;
   /** The player's room (MR planes) for collisions, rebuilt twice a second. */
   private room = new Room();
   private roomTimer = 0;
@@ -734,6 +747,7 @@ export class CombatSystem extends createSystem({
     this.root.add(this.panel.group);
     this.music = new Music(this.sfx);
     this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
+    setSensitivity(this.profile.settings.gestures);
     this.menus = new GameMenus(this.profile, {
       play: (hero, stage) => this.startStage(hero, stage),
       resume: () => this.resumeStage(),
@@ -816,6 +830,10 @@ export class CombatSystem extends createSystem({
         slashCooldown: 0,
         sword,
         skewer: null,
+        palmVel: new Vector3(),
+        palmPrev: new Vector3(),
+        palmValid: false,
+        ...this.makeDebugLabel(),
         tipVel: new Vector3(),
         swordHold: 0,
         psi,
@@ -1380,6 +1398,8 @@ export class CombatSystem extends createSystem({
     }
     this.readHands();
     for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
+    this.updateHandMotion(realDt);
+    this.updateHandDebug(realDt);
     if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.wristPressed();
 
     this.tips.length = 0;
@@ -1405,6 +1425,7 @@ export class CombatSystem extends createSystem({
     this.updateSwords(realDt, time);
     this.updateShield(realDt);
     this.updatePsion(realDt, dt, time);
+    if (this.powersLive) this.updateShoves();
     this.updateScript(realDt, time);
     if (!this.paused) this.updateTwist(dt, time);
     this.coach.update(realDt, this.head, this.forward);
@@ -2199,6 +2220,7 @@ export class CombatSystem extends createSystem({
   private profileChanged(): void {
     saveProfile(this.profile);
     this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
+    setSensitivity(this.profile.settings.gestures);
     this.applySkin();
   }
 
@@ -2731,7 +2753,7 @@ export class CombatSystem extends createSystem({
             break;
           }
           hand.web.head.copy(target.object.position);
-          hand.web.draw(this.v3, time, 0.3);
+          hand.web.drawRope(this.v3, dt, this.room, time);
           // Yank: fist and pull back toward the body rips them apart.
           this.v1.subVectors(this.head, target.object.position).normalize();
           if (isFist(hand.joints) && this.v2.dot(this.v1) > YANK_SPEED) {
@@ -2740,7 +2762,7 @@ export class CombatSystem extends createSystem({
           }
           // Fling: whip the hand any way and the webbed enemy goes flying.
           const whip = this.v2.length();
-          if (!isFist(hand.joints) && whip > 1.8 && hand.webTime > 0.15 && ENEMIES[target.kind].ground) {
+          if (!isFist(hand.joints) && whip > 1.8 * tuning.swing && hand.webTime > 0.15 && ENEMIES[target.kind].ground) {
             this.v1.copy(this.v2).normalize().multiplyScalar(Math.min(15, Math.max(7, whip * 5)));
             this.v1.y += 2.5;
             if (this.flingDrone(target, this.v1)) {
@@ -2938,7 +2960,7 @@ export class CombatSystem extends createSystem({
         if (this.hammerLetGo > 0.06) {
           this.hammerLetGo = 0;
           const speed = this.hammerVelocity.length();
-          if (speed > HAMMER_THROW_MIN) this.throwHammer(speed);
+          if (speed > HAMMER_THROW_MIN * tuning.swing) this.throwHammer(speed);
           else this.dropHammer(this.hammerVelocity, 0.5);
         }
         break;
@@ -3159,7 +3181,7 @@ export class CombatSystem extends createSystem({
 
       this.bladeProps(claws.base, claws.tip, hand.prevTip);
       this.checkParry(claws.base, claws.tip);
-      if (speed > CRESCENT_MIN_SWING && hand.slashCooldown <= 0) {
+      if (speed > CRESCENT_MIN_SWING * tuning.swing && hand.slashCooldown <= 0) {
         hand.slashCooldown = CRESCENT_COOLDOWN * (1 - 0.12 * this.level('talon-tempo')) * (this.buffRapid > 0 ? 0.5 : 1);
         this.v4.subVectors(claws.tip, hand.prevTip).normalize();
         this.fireCrescent(claws.tip, this.v4, claws.direction);
@@ -3207,6 +3229,173 @@ export class CombatSystem extends createSystem({
     this.sfx.crescent();
   }
 
+  // ---------------------------------------------------------------- hands
+
+  private makeDebugLabel(): { debug: Sprite; debugCanvas: HTMLCanvasElement; debugTexture: CanvasTexture } {
+    const debugCanvas = document.createElement('canvas');
+    debugCanvas.width = 256;
+    debugCanvas.height = 128;
+    const debugTexture = new CanvasTexture(debugCanvas);
+    const debug = new ThreeSprite(new SpriteMaterial({ map: debugTexture, depthTest: false, transparent: true }));
+    debug.scale.set(0.16, 0.08, 1);
+    debug.renderOrder = 40;
+    debug.visible = false;
+    this.root.add(debug);
+    return { debug, debugCanvas, debugTexture };
+  }
+
+  /** Palm velocity per hand, smoothed, for slaps and shoves. */
+  private updateHandMotion(dt: number): void {
+    for (const hand of this.hands) {
+      const palm = hand.gauntlet.palmPoint;
+      if (!hand.tracked || dt <= 0) {
+        hand.palmValid = false;
+        hand.palmVel.set(0, 0, 0);
+        continue;
+      }
+      if (hand.palmValid) {
+        this.rv.subVectors(palm, hand.palmPrev).divideScalar(dt);
+        hand.palmVel.lerp(this.rv, 0.5);
+      }
+      hand.palmPrev.copy(palm);
+      hand.palmValid = true;
+    }
+  }
+
+  /**
+   * HAND DEBUG: finger extension ratios, the gesture each hand reads as, and
+   * palm speed, floating over the wrist, so thresholds can be tuned on the
+   * headset (Settings > GESTURES).
+   */
+  private updateHandDebug(dt: number): void {
+    const on = this.profile.settings.handDebug;
+    this.debugTimer -= dt;
+    const redraw = this.debugTimer <= 0;
+    if (redraw) this.debugTimer = 0.12;
+    this.hands.forEach((hand, i) => {
+      hand.debug.visible = on && hand.tracked;
+      if (!hand.debug.visible) return;
+      hand.pose.position(J.wrist, this.rv);
+      hand.debug.position.copy(this.rv).setY(this.rv.y + 0.13);
+      if (!redraw) return;
+      const e = fingerExtension(hand.joints);
+      const pinch = this.pinchPoint(i, this.rd);
+      const gesture = isFist(hand.joints)
+        ? 'FIST'
+        : isWebPose(hand.joints)
+          ? 'WEB'
+          : isOpenPalm(hand.joints)
+            ? 'OPEN'
+            : pinch < PINCH_DISTANCE * 1.4
+              ? 'PINCH'
+              : '-';
+      const c = hand.debugCanvas.getContext('2d')!;
+      c.clearRect(0, 0, 256, 128);
+      c.fillStyle = 'rgba(8, 8, 20, 0.85)';
+      c.fillRect(0, 0, 256, 128);
+      c.fillStyle = gesture === '-' ? '#9AA0B4' : '#3DF5FF';
+      c.font = 'bold 34px monospace';
+      c.fillText(`${hand.handedness === 'left' ? 'L' : 'R'} ${gesture}`, 10, 38);
+      c.fillStyle = '#FFFFFF';
+      c.font = '22px monospace';
+      c.fillText(`I${e[0].toFixed(2)} M${e[1].toFixed(2)}`, 10, 70);
+      c.fillText(`R${e[2].toFixed(2)} P${e[3].toFixed(2)}`, 10, 96);
+      c.fillText(`${hand.palmVel.length().toFixed(1)} m/s  pinch ${(pinch * 100).toFixed(0)}cm`, 10, 121);
+      hand.debugTexture.needsUpdate = true;
+    });
+  }
+
+  /** A hand that is holding or wielding something does not shove. */
+  private handBusy(i: number): boolean {
+    const hand = this.hands[i];
+    switch (this.hero) {
+      case 'talon':
+        return hand.claws.extension > 0.3;
+      case 'ronin':
+        return hand.sword.extension > 0.3;
+      case 'havoc':
+        return this.gunHolder === i;
+      case 'orion':
+        return this.bowHolder === i;
+      case 'tempest':
+        return this.hammerState === 'gripped' && this.hammerHand === i;
+      case 'vanguard':
+        return true;
+      case 'psion':
+        return hand.held != null;
+      default:
+        return false;
+    }
+  }
+
+  /** A fast hand into an alien or a prop shoves it away. */
+  private updateShoves(): void {
+    for (let i = 0; i < this.hands.length; i += 1) {
+      const hand = this.hands[i];
+      if (!hand.tracked || this.handBusy(i)) continue;
+      const speed = hand.palmVel.length();
+      if (speed < 1.6 * tuning.swing) continue;
+      const palm = hand.gauntlet.palmPoint;
+      for (const drone of this.drones) {
+        const def = ENEMIES[drone.kind];
+        if (def.ground == null || drone.state === 'off' || drone.state === 'emerging' || drone.lifted) continue;
+        if (this.elapsed - drone.bladeHitAt < 0.4) continue;
+        const scale = (def.ground.chest * drone.size) / 1.15;
+        const at = drone.object.position;
+        this.sa.set(at.x, at.y - 0.6 * scale, at.z);
+        this.sb.set(at.x, at.y + 0.45 * scale, at.z);
+        if (this.segmentHits(this.sa, this.sb, palm, def.radius * 0.8 + 0.1) === false) continue;
+        drone.bladeHitAt = this.elapsed;
+        this.markHit('blast', at, hand.palmVel, undefined, 2.5);
+        this.damageDrone(drone, 0.5, true);
+        this.flashes.spawn(palm, WHITE, 0.05, 0.5, 0.15);
+        this.sfx.catchHammer();
+        this.hitStop = Math.max(this.hitStop, 0.03);
+        if (this.elapsed - this.shoveAt > 1.5) {
+          this.shoveAt = this.elapsed;
+          this.comic.pop('SHOVE!', this.v1.copy(at).setY(at.y + 0.5), this.accent, 0.35);
+        }
+        break;
+      }
+      for (const item of this.debris) {
+        if ((item.state !== 'rest' && item.state !== 'flying') || this.elapsed - item.bashAt < 0.3) continue;
+        if (item.object.position.distanceTo(palm) > item.radius + 0.08) continue;
+        item.bashAt = this.elapsed;
+        this.hitProp(item, 0, hand.palmVel, 2);
+      }
+    }
+  }
+
+  /** A fast hand that meets an enemy shot slaps it back at the aliens. */
+  private slapped(shot: Drone): boolean {
+    if (!this.powersLive) return false;
+    for (const hand of this.hands) {
+      if (!hand.tracked || hand.palmVel.lengthSq() < 1.0) continue;
+      if (hand.gauntlet.palmPoint.distanceTo(shot.object.position) > 0.17) continue;
+      this.ra.copy(shot.object.position);
+      this.retireDrone(shot);
+      this.sfx.clang();
+      this.flashes.spawn(this.ra, WHITE, 0.05, 0.5, 0.15);
+      this.particles.burst(this.ra, GOLD, 16, 2, 0.25, this.v2);
+      if (this.comicCooldown <= 0) {
+        this.comicCooldown = 0.4;
+        this.comic.pop('SLAP!', this.v1.copy(this.ra).setY(this.ra.y + 0.2), GOLD, 0.35);
+      }
+      const target = this.nearestEnemy(this.ra, null, 25);
+      if (target) {
+        this.rv.subVectors(target.object.position, this.ra).normalize();
+        const bolt = this.fire(this.rb.copy(this.ra).addScaledVector(this.rv, 0.2), this.rv, true);
+        if (bolt) {
+          bolt.damage = 1.5;
+          bolt.force = 1.5;
+          bolt.target = target;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
   // ---------------------------------------------------------------- props
 
   /**
@@ -3216,7 +3405,7 @@ export class CombatSystem extends createSystem({
   private hitProp(item: Throwable, damage: number, direction: Vector3, force: number): void {
     if (item.state === 'off' || item.state === 'spawn' || item.fuse > 0) return;
     const at = item.object.position;
-    if (item.kind === 'explosive') {
+    if (item.kind === 'explosive' && damage > 0) {
       item.fuse = 0.12 + Math.random() * 0.12;
       this.flashes.spawn(at, ORANGE, 0.1, 0.8, 0.2);
       this.sfx.sizzle();
@@ -4304,7 +4493,7 @@ export class CombatSystem extends createSystem({
       // Throw: swing and open the hand.
       const e = fingerExtension(hand.joints);
       const open = (e[0] + e[1] + e[2] + e[3]) / 4 > 1.6;
-      if (open && speed > 2.2 && this.shieldTime > 0.4) this.throwShield(speed);
+      if (open && speed > 2.2 * tuning.swing && this.shieldTime > 0.4) this.throwShield(speed);
       return;
     }
     shield.visible = true;
@@ -4437,7 +4626,7 @@ export class CombatSystem extends createSystem({
     hand.pose.position(J.middleProx, this.v1);
     const speed = this.v2.subVectors(this.v1, hand.prevTip).length() / dt;
     hand.prevTip.copy(this.v1);
-    if (speed < 1.6 || !isFist(hand.joints)) return;
+    if (speed < 1.6 * tuning.swing || !isFist(hand.joints)) return;
     for (const item of this.debris) {
       if ((item.state !== 'rest' && item.state !== 'flying') || this.elapsed - item.bashAt < 0.3) continue;
       if (item.object.position.distanceTo(this.v1) > item.radius + 0.1) continue;
@@ -4510,7 +4699,7 @@ export class CombatSystem extends createSystem({
       }
       this.bladeProps(sword.base, sword.tip, hand.prevTip);
       hand.slashCooldown -= dt;
-      if (sword.speed > SWORD_WAVE_SPEED && hand.slashCooldown <= 0) {
+      if (sword.speed > SWORD_WAVE_SPEED * tuning.swing && hand.slashCooldown <= 0) {
         hand.slashCooldown = SWORD_WAVE_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
         const wave = this.level('ronin-wave');
         this.v4.subVectors(sword.tip, hand.prevTip).normalize();
@@ -4889,7 +5078,7 @@ export class CombatSystem extends createSystem({
     item.t = 0;
     item.thrown = false;
     const speed = item.velocity.length();
-    if (!flung || speed < PSI_THROW_MIN) return;
+    if (!flung || speed < PSI_THROW_MIN * tuning.swing) return;
     // Aim assist: snap to the enemy nearest the throw line.
     const position = item.object.position;
     this.v1.copy(item.velocity).divideScalar(speed);
@@ -5539,6 +5728,7 @@ export class CombatSystem extends createSystem({
         if (civilian) civilian.rotation.z = Math.sin(time * 6 + drone.t) * 0.15;
         continue;
       }
+      if ((drone.state === 'shot' || drone.state === 'fly') && this.slapped(drone)) continue;
       if (drone.state === 'shot') {
         // Enemy plasma shot: straight line, so it can be dodged or shot down.
         drone.object.position.addScaledVector(drone.offset, dt);
@@ -5999,7 +6189,7 @@ export class CombatSystem extends createSystem({
    */
   private tryImpale(index: number, base: Vector3, tip: Vector3, direction: Vector3): void {
     const hand = this.hands[index];
-    if (hand.tipVel.dot(direction) < 0.9) return;
+    if (hand.tipVel.dot(direction) < 0.9 * tuning.swing) return;
     for (const drone of this.drones) {
       const def = ENEMIES[drone.kind];
       if (def.ground == null || drone.state === 'off' || drone.state === 'emerging' || drone.lifted) continue;
