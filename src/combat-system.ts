@@ -74,6 +74,8 @@ import { Lightning } from './combat/lightning.js';
 import { CreatureModel } from './combat/creature.js';
 import { BeamFx } from './combat/beamfx.js';
 import { Haptics } from './combat/haptics.js';
+import { RoomBorder } from './combat/roomborder.js';
+import { roomSpots, type Segment, wallSegment } from './combat/roomgeo.js';
 import { BOSSES, ROLE_HEIGHT, ROLE_POOL, ROSTER, speciesById, speciesFor } from './combat/creatures.js';
 import { HoloMap } from './combat/holomap.js';
 import { GameMenus, wrap } from './combat/menus.js';
@@ -768,6 +770,10 @@ export class CombatSystem extends createSystem({
   private senseAt = -10;
   /** Which power-ups are on ('', 'rapid', 'power', 'both') and the colour they give the kit. */
   private buffKey = '';
+  /** Wall footprints from the scan, and a counter that changes when they do. */
+  private wallSegs: Segment[] = [];
+  private wallVersion = 0;
+  private roomBorder!: RoomBorder;
   private buffTint: Color | null = null;
   private shieldTrail = 0;
   private readonly swishArmed = [true, true];
@@ -830,6 +836,7 @@ export class CombatSystem extends createSystem({
     this.wrist.setHero('ARC', CYAN);
     this.lightningFx = new Lightning(this.root);
     this.webShots = new WebShots(this.root, PINK);
+    this.roomBorder = new RoomBorder(this.root, CYAN);
     this.handBeams = [new BeamFx(this.root, WHITE), new BeamFx(this.root, WHITE)];
     this.chestBeam = new BeamFx(this.root, CYAN);
     this.reactor = createGlowSprite(CYAN, 0);
@@ -1871,7 +1878,11 @@ export class CombatSystem extends createSystem({
 
   private frame(delta: number, time: number): void {
     if (!this.ready) return;
-    if (this.arena) this.arena.visible = !this.isPassthrough();
+    if (this.arena) {
+      this.arena.visible = !this.isPassthrough();
+      // The arena travels with the player, so walking never leaves it behind.
+      if (this.arena.visible) this.arena.position.set(this.world.camera.getWorldPosition(this.v1).x, 0, this.v1.z);
+    }
     if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) return;
     const realDt = Math.min(delta, this.maxDt);
     this.elapsed = time;
@@ -1936,6 +1947,7 @@ export class CombatSystem extends createSystem({
     this.coach.update(realDt, this.head, this.forward);
     this.erasure.update(realDt, time, this.head, this.eraseTarget, this.veilTarget);
     this.updateAuras(realDt, time);
+    this.roomBorder.update(this.isPassthrough() ? this.wallSegs : [], this.wallVersion, this.head.x, this.head.z, time, this.accent);
     this.updateHammer(realDt, time);
     this.updateBow(realDt);
     this.updateGun(realDt);
@@ -4811,6 +4823,7 @@ export class CombatSystem extends createSystem({
     const room = this.room;
     room.clear();
     room.floor = 0;
+    const walls: Segment[] = [];
     for (const entity of this.queries.planes.entities) {
       const plane = entity.getValue(XRPlane, '_plane') as XRPlane | undefined;
       const object = entity.object3D;
@@ -4837,6 +4850,21 @@ export class CombatSystem extends createSystem({
       this.rd.set(1, 0, 0).transformDirection(object.matrixWorld);
       this.re.set(0, 0, 1).transformDirection(object.matrixWorld);
       room.add(this.rb, this.ra, this.rd, this.re, (maxX - minX) / 2, (maxZ - minZ) / 2);
+      if (plane.orientation === 'vertical' && Math.abs(this.rb.y) < 0.35) {
+        const seg = wallSegment([this.ra.x, this.ra.y, this.ra.z], [this.rb.x, this.rb.y, this.rb.z], [this.rd.x, this.rd.y, this.rd.z], [this.re.x, this.re.y, this.re.z], (maxX - minX) / 2, (maxZ - minZ) / 2);
+        if (seg) walls.push(seg);
+      }
+    }
+    // Remember the walls (and tell the border when they changed).
+    let changed = walls.length !== this.wallSegs.length;
+    for (let i = 0; !changed && i < walls.length; i += 1) {
+      const a = walls[i];
+      const b = this.wallSegs[i];
+      changed = Math.abs(a.a[0] - b.a[0]) + Math.abs(a.a[2] - b.a[2]) + Math.abs(a.b[0] - b.b[0]) + Math.abs(a.b[2] - b.b[2]) > 0.05;
+    }
+    if (changed) {
+      this.wallSegs = walls.slice(0, 24);
+      this.wallVersion += 1;
     }
   }
 
@@ -6156,6 +6184,7 @@ export class CombatSystem extends createSystem({
     let crate = false;
     let barrel = false;
     let n = 0;
+    const spots = this.isPassthrough() ? roomSpots(this.wallSegs, total, 0.7, this.head.x, this.head.z, 1.2) : [];
     for (const item of this.debris) {
       item.placed = false;
       let use = psion || item.kind === 'explosive';
@@ -6168,6 +6197,8 @@ export class CombatSystem extends createSystem({
       const s = Math.sin(angle);
       item.home.set(this.v3.x * c - this.v3.z * s, 0, this.v3.x * s + this.v3.z * c);
       item.home.multiplyScalar(distance).add(this.head);
+      const spot = spots[n];
+      if (spot) item.home.set(spot[0], 0, spot[2]);
       item.home.y = item.radius * 0.8;
       item.placed = true;
       this.spawnDebris(item);
@@ -6865,9 +6896,26 @@ export class CombatSystem extends createSystem({
     if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
     this.v1.normalize();
     let placed = 0;
+    // With a scanned room the cages are spread around its walls: walk over to free them.
+    const spots = this.isPassthrough() ? roomSpots(this.wallSegs, count, 0.8, this.head.x, this.head.z, 1.8) : [];
     for (const pod of this.drones) {
       if (placed >= count) break;
       if (pod.kind !== 'pod' || pod.state !== 'off') continue;
+      const spot = spots[placed];
+      if (spot) {
+        pod.counted = false;
+        pod.hp = ENEMIES.pod.hp;
+        pod.state = 'hold';
+        pod.t = Math.random() * 6;
+        pod.spawn.set(spot[0], 1.0 + (placed % 2) * 0.25, spot[2]);
+        pod.object.position.copy(pod.spawn);
+        pod.object.scale.setScalar(1);
+        pod.object.visible = true;
+        pod.object.lookAt(this.head.x, pod.spawn.y, this.head.z);
+        pod.portal.visible = false;
+        placed += 1;
+        continue;
+      }
       const angle = count === 1 ? 0 : -1.1 + (2.2 * placed) / (count - 1);
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
