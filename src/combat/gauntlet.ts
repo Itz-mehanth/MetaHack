@@ -99,6 +99,12 @@ const STYLES: Readonly<Record<string, { armor: string; metal: number; rough: num
   vesper: { armor: '#1A1230', metal: 0.7, rough: 0.35, trim: '#FFC857', emitter: false },
 };
 
+/** Armour colours of a hero's glove, for the matching forearm sleeves. */
+export function styleColors(hero: string): { armor: string; trim: string } {
+  const st = STYLES[hero] ?? STYLES.arc;
+  return { armor: st.armor, trim: st.trim };
+}
+
 
 /**
  * Original sci-fi gauntlet rebuilt every frame from tracked joints: a wrist

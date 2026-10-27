@@ -77,6 +77,7 @@ import { SpellFx } from './combat/spellfx.js';
 import { BeamFx } from './combat/beamfx.js';
 import { Haptics } from './combat/haptics.js';
 import { RoomBorder } from './combat/roomborder.js';
+import { Suit } from './combat/suit.js';
 import { roomSpots, type Segment, wallSegment } from './combat/roomgeo.js';
 import { BOSSES, ROLE_HEIGHT, ROLE_POOL, ROSTER, speciesById, speciesFor } from './combat/creatures.js';
 import { HoloMap } from './combat/holomap.js';
@@ -797,6 +798,8 @@ export class CombatSystem extends createSystem({
   private wallSegs: Segment[] = [];
   private wallVersion = 0;
   private roomBorder!: RoomBorder;
+  private suit!: Suit;
+  private readonly suitWrists: Array<Vector3 | null> = [null, null];
   private buffTint: Color | null = null;
   private shieldTrail = 0;
   private readonly swishArmed = [true, true];
@@ -860,6 +863,7 @@ export class CombatSystem extends createSystem({
     this.lightningFx = new Lightning(this.root);
     this.webShots = new WebShots(this.root, PINK);
     this.roomBorder = new RoomBorder(this.root, CYAN);
+    this.suit = new Suit(this.root, CYAN);
     this.spellFx = new SpellFx(this.root, CYAN);
     this.handBeams = [new BeamFx(this.root, WHITE), new BeamFx(this.root, WHITE)];
     this.chestBeam = new BeamFx(this.root, CYAN);
@@ -1985,6 +1989,15 @@ export class CombatSystem extends createSystem({
     this.erasure.update(realDt, time, this.head, this.eraseTarget, this.veilTarget);
     this.updateAuras(realDt, time);
     this.updateSorcerer(realDt, time);
+    // The suit: forearm sleeves and the chest emblem, while a stage runs.
+    if (this.powersLive) {
+      for (let i = 0; i < 2; i += 1) {
+        const hand = this.hands[i];
+        if (hand.tracked) hand.pose.position(J.wrist, (this.suitWrists[i] ??= new Vector3()));
+        else this.suitWrists[i] = null;
+      }
+      this.suit.update(this.suitWrists, this.head, this.forward, time);
+    } else this.suit.hide();
     this.roomBorder.update(this.isPassthrough() ? this.wallSegs : [], this.wallVersion, this.head.x, this.head.z, time, this.accent);
     this.updateHammer(realDt, time);
     this.updateBow(realDt);
@@ -2657,6 +2670,7 @@ export class CombatSystem extends createSystem({
     // A power-up recolours the whole kit while it lasts.
     if (this.buffTint) this.weaponColor.copy(this.buffTint);
     this.bow.setColor(this.weaponColor);
+    this.suit?.setStyle(this.hero, this.buffTint ?? this.accent);
     for (const hand of this.hands) {
       hand.gauntlet.setAccent(this.buffTint ?? this.accent);
       hand.gauntlet.setStyle(this.hero);
