@@ -15,4 +15,6 @@ export const shell = {
   sound: false,
   /** Starts audio; must run inside a click handler (browser autoplay rules). */
   unlockAudio: null as (() => void) | null,
+  /** Shows the landing page again (set by landing.ts). */
+  goHome: null as (() => void) | null,
 };

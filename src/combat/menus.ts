@@ -79,6 +79,10 @@ export interface MenuActions {
   story(): void;
   /** Starts the finale, CONVERGENCE. */
   finale(): void;
+  /** Leaves the headset session (or returns to the home page on a screen). */
+  exit(): void;
+  /** Asks the headset to scan the room (walls and furniture). */
+  scanRoom(): void;
 }
 
 export interface ResultInfo {
@@ -252,6 +256,7 @@ export class GameMenus {
         { id: 'garage', x: 640, y: 450, w: 438, h: 150, label: 'GARAGE', sub: 'Upgrades & skins', icon: 'garage' },
         { id: 'settings', x: 1098, y: 450, w: 438, h: 150, label: 'SETTINGS', sub: 'Sound & difficulty', icon: 'settings' },
         { id: 'howto', x: 640, y: 630, w: 438, h: 150, label: 'HOW TO PLAY', icon: 'map' },
+        { id: 'exit', x: 1236, y: 150, w: 300, h: 70, label: this.flat ? 'HOME' : 'EXIT', sub: this.flat ? undefined : 'Back to the site', size: 32, color: '#FF3B5C' },
         {
           id: 'stats',
           kind: 'text',
@@ -619,6 +624,7 @@ export class GameMenus {
         { id: 'aim', x: 64, y: 530, w: 460, h: 110, label: 'AIM ASSIST', sub: s.aimAssist ? 'ON' : 'OFF', selected: s.aimAssist },
         { id: 'difficulty', x: 544, y: 530, w: 460, h: 110, label: 'DIFFICULTY', sub: s.difficulty.toUpperCase() },
         { id: 'lefty', x: 1024, y: 530, w: 512, h: 110, label: 'BOW HAND', sub: s.leftHanded ? 'RIGHT HAND' : 'LEFT HAND' },
+        { id: 'scan', x: 1284, y: 690, w: 252, h: 110, label: 'SCAN ROOM', size: 30 },
         { id: 'spawns', x: 704, y: 690, w: 560, h: 110, label: 'ENEMIES COME FROM', sub: s.allAround ? 'ALL AROUND (ROOM-SCALE)' : 'AHEAD', selected: s.allAround },
         {
           id: 'reset',
@@ -681,6 +687,7 @@ export class GameMenus {
         { id: 'restart', x: 400, y: 410, w: 800, h: 130, label: 'RESTART STAGE', icon: 'timer' },
         { id: 'pause-settings', x: 400, y: 570, w: 800, h: 130, label: 'SETTINGS', icon: 'settings' },
         { id: 'quit', x: 400, y: 730, w: 800, h: 130, label: 'QUIT TO WAR MAP', color: '#FF3B5C', icon: 'map' },
+        { id: 'exit', x: 1236, y: 150, w: 300, h: 70, label: this.flat ? 'HOME' : 'EXIT', size: 32, color: '#FF3B5C' },
       ],
     };
   }
@@ -870,6 +877,12 @@ export class GameMenus {
       case 'aim':
         p.settings.aimAssist = !p.settings.aimAssist;
         this.actions.changed();
+        return;
+      case 'exit':
+        this.actions.exit();
+        return;
+      case 'scan':
+        this.actions.scanRoom();
         return;
       case 'spawns':
         p.settings.allAround = !p.settings.allAround;

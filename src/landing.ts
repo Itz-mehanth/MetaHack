@@ -257,6 +257,7 @@ export function setupLanding(world: World): void {
     sound.innerHTML = shell.sound ? '&#x1F50A; SOUND ON' : '&#x1F507; SOUND OFF';
   });
   home.addEventListener('click', () => show(true));
+  shell.goHome = () => show(true);
 
   xr.addEventListener('sessionstart', () => {
     shell.landing = false;

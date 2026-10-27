@@ -770,6 +770,7 @@ export class CombatSystem extends createSystem({
   private frameDt = 0;
   private webShots!: WebShots;
   private senseAt = -10;
+  private roomAsked = false;
   /** Which power-ups are on ('', 'rapid', 'power', 'both') and the colour they give the kit. */
   private buffKey = '';
   /** VESPER: the loaded spell, its charge, and the lasting effects. */
@@ -894,6 +895,12 @@ export class CombatSystem extends createSystem({
       txSkip: () => this.endTransmission(),
       story: () => this.startStage('arc', PROLOGUE),
       finale: () => this.startStage('arc', FINALE),
+      exit: () => {
+        // Leave the headset session (MR or VR); on a screen, back to the home page.
+        if (this.world.renderer.xr.isPresenting) this.world.exitXR();
+        else shell.goHome?.();
+      },
+      scanRoom: () => this.requestRoomCapture(true),
       resetProgress: () => {
         this.profile = resetProfile();
         this.menus.setProfile(this.profile);
@@ -1110,6 +1117,7 @@ export class CombatSystem extends createSystem({
     const xr = this.world.renderer.xr;
     const onSessionStart = () => {
       if (this.attract) this.stopAttract();
+      this.roomAsked = false;
       this.sfx.unlock();
       this.hudPlaced = false;
       if (this.panel.visible) this.replaceMenuAt = this.elapsed + 0.6;
@@ -2777,7 +2785,7 @@ export class CombatSystem extends createSystem({
     });
     this.galaxy.build(nodes, finaleUnlocked(p), anchorsRecovered(p).length);
     this.galaxy.selected = this.menus.galaxyIndex;
-    if (!this.galaxy.visible) this.galaxy.show(this.head, this.forward, this.flat ? 0.55 : 0.35, this.flat ? 0.62 : 0.62, this.flat ? 1.05 : 1.0, this.flat ? -0.75 : -0.5);
+    if (!this.galaxy.visible) this.galaxy.show(this.head, this.forward, this.flat ? 0.55 : 0.35, this.flat ? 0.62 : 0.62, this.flat ? 1.05 : 1.0, this.flat ? -0.75 : 0);
   }
 
   /** Poking a planet picks that hero's front; the core starts the finale. */
@@ -2969,6 +2977,23 @@ export class CombatSystem extends createSystem({
    * Room-scan sweep on entering MR: every detected wall and surface lights
    * up as a pulsing hologram grid for a few seconds, then fades away.
    */
+  /**
+   * Asks the headset to run Space Setup from inside the session (Quest
+   * browser's initiateRoomCapture): it gives the game the real walls, and
+   * with a mapped room Quest no longer shows the small stationary circle.
+   * The browser allows it once per session.
+   */
+  private requestRoomCapture(manual: boolean): void {
+    const session = this.world.renderer.xr.getSession() as (XRSession & { initiateRoomCapture?: () => Promise<void> }) | null;
+    if (session?.initiateRoomCapture == null || (this.roomAsked && !manual)) {
+      if (manual) this.comic.pop(session ? 'ROOM SCAN NOT AVAILABLE' : 'ENTER MR FIRST', this.v1.copy(this.head).addScaledVector(this.forward, 0.9), CYAN, 0.45);
+      return;
+    }
+    this.roomAsked = true;
+    this.comic.pop('SCAN YOUR ROOM', this.v1.copy(this.head).addScaledVector(this.forward, 0.9), CYAN, 0.6);
+    session.initiateRoomCapture().catch(() => undefined);
+  }
+
   private updateRoomScan(dt: number): void {
     if (this.scanTime < 0) return;
     this.scanTime += dt;
@@ -3005,7 +3030,11 @@ export class CombatSystem extends createSystem({
       this.comic.pop('ROOM SCANNED!', this.v1, CYAN, 0.7);
       this.sfx.radio();
     }
-    if (done) this.scanTime = -1;
+    if (done) {
+      this.scanTime = -1;
+      // No walls came through: offer the headset's room scan once.
+      if (walls + surfaces === 0) this.requestRoomCapture(false);
+    }
   }
 
   /** Shows the holographic armory only on the garage screen. */
