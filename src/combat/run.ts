@@ -22,6 +22,8 @@ export interface SpawnOrder {
   speed: number;
   /** A level's champion (boss-like elite). */
   champion?: boolean;
+  /** A wave's last enemy: bigger, tougher, and it always drops a power-up. */
+  elite?: boolean;
 }
 
 export interface RunOptions {
@@ -128,13 +130,18 @@ export class Run {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
         const def = this.waveDef;
+        // A crowd cap: the next one waits until there is room.
+        if (this.alive >= (def.alive ?? 99)) {
+          this.spawnTimer = 0.25;
+          return null;
+        }
         if (this.burstLeft <= 0) this.burstLeft = def.burst ?? 1;
         this.burstLeft -= 1;
         this.spawnTimer = this.burstLeft > 0 ? BURST_GAP : def.interval * this.spawnScale;
         this.spawned += 1;
         this.alive += 1;
         const kind = def.kinds[Math.min(def.kinds.length - 1, Math.floor(this.random() * def.kinds.length))];
-        return { kind, speed: def.speed * this.speedScale };
+        return { kind, speed: def.speed * this.speedScale, elite: this.wave >= 1 && this.spawned === def.count && !def.boss && !def.champion };
       }
     }
     return null;

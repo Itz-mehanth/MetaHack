@@ -411,6 +411,8 @@ interface Drone {
   creature: CreatureModel | null;
   /** When it last blocked a cut (duellists only). */
   guardAt: number;
+  /** A wave's last enemy: bigger, tougher, drops a power-up. */
+  elite: boolean;
   /** A walker stepped forward this frame, at `moveSpeed` m/s (picks the walk or run clip). */
   moving: boolean;
   moveSpeed: number;
@@ -764,6 +766,9 @@ export class CombatSystem extends createSystem({
   private frameDt = 0;
   private webShots!: WebShots;
   private senseAt = -10;
+  /** Which power-ups are on ('', 'rapid', 'power', 'both') and the colour they give the kit. */
+  private buffKey = '';
+  private buffTint: Color | null = null;
   private shieldTrail = 0;
   private readonly swishArmed = [true, true];
   private readonly haptics = new Haptics();
@@ -1196,6 +1201,7 @@ export class CombatSystem extends createSystem({
         species: '',
         creature: null,
         guardAt: -10,
+        elite: false,
         moving: false,
         moveSpeed: 0,
       });
@@ -1411,6 +1417,7 @@ export class CombatSystem extends createSystem({
       species: extra.species ?? '',
       creature,
       guardAt: -10,
+      elite: false,
       moving: false,
       moveSpeed: 0,
     };
@@ -1769,6 +1776,11 @@ export class CombatSystem extends createSystem({
     // Test hook: spawns n enemies of a kind (not counted toward the wave).
     (window as unknown as { __surgeSpawn: (kind: string, n?: number) => void }).__surgeSpawn = (kind: string, n = 1) => {
       for (let k = 0; k < n; k += 1) this.spawnDrone(kind as EnemyKind, 0.8, false);
+    };
+    // Test hook: takes a power-up ('rapid' or 'power') as if it were collected.
+    (window as unknown as { __surgeBuff: (kind: string) => void }).__surgeBuff = (kind: string) => {
+      const pickup = this.pickups.find((p) => p.kind === kind);
+      if (pickup) this.collect(pickup);
     };
     // Test hook: calls down n lightning strikes from the sky.
     (window as unknown as { __surgeStrike: (n: number) => void }).__surgeStrike = (n: number) => {
@@ -2590,9 +2602,11 @@ export class CombatSystem extends createSystem({
     // Energy colour: the finish wins, then the weapon's own, then the suit.
     const finishEnergy = finishFor(this.profile, this.hero).energy;
     this.weaponColor.set(finishEnergy ?? (this.weaponDef.hero === this.hero && this.weaponDef.color ? this.weaponDef.color : this.accent));
+    // A power-up recolours the whole kit while it lasts.
+    if (this.buffTint) this.weaponColor.copy(this.buffTint);
     this.bow.setColor(this.weaponColor);
     for (const hand of this.hands) {
-      hand.gauntlet.setAccent(this.accent);
+      hand.gauntlet.setAccent(this.buffTint ?? this.accent);
       hand.gauntlet.setStyle(this.hero);
       hand.claws.setColor(this.weaponColor);
       hand.web.setColor(this.weaponColor);
@@ -2600,7 +2614,7 @@ export class CombatSystem extends createSystem({
       for (const beam of this.handBeams) beam.setColor(this.weaponColor);
       this.chestBeam?.setColor(this.accent);
       hand.sword.setColor(this.weaponColor);
-      hand.psi.setColor(this.accent);
+      hand.psi.setColor(this.buffTint ?? this.accent);
       hand.beamMaterial.color.copy(this.accent);
       hand.glow.material.color.copy(this.accent);
     }
@@ -2969,8 +2983,9 @@ export class CombatSystem extends createSystem({
 
   /** Weapon tier visuals in a mission: auras on held weapons, sparks on hands. */
   private applyWeaponTier(): void {
-    this.weaponTierNow = weaponTier(this.profile, this.hero);
-    for (const aura of [this.hammerAura, this.gunAura, this.bowAura]) aura?.set(this.weaponTierNow, this.accent);
+    // A power-up adds two tiers of rings, sparks and flames on top of the weapon's own.
+    this.weaponTierNow = Math.min(5, weaponTier(this.profile, this.hero) + (this.buffKey ? 2 : 0));
+    for (const aura of [this.hammerAura, this.gunAura, this.bowAura]) aura?.set(this.weaponTierNow, this.buffTint ?? this.accent);
   }
 
   private syncCarousel(): void {
@@ -3657,6 +3672,7 @@ export class CombatSystem extends createSystem({
         this.v4.addScaledVector(this.v1, (k % 2 === 1 ? 1 : -1) * 0.07 * Math.ceil(k / 2)).normalize();
       }
       bolt.kind = 'arrow';
+      bolt.object.scale.setScalar(this.buffPower > 0 ? 1.4 : 1);
       bolt.missile.visible = false;
       bolt.blast = this.weaponDef.id === 'orion-blast' ? 1.2 : 0;
       bolt.zap = this.weaponDef.id === 'orion-storm';
@@ -4311,6 +4327,8 @@ export class CombatSystem extends createSystem({
       if (!hand.tracked) continue;
       const palm = hand.gauntlet.palmPoint;
       const speed = hand.palmVel.length();
+      // A power-up: a steady spray of its colour off every hand.
+      if (this.buffTint && Math.random() < 0.7 * rate) this.mote(palm, 0.09, 0.5, this.buffTint, 0.6);
       // Streaks behind a fast hand.
       if (speed > 2.5 && Math.random() < 0.8 * rate) {
         this.v2.copy(hand.palmVel).multiplyScalar(-0.08);
@@ -4469,6 +4487,7 @@ export class CombatSystem extends createSystem({
     const bolt = this.bolts.find((b) => !b.active);
     if (bolt == null) return null;
     bolt.kind = 'crescent';
+    bolt.object.scale.setScalar(this.buffPower > 0 ? 1.3 : 1);
     bolt.missile.visible = false;
     bolt.blast = 0;
     bolt.zap = false;
@@ -4997,7 +5016,8 @@ export class CombatSystem extends createSystem({
   /** Bosses and champions are announced: siren, warning, then the arrival. */
   private queueSpawn(order: SpawnOrder): void {
     if (order.kind !== 'boss' && !order.champion) {
-      this.spawnDrone(order.kind, order.speed);
+      const drone = this.spawnDrone(order.kind, order.speed);
+      if (drone && order.elite) this.makeElite(drone);
       return;
     }
     this.pending = { ...order, t: 0 };
@@ -5005,6 +5025,19 @@ export class CombatSystem extends createSystem({
     this.riftLevel = Math.min(0.6, this.riftLevel + 0.1);
     this.v1.copy(this.head).addScaledVector(this.forward, 1.6);
     this.comic.pop('WARNING!', this.v1, MAGENTA, 1.0);
+  }
+
+  /** The wave's last enemy: a size bigger, twice as tough, and it brings a power-up. */
+  private makeElite(drone: Drone): void {
+    const def = ENEMIES[drone.kind];
+    drone.elite = true;
+    drone.size = 1.25;
+    drone.hp = def.hp * 2.2;
+    drone.maxHp = drone.hp;
+    if (def.ground) drone.spawn.y = def.ground.chest * drone.size;
+    this.flashes.spawn(drone.spawn, GOLD, 0.3, 2, 0.6);
+    this.particles.burst(drone.spawn, GOLD, 50, 2.5, 0.6, this.v2);
+    this.comic.pop('ELITE!', this.v1.copy(drone.spawn).setY(drone.spawn.y + 1), GOLD, 0.6);
   }
 
   private updatePending(dt: number): void {
@@ -6544,6 +6577,7 @@ export class CombatSystem extends createSystem({
       }
     }
     bolt.kind = 'bolt';
+    bolt.object.scale.setScalar(this.buffPower > 0 ? 1.6 : 1);
     bolt.missile.visible = false;
     bolt.blast = 0;
     bolt.zap = false;
@@ -6702,6 +6736,7 @@ export class CombatSystem extends createSystem({
       drone.stagger = 0;
     }
     drone.creature?.reset();
+    drone.elite = false;
     drone.hp = ENEMIES[kind].hp;
     drone.state = 'emerging';
     drone.t = 0;
@@ -6875,8 +6910,8 @@ export class CombatSystem extends createSystem({
     return (hasUnlock(this.profile, `core-${this.hero}`) ? 1.25 : 1) * (this.buffPower > 0 ? 2 : 1);
   }
 
-  private dropPickup(at: Vector3): void {
-    if (Math.random() > 0.15) return;
+  private dropPickup(at: Vector3, always = false): void {
+    if (!always && Math.random() > 0.22) return;
     const roll = Math.random();
     const kind: PickupKind = this.run.health < this.run.maxHealth && roll < 0.4 ? 'heal' : roll < 0.7 ? 'rapid' : 'power';
     const pickup = this.pickups.find((p) => !p.active && p.kind === kind);
@@ -6896,6 +6931,7 @@ export class CombatSystem extends createSystem({
     if (this.paused) return;
     this.buffRapid = Math.max(0, this.buffRapid - dt);
     this.buffPower = Math.max(0, this.buffPower - dt);
+    this.syncBuffLook();
     // Pickups drift toward the player; touch one with either hand to take it.
     for (const pickup of this.pickups) {
       if (!pickup.active) continue;
@@ -6957,12 +6993,46 @@ export class CombatSystem extends createSystem({
       this.comic.pop('HEAL!', at, new Color('#39FF88'), 0.35);
     } else if (pickup.kind === 'rapid') {
       this.buffRapid = BUFF_SECONDS;
-      this.comic.pop('RAPID!', at, GOLD, 0.35);
+      this.syncBuffLook();
+      this.upgradeBurst('OVERCLOCK!', GOLD);
     } else {
       this.buffPower = BUFF_SECONDS;
-      this.comic.pop('POWER!', at, MAGENTA, 0.35);
+      this.syncBuffLook();
+      this.upgradeBurst('POWER UP!', MAGENTA);
     }
     this.retirePickup(pickup);
+  }
+
+  /** Recolours the weapon and its rings when a power-up starts or ends. */
+  private syncBuffLook(): void {
+    const key = this.buffRapid > 0 && this.buffPower > 0 ? 'both' : this.buffRapid > 0 ? 'rapid' : this.buffPower > 0 ? 'power' : '';
+    if (key === this.buffKey) return;
+    this.buffKey = key;
+    this.buffTint = key === 'both' ? WHITE : key === 'rapid' ? GOLD : key === 'power' ? MAGENTA : null;
+    this.applySkin();
+    this.applyWeaponTier();
+  }
+
+  /** The weapon upgrades: a ring of energy off the hands, flashes at each palm, the name in comic type. */
+  private upgradeBurst(text: string, color: Color): void {
+    this.v1.copy(this.head).addScaledVector(this.forward, 0.9);
+    this.v1.y -= 0.05;
+    this.comic.pop(text, this.v1, color, 0.6);
+    for (const hand of this.hands) {
+      const at = hand.tracked ? hand.gauntlet.palmPoint : this.v2.copy(this.head).addScaledVector(this.forward, 0.5).setY(this.head.y - 0.4);
+      this.flashes.spawn(at, color, 0.1, 0.9, 0.5);
+      this.particles.burst(at, color, 50, 2, 0.6, this.v3);
+      this.particles.burst(at, WHITE, 16, 3, 0.4, this.v3);
+    }
+    if (this.shockwave) {
+      this.shockwave.position.copy(this.head).setY(this.head.y - 0.5);
+      this.shockwave.rotation.set(Math.PI / 2, 0, 0);
+      (this.shockwave.material as MeshBasicMaterial).color.copy(color);
+      this.shockwave.visible = true;
+      this.shockwaveTime = 0;
+    }
+    this.sfx.swap();
+    this.sfx.coin();
   }
 
   private chargeOverdrive(amount: number): void {
@@ -7917,7 +7987,7 @@ export class CombatSystem extends createSystem({
       return;
     }
     this.chargeOverdrive(drone.champion ? 0.5 : 0.1);
-    this.dropPickup(drone.object.position);
+    this.dropPickup(drone.object.position, drone.elite);
     const last = this.run.kill(drone.kind);
     const big = last || drone.kind === 'titan' || drone.champion !== '';
     if (drone.champion) {

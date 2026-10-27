@@ -181,7 +181,7 @@ describe('Run', () => {
       }
     }
     expect(times[1] - times[0]).toBeLessThan(0.3);
-    expect(times[3] - times[2]).toBeGreaterThan(1.5);
+    expect(times[2] - times[1]).toBeGreaterThan(1.5);
   });
 
   it('spawns the boss first in a boss wave and only clears when it falls', () => {

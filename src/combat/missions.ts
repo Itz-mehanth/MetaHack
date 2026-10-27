@@ -100,6 +100,8 @@ export interface WaveDef {
   readonly kinds: readonly EnemyKind[];
   /** Enemies per spawn group (swarms arrive in packs). */
   readonly burst?: number;
+  /** Most enemies of this wave on the field at once; the rest wait their turn. */
+  readonly alive?: number;
   /** The region's boss joins this wave; it must fall before the wave ends. */
   readonly boss?: boolean;
   /** A giant elite of this kind closes the level (non-boss levels). */

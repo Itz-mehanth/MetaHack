@@ -87,6 +87,13 @@ throughout (no Marvel or other third-party names/designs).
   beamfx.ts. VANGUARD's shield is smaller, has a real inside (lining,
   straps), ripples on blocks, trails when thrown and is caught with a pop.
   haptics.ts rumbles controllers/phones on hits (a headset has no motor).
+- Power-ups (RAPID = OVERCLOCK, POWER = POWER UP): collecting one recolours
+  the gauntlets and weapon energy, adds two tiers of rings/sparks/flames,
+  sprays motes off the hands, bursts a ring and the name, and POWER makes
+  shots bigger (damage x2). Crowd control: waves are small (3 to 15), a
+  per-wave cap on enemies alive at once (Run waits for room), smaller swarm
+  bursts, and each wave ends on an ELITE (size x1.25, hp x2.2) that always
+  drops a power-up (others drop 22%).
 - Hands push the world: a fast palm slaps enemy shots back at the aliens
   (SLAP!); free hands shove aliens (knockback) and props.
 - WEAVER's webs are bullets (webshot.ts): a spinning web net per shot, fired

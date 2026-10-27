@@ -63,11 +63,13 @@ function buildWaves(world: World, worldIndex: number, stage: number): WaveDef[] 
     }
     if (stage === 2 && last && !kinds.includes('titan')) kinds.push('titan');
     waves.push({
-      count: (swarm ? 6 : 4) + w * 2 + tier,
-      interval: Math.max(0.8, (swarm ? 2.4 : 1.8) - w * 0.2 - tier * 0.04),
+      // Fewer enemies at a time, each worth fighting: the field is capped, and every wave ends on an elite.
+      count: (swarm ? 5 : 3) + w + Math.floor(tier / 3),
+      alive: (swarm ? 6 : 4) + Math.min(3, w) + Math.floor(tier / 8),
+      interval: Math.max(1.1, (swarm ? 2.6 : 2.2) - w * 0.15 - tier * 0.03),
       speed: (swarm ? 1.3 : 0.7) + w * 0.08 + tier * 0.04,
       kinds,
-      burst: swarm ? 3 + Math.min(2, Math.floor(w / 2)) : undefined,
+      burst: swarm ? 2 + Math.min(1, Math.floor(w / 2)) : undefined,
       boss: stage === 2 && last ? true : undefined,
       champion: stage < 2 && last ? (world.enemies[0] === 'blade' ? 'blade' : world.enemies.includes('titan') ? 'titan' : 'armored') : undefined,
     });
