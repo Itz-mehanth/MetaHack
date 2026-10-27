@@ -229,7 +229,7 @@ export class GameMenus {
       : { id: 'story', x: 640, y: 220, w: 896, h: 200, label: 'START STORY', icon: 'play', sub: 'PROLOGUE: learn your powers in 4 minutes', selected: true, color: '#FF4FD8', size: 72 };
     return {
       title: 'SURGE',
-      subtitle: begun ? `OBLIVAX is unmaking reality. Win back the Anchors. ${anchors}/9` : 'Hands of Heroes',
+      subtitle: begun ? `OBLIVAX is unmaking reality. Win back the Anchors. ${anchors}/${HEROES.length}` : 'Hands of Heroes',
       coins: this.profile.coins,
       accent,
       widgets: [
@@ -269,7 +269,7 @@ export class GameMenus {
               y: 800,
               w: 896,
               h: 120,
-              label: finale ? 'CONVERGENCE: FACE OBLIVAX' : `ANCHORS ${anchors} / 9`,
+              label: finale ? 'CONVERGENCE: FACE OBLIVAX' : `ANCHORS ${anchors} / ${HEROES.length}`,
               sub: finale ? 'The final battle. Every hero, one fight.' : `Beat ${ANCHORS_TO_FINALE - anchors} more region bosses to face OBLIVAX`,
               icon: finale ? 'skull' : 'lock',
               color: '#FF4FD8',
@@ -303,7 +303,7 @@ export class GameMenus {
     const color = equippedColor(p, hero.id);
     return {
       title: 'THE ANCHOR WAR',
-      subtitle: `Anchors ${anchors}/9. ${this.flat ? 'Tap' : 'Poke'} a planet below to choose a front.`,
+      subtitle: `Anchors ${anchors}/${HEROES.length}. ${this.flat ? 'Tap' : 'Poke'} a planet below to choose a front.`,
       coins: p.coins,
       accent: color,
       widgets: [
@@ -454,7 +454,7 @@ export class GameMenus {
     );
     return {
       title: chapter.region,
-      subtitle: `${HEROES.find((h) => h.id === this.hero)!.name} vs ${chapter.villain.name}  |  Boss holds an ANCHOR (${anchorsRecovered(this.profile).length}/9 recovered)`,
+      subtitle: `${HEROES.find((h) => h.id === this.hero)!.name} vs ${chapter.villain.name}  |  Boss holds an ANCHOR (${anchorsRecovered(this.profile).length}/${HEROES.length} recovered)`,
       coins: this.profile.coins,
       accent,
       widgets,

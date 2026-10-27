@@ -23,6 +23,7 @@ export const SHOWCASE: readonly Shot[] = [
   { hero: 'psion', weapon: 'psion-inferno' },
   { hero: 'havoc', weapon: 'havoc-minigun' },
   { hero: 'vanguard', weapon: 'vanguard-storm' },
+  { hero: 'vesper', weapon: 'vesper-nova' },
   { hero: 'weaver', weapon: 'weaver-electro' },
   { hero: 'orion', weapon: 'orion-blast' },
   { hero: 'talon', weapon: 'talon-molten' },
@@ -42,6 +43,7 @@ const STYLE: Readonly<Record<HeroId, { mode: 'hold' | 'tap' | 'blade' | 'drag' |
   talon: { mode: 'blade', hold: 0, gap: 0.3 },
   tempest: { mode: 'tap', hold: 0, gap: 1.35 },
   vanguard: { mode: 'tap', hold: 0, gap: 1.5 },
+  vesper: { mode: 'hold', hold: 1.0, gap: 0.3 },
   weaver: { mode: 'web', hold: 0, gap: 0.55 },
   psion: { mode: 'drag', hold: 0.95, gap: 0.45 },
 };

@@ -94,6 +94,19 @@ throughout (no Marvel or other third-party names/designs).
   per-wave cap on enemies alive at once (Run waits for room), smaller swarm
   bursts, and each wave ends on an ELITE (size x1.25, hp x2.2) that always
   drops a power-up (others drop 22%).
+- VESPER, the sorcerer (10th hero, region THE VEIL / VEIL SANCTUM, villain
+  MORVETH): two fingers out (isSigilPose) fire runic darts (variants: ASTRAL
+  homes, VOID SIGILS burst). Defeated enemies drop rune orbs (only for him);
+  an orb loads a random spell (spells.ts), cast with its gesture before 20 s
+  run out (CAST button on screens): MANDALA SHIELD (open palm), RIFT PORTAL
+  (both palms out), TIME BUBBLE (cup hands, open), BINDING SIGILS (fist, snap
+  open), ASTRAL TWINS (spread hands), METEOR SIGIL (raise, slam), HEALING
+  ANKH (palms to chest). Visuals in spellfx.ts. Hook: __surgeSpell(id).
+- Galaxy map (galaxy.ts): a big spiral-galaxy table with a black-hole core,
+  textured planets, lanes and Anchor light columns, tilted to the viewer.
+- Room-scale MR: roomborder.ts draws the scanned walls' border (red near
+  them); the VR arena follows the player; cages and props spread around the
+  walls (roomgeo.ts, tested).
 - Hands push the world: a fast palm slaps enemy shots back at the aliens
   (SLAP!); free hands shove aliens (knockback) and props.
 - WEAVER's webs are bullets (webshot.ts): a spinning web net per shot, fired

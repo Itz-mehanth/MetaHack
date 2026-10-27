@@ -146,7 +146,7 @@ function heroCards(): string {
 const how = (icon: string, color: string, title: string, text: string) =>
   `<div style="--c:${color};--i:url('${ICONS}${icon}.svg')"><b>${title}</b>${text}</div>`;
 
-const TAGLINE = 'OBLIVAX, the Unmaker, is erasing reality, starting with the room you stand in. Nine heroes. <b>No controllers.</b> Your bare hands are the last line.';
+const TAGLINE = 'OBLIVAX, the Unmaker, is erasing reality, starting with the room you stand in. Ten heroes. <b>No controllers.</b> Your bare hands are the last line.';
 
 const HTML = () => `
 <div class="fx"></div><div class="shade"></div>
@@ -158,7 +158,7 @@ const HTML = () => `
     <div class="kicker">
       <span class="badge">HAND TRACKING ONLY</span>
       <span class="badge alt">MIXED REALITY</span>
-      <span class="badge alt2">9 HEROES &middot; 27 MISSIONS</span>
+      <span class="badge alt2">10 HEROES &middot; 30 MISSIONS</span>
     </div>
     <h1>SURGE</h1>
     <div class="sub">HANDS OF HEROES</div>

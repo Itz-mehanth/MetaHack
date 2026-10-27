@@ -43,6 +43,9 @@ export const TWISTS: Readonly<Record<string, TwistId>> = {
   'iron-bastion-1': 'none',
   'iron-bastion-2': 'meteors',
   'iron-bastion-3': 'ceiling',
+  'veil-sanctum-1': 'none',
+  'veil-sanctum-2': 'blackout',
+  'veil-sanctum-3': 'lowgrav',
 };
 
 export function twistFor(stageId: string): TwistId {
@@ -72,4 +75,6 @@ export const CHAMPIONS: Readonly<Record<string, string>> = {
   'sky-ruins-2': 'GRAVITON',
   'iron-bastion-1': 'WALL BREAKER',
   'iron-bastion-2': 'SHELL SHOCK',
+  'veil-sanctum-1': 'RUNE WARDEN',
+  'veil-sanctum-2': 'HOLLOW ABBOT',
 };

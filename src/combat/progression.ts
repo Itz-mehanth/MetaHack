@@ -27,6 +27,7 @@ export const WORLDS: readonly World[] = [
   { id: 'moon-temple', name: 'MOON TEMPLE', color: '#4DA6FF', enemies: ['blade', 'swarmer', 'armored', 'flyer'] },
   { id: 'sky-ruins', name: 'SKY RUINS', color: '#E05CFF', enemies: ['drone', 'armored', 'titan', 'flyer'] },
   { id: 'iron-bastion', name: 'IRON BASTION', color: '#3D6BFF', enemies: ['drone', 'blade', 'armored', 'flyer'] },
+  { id: 'veil-sanctum', name: 'VEIL SANCTUM', color: '#8A5CFF', enemies: ['drone', 'blade', 'swarmer', 'armored', 'flyer'] },
 ];
 
 export const STAGES_PER_WORLD = 3;
@@ -118,6 +119,7 @@ export const HERO_PRICE: Readonly<Record<HeroId, number>> = {
   ronin: 1800,
   psion: 2100,
   vanguard: 2400,
+  vesper: 2700,
 };
 
 export const ENEMY_COINS: Readonly<Record<EnemyKind, number>> = {
@@ -172,6 +174,9 @@ export const UPGRADES: readonly UpgradeDef[] = [
   { id: 'vanguard-ricochet', hero: 'vanguard', name: 'RICOCHET', description: 'Thrown shield bounces to more enemies' },
   { id: 'vanguard-force', hero: 'vanguard', name: 'BATTERING RAM', description: 'Shield hits and punches hit harder' },
   { id: 'vanguard-guard', hero: 'vanguard', name: 'REFLECTOR', description: 'Deflected shots hit back harder' },
+  { id: 'vesper-power', hero: 'vesper', name: 'RUNIC FORCE', description: 'Darts and spells hit harder' },
+  { id: 'vesper-well', hero: 'vesper', name: 'DEEP WELL', description: 'Spells last longer and orbs drop more often' },
+  { id: 'vesper-rate', hero: 'vesper', name: 'SWIFT HANDS', description: 'Faster darts' },
 ];
 
 export interface Skin {
@@ -210,6 +215,9 @@ const SKIN_SETS: ReadonlyArray<readonly [HeroId, string, string]> = [
   ['vanguard', 'CLASSIC', '#3D6BFF'],
   ['vanguard', 'SENTINEL', '#E8F0FF'],
   ['vanguard', 'CRIMSON', '#FF3B3B'],
+  ['vesper', 'CLASSIC', '#8A5CFF'],
+  ['vesper', 'EMBER', '#FF7A3D'],
+  ['vesper', 'MOONLIT', '#7CE8FF'],
 ];
 
 export const SKINS: readonly Skin[] = SKIN_SETS.map(([hero, name, color], i) => ({

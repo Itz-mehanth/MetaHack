@@ -104,6 +104,7 @@ export const ROSTER: Readonly<Record<string, Partial<Record<EnemyKind, string>>>
   'moon-temple': { blade: 'tribal', swarmer: 'pinkblob', armored: 'orc', titan: 'mushking', flyer: 'goleling' },
   'sky-ruins': { drone: 'alien', armored: 'bluedemon', titan: 'dino', flyer: 'alpaking' },
   'iron-bastion': { drone: 'mike', blade: 'leela', armored: 'stan', titan: 'george', flyer: 'ghostskull' },
+  'veil-sanctum': { drone: 'tribal', blade: 'ninja', swarmer: 'mushnub', armored: 'demon', titan: 'mushking', flyer: 'ghost' },
 };
 
 /** Each region's boss: a giant flying creature (species, height in metres). */
@@ -117,6 +118,7 @@ export const BOSSES: Readonly<Record<string, { readonly species: string; readonl
   'moon-temple': { species: 'golelingevo', height: 2.8 },
   'sky-ruins': { species: 'alpakingevo', height: 3 },
   'iron-bastion': { species: 'hywirl', height: 2.8 },
+  'veil-sanctum': { species: 'ghostskull', height: 3 },
 };
 
 /** The species fighting as `kind` in `worldId` ('' for the humanoid aliens). */

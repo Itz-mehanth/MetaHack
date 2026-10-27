@@ -251,6 +251,9 @@ export class Pilot {
       case 'psion':
         this.psion(dt, intent, view);
         break;
+      case 'vesper':
+        this.vesper(intent);
+        break;
       case 'vanguard':
         this.vanguard(intent, view);
         break;
@@ -268,6 +271,26 @@ export class Pilot {
       if (intent.down && (i === lead || intent.held > 1.1)) this.blast(i, 0.44);
       else this.idle(i);
     }
+  }
+
+  /** VESPER: the sigil pose (two fingers) at the target; hold a second and both hands cast. */
+  private vesper(intent: Intent): void {
+    const lead = this.lead;
+    for (let i = 0; i < 2; i += 1) {
+      if (this.tracks[i].busy) continue;
+      if (intent.down && (i === lead || intent.held > 1.1)) this.sigil(i, 0.44);
+      else this.idle(i);
+    }
+  }
+
+  /** The sigil pose toward the target, `reach` metres out from the shoulder. */
+  private sigil(i: number, reach: number): void {
+    this.shoulder(i, this.s);
+    this.d.subVectors(this.target, this.s).normalize();
+    this.p.copy(this.s).addScaledVector(this.d, reach);
+    this.up(this.d, this.f);
+    this.handFrame(this.d, this.f, this.q);
+    this.set(i, this.p, this.q, SHAPES.sigil);
   }
 
   /** TALON and RONIN: fists up; taps strike, swipes slash, holding keeps cutting. */
@@ -482,6 +505,7 @@ export class Pilot {
     else if (view.hero === 'ronin') this.cross();
     else if (view.hero === 'tempest' && view.hammerState === 'gripped') this.raise(view.hammerHand);
     else if (view.hero === 'arc' && view.unibeam) this.chestCharge(1);
+    else if (view.hero === 'vesper') this.raise(1);
   }
 
   /** ARC: an open palm pressed to the chest while the reactor charges. */

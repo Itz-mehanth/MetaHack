@@ -296,10 +296,10 @@ export function createPod(): Group {
 }
 
 /** Power-up pickup; `kind` picks the colour and icon shape. */
-export function createPickup(kind: 'heal' | 'rapid' | 'power'): Group {
+export function createPickup(kind: 'heal' | 'rapid' | 'power' | 'rune'): Group {
   const root = new Group();
   root.name = `Pickup-${kind}`;
-  const color = kind === 'heal' ? '#39FF88' : kind === 'rapid' ? '#FFD23F' : '#FF3B5C';
+  const color = kind === 'heal' ? '#39FF88' : kind === 'rapid' ? '#FFD23F' : kind === 'rune' ? '#8A5CFF' : '#FF3B5C';
   const shell = new Mesh(
     new IcosahedronGeometry(0.06, 1),
     new MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.2, transparent: true, opacity: 0.55 }),
@@ -310,7 +310,9 @@ export function createPickup(kind: 'heal' | 'rapid' | 'power'): Group {
       ? new Mesh(new BoxGeometry(0.05, 0.015, 0.015), glow('#FFFFFF', 3))
       : kind === 'rapid'
         ? new Mesh(new ConeGeometry(0.02, 0.05, 3), glow('#FFFFFF', 3))
-        : new Mesh(new IcosahedronGeometry(0.022, 0), glow('#FFFFFF', 3));
+        : kind === 'rune'
+          ? new Mesh(new OctahedronGeometry(0.03, 0), glow('#FFE8A8', 3))
+          : new Mesh(new IcosahedronGeometry(0.022, 0), glow('#FFFFFF', 3));
   icon.name = 'Icon';
   if (kind === 'heal') {
     const cross = new Mesh(new BoxGeometry(0.015, 0.05, 0.015), glow('#FFFFFF', 3));

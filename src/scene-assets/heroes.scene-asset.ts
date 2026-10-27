@@ -22,7 +22,7 @@ import { createKatana, createShield } from './weapons.scene-asset.js';
  * All designs are original.
  */
 
-type HeroId = 'arc' | 'talon' | 'tempest' | 'orion' | 'weaver' | 'havoc' | 'ronin' | 'psion' | 'vanguard';
+type HeroId = 'arc' | 'talon' | 'tempest' | 'orion' | 'weaver' | 'havoc' | 'ronin' | 'psion' | 'vanguard' | 'vesper';
 
 const DEFAULT_ACCENT: Record<HeroId, string> = {
   arc: '#3DF5FF',
@@ -34,6 +34,7 @@ const DEFAULT_ACCENT: Record<HeroId, string> = {
   ronin: '#4DA6FF',
   psion: '#E05CFF',
   vanguard: '#3D6BFF',
+  vesper: '#8A5CFF',
 };
 
 const SUIT: Record<HeroId, string> = {
@@ -46,6 +47,7 @@ const SUIT: Record<HeroId, string> = {
   ronin: '#17171F',
   psion: '#1E1428',
   vanguard: '#1C2A4A',
+  vesper: '#1A1230',
 };
 
 function accentMaterial(color: string): MeshStandardMaterial {
@@ -234,6 +236,26 @@ export function createHeroFigure(hero: HeroId): Group {
     shield.position.set(-0.25, 0.6, 0.08);
     shield.rotation.y = -0.5;
     root.add(shield);
+  } else if (hero === 'vesper') {
+    // Hooded sorcerer: a high collar, a gold clasp, a floating mandala and a spell orb in the raised hand.
+    const gold = new MeshStandardMaterial({ color: '#FFC857', metalness: 0.9, roughness: 0.25 });
+    const hood = part(new SphereGeometry(0.095, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), suit, 0, 0.95, -0.012);
+    root.add(hood);
+    const collar = part(new CylinderGeometry(0.13, 0.09, 0.09, 6, 1, true), new MeshStandardMaterial({ color: '#2A1A4A', side: DoubleSide, roughness: 0.8 }), 0, 0.82, -0.01);
+    root.add(collar);
+    const cloak = part(new CylinderGeometry(0.11, 0.25, 0.5, 14, 1, true), new MeshStandardMaterial({ color: '#2A1A4A', side: DoubleSide, roughness: 0.85 }), 0, 0.4, -0.04);
+    cloak.scale.z = 0.7;
+    root.add(cloak);
+    root.add(part(new SphereGeometry(0.016, 10, 8), gold, 0, 0.78, 0.095));
+    for (let r = 0; r < 2; r += 1) {
+      const ring = part(new TorusGeometry(0.15 + r * 0.04, 0.004, 6, 48), r === 0 ? accent : gold, 0, 1.12, -0.02);
+      ring.rotation.set(Math.PI / 2 - 0.2, 0, r * 0.8);
+      root.add(ring);
+    }
+    root.add(part(new SphereGeometry(0.035, 12, 10), accent, 0.26, 1.0, 0.07));
+    const raised = part(new CapsuleGeometry(0.03, 0.15, 4, 10), suit, 0.21, 0.86, 0.03);
+    raised.rotation.z = -0.55;
+    root.add(raised);
   } else if (hero === 'psion') {
     // Hooded mystic: a halo of floating shards and a rock held aloft by the mind.
     const hood = part(new SphereGeometry(0.09, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), suit, 0, 0.95, -0.01);

@@ -539,6 +539,59 @@ export const CHAPTERS: readonly Chapter[] = [
       },
     ],
   },
+  {
+    hero: 'vesper',
+    worldId: 'veil-sanctum',
+    region: 'THE VEIL',
+    villain: { name: 'MORVETH', title: 'The Hollow Magus', color: '#7A4DFF' },
+    levels: [
+      {
+        location: 'THE SILENT LIBRARY',
+        blurb: 'The Legion has gutted a library that guards the Veil. Scholars are caged among the shelves.',
+        hostages: 3,
+        intro: [
+          { speaker: 'villain', text: 'Burn the books. A world with no spells has no defenders.' },
+          { speaker: 'hero', text: 'Every page you burn is a spell I already know.' },
+        ],
+        outro: [
+          { speaker: 'civilian', text: 'The runes woke for you. They have not woken for anyone in years.' },
+          { speaker: 'villain', text: 'Parlour tricks. The cloister will teach you fear.' },
+        ],
+        taunts: ['Silence the room!', 'No spell survives ash!'],
+        reward: overdrive('vesper'),
+        map: [-0.6, 0.3],
+      },
+      {
+        location: 'MIRROR CLOISTER',
+        blurb: 'Mirrors split the cloister into a dozen copies. Legion troops step out of every one.',
+        hostages: 4,
+        intro: [
+          { speaker: 'villain', text: 'Which of us is real? It will not matter when you are dead.' },
+          { speaker: 'hero', text: 'Mirrors only show what is in front of them. I am behind you.' },
+        ],
+        outro: [{ speaker: 'villain', text: 'Then come to the Hollow Throne, little sorcerer. Bring your orbs.' }],
+        taunts: ['Break the glass!', 'Twelve of us, one of you!'],
+        reward: core('vesper'),
+        map: [0.0, 0.0],
+      },
+      {
+        location: 'THE HOLLOW THRONE',
+        blurb: 'Boss: MORVETH, a magus emptied of everything but hunger, on a throne that eats the light.',
+        hostages: 3,
+        intro: [
+          { speaker: 'villain', text: 'I gave my name to the Unmaker. What have you given anyone?' },
+          { speaker: 'hero', text: 'Spells. Back to the people you stole them from.' },
+        ],
+        outro: [
+          { speaker: 'villain', text: 'The Veil... is thinner than I... thought...' },
+          { speaker: 'vex', text: 'Another Anchor lost? Then OBLIVAX will come for the Veil himself.' },
+        ],
+        taunts: ['KNEEL TO THE HOLLOW!', 'Your orbs are empty!', 'I am the void between your spells!'],
+        reward: legend('vesper'),
+        map: [0.6, -0.5],
+      },
+    ],
+  },
 ];
 
 export function chapterFor(hero: HeroId): Chapter {
