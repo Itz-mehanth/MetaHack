@@ -79,12 +79,12 @@ export const ROLE_FAMILY: Partial<Record<EnemyKind, Family>> = {
 
 /** Standing height (m) of the creature in each role. */
 export const ROLE_HEIGHT: Partial<Record<EnemyKind, number>> = {
-  drone: 1.7,
-  armored: 2.0,
-  blade: 1.8,
-  titan: 3.2,
-  swarmer: 1.25,
-  flyer: 1.15,
+  drone: 1.3,
+  armored: 1.5,
+  blade: 1.4,
+  titan: 2.5,
+  swarmer: 0.95,
+  flyer: 0.9,
 };
 
 /** Creatures kept ready per role (a pool slot is one skinned clone with its own mixer). */
@@ -109,16 +109,16 @@ export const ROSTER: Readonly<Record<string, Partial<Record<EnemyKind, string>>>
 
 /** Each region's boss: a giant flying creature (species, height in metres). */
 export const BOSSES: Readonly<Record<string, { readonly species: string; readonly height: number }>> = {
-  'neon-grid': { species: 'dragon', height: 2.6 },
-  'ember-foundry': { species: 'dragonevo', height: 3 },
-  'storm-peak': { species: 'squidle', height: 2.6 },
-  'frost-spire': { species: 'glubevo', height: 2.8 },
-  'void-rift': { species: 'ghost', height: 3 },
-  'scrap-wastes': { species: 'armabeeevo', height: 2.8 },
-  'moon-temple': { species: 'golelingevo', height: 2.8 },
-  'sky-ruins': { species: 'alpakingevo', height: 3 },
-  'iron-bastion': { species: 'hywirl', height: 2.8 },
-  'veil-sanctum': { species: 'ghostskull', height: 3 },
+  'neon-grid': { species: 'dragon', height: 2.2 },
+  'ember-foundry': { species: 'dragonevo', height: 2.4 },
+  'storm-peak': { species: 'squidle', height: 2.2 },
+  'frost-spire': { species: 'glubevo', height: 2.3 },
+  'void-rift': { species: 'ghost', height: 2.4 },
+  'scrap-wastes': { species: 'armabeeevo', height: 2.3 },
+  'moon-temple': { species: 'golelingevo', height: 2.3 },
+  'sky-ruins': { species: 'alpakingevo', height: 2.4 },
+  'iron-bastion': { species: 'hywirl', height: 2.3 },
+  'veil-sanctum': { species: 'ghostskull', height: 2.4 },
 };
 
 /** The species fighting as `kind` in `worldId` ('' for the humanoid aliens). */

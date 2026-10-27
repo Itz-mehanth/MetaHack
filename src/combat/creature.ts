@@ -27,6 +27,17 @@ const FALLBACK: Readonly<Record<ClipName, readonly ClipName[]>> = {
   death: ['death', 'hit', 'idle'],
 };
 
+export type GrabZone = 'head' | 'arm' | 'leg';
+
+/** Skeleton bones that count as grab zones (humanoids; blobs and flyers have only a head). */
+const ZONE_BONES: readonly (readonly [GrabZone, string])[] = [
+  ['head', 'Head'],
+  ['arm', 'LowerArm.L'],
+  ['arm', 'LowerArm.R'],
+  ['leg', 'LowerLeg.L'],
+  ['leg', 'LowerLeg.R'],
+];
+
 let outlineMaterial: MeshBasicMaterial | null = null;
 
 /** Ink for the outline: the skinned mesh drawn again from behind, pushed out along its normals. */
@@ -56,6 +67,8 @@ export class CreatureModel {
   private current: ClipName | '' = '';
   private currentAction: AnimationAction | null = null;
   private once = false;
+  /** Bones a free hand can take hold of. */
+  readonly zones: { name: GrabZone; bone: Object3D }[] = [];
 
   /**
    * `lift` is the height of the body centre above the feet (walkers), or
@@ -87,6 +100,10 @@ export class CreatureModel {
       outline.frustumCulled = false;
       skinned.parent!.add(outline);
     });
+    for (const [name, bone] of ZONE_BONES) {
+      const found = model.getObjectByName(bone);
+      if (found) this.zones.push({ name, bone: found });
+    }
     this.mixer = new AnimationMixer(model);
     for (const clip of clips) {
       const name = clip.name as ClipName;

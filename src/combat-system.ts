@@ -71,7 +71,7 @@ import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
 import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isSigilPose, isWebPose, setSensitivity, tuning } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
-import { CreatureModel } from './combat/creature.js';
+import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { rollSpell, type SpellId, spellById } from './combat/spells.js';
 import { SpellFx } from './combat/spellfx.js';
 import { BeamFx } from './combat/beamfx.js';
@@ -174,6 +174,7 @@ const PSI_GRAVITY = 3;
 
 const CYAN = new Color('#3DF5FF');
 const WHITE = new Color('#FFFFFF');
+const BLOOD_RED = new Color('#C01818');
 const ORANGE = new Color('#FF8A1F');
 const MAGENTA = new Color('#FF2D6F');
 const GOLD = new Color('#FFD23F');
@@ -268,6 +269,11 @@ interface HandState {
   aimDrone: Drone | null;
   aimTime: number;
   release: number;
+  /** A universal grab: this hand holds a creature by a bone (`held` is its slot). */
+  grabZone: GrabZone | null;
+  grabOffset: Vector3;
+  grabLoose: number;
+  grabRingAt: number;
 }
 
 /** A meteor or lightning strike: warning circle, then impact. */
@@ -414,6 +420,8 @@ interface Drone {
   species: string;
   /** Animated model of a creature (null for humanoids and bosses). */
   creature: CreatureModel | null;
+  /** Torso height above the floor for creatures (0: use the role's own). */
+  chest: number;
   /** When it last blocked a cut (duellists only). */
   guardAt: number;
   /** Sidestep: seconds left, its direction, and the cooldown before the next. */
@@ -988,6 +996,10 @@ export class CombatSystem extends createSystem({
         aimDrone: null,
         aimTime: -10,
         release: 0,
+        grabZone: null,
+        grabOffset: new Vector3(),
+        grabLoose: 0,
+        grabRingAt: 0,
       });
       this.handSlots.push(jointSlots(joints));
     }
@@ -1246,6 +1258,7 @@ export class CombatSystem extends createSystem({
         bowlAt: -10,
         species: '',
         creature: null,
+        chest: 0,
         guardAt: -10,
         dodge: 0,
         dodgeDir: new Vector3(),
@@ -1465,6 +1478,7 @@ export class CombatSystem extends createSystem({
       bowlAt: -10,
       species: extra.species ?? '',
       creature,
+      chest: 0,
       guardAt: -10,
       dodge: 0,
       dodgeDir: new Vector3(),
@@ -1532,7 +1546,8 @@ export class CombatSystem extends createSystem({
     const count = ROLE_POOL[kind];
     if (species == null || height == null || count == null) return;
     const gltf = await AssetManager.loadGLTFById(`creature-${id}`);
-    const lift = ENEMIES[kind].ground?.chest ?? null;
+    // The torso sits at 55% of the body's height, so what you see is what the hit areas cover.
+    const lift = ENEMIES[kind].ground ? height * species.scale * 0.55 : null;
     const portalGeometry = new RingGeometry(0.17, 0.26, 48);
     for (let n = 0; n < count; n += 1) {
       const creature = new CreatureModel(gltf.scene, gltf.animations, height * species.scale, lift);
@@ -1543,8 +1558,14 @@ export class CombatSystem extends createSystem({
       object.visible = false;
       object.rotation.order = 'YXZ';
       this.root.add(object);
-      this.makeDrone(object, kind, portalGeometry, 1000 + this.drones.length, { species: id, creature });
+      const drone = this.makeDrone(object, kind, portalGeometry, 1000 + this.drones.length, { species: id, creature });
+      if (lift != null) drone.chest = lift;
     }
+  }
+
+  /** Torso height of a walker: the creature's own, else its role's. */
+  private chestOf(drone: Drone): number {
+    return drone.chest > 0 ? drone.chest : ENEMIES[drone.kind].ground!.chest;
   }
 
   /** Ichor colour of a creature (undefined: the humanoids' red). */
@@ -1992,6 +2013,7 @@ export class CombatSystem extends createSystem({
     this.updateSwords(realDt, time);
     this.updateShield(realDt);
     this.updatePsion(realDt, dt, time);
+    this.updateGrabs(realDt, time);
     if (this.powersLive) this.updateShoves();
     this.updateScript(realDt, time);
     if (!this.paused) this.updateTwist(dt, time);
@@ -5104,7 +5126,7 @@ export class CombatSystem extends createSystem({
         const def = ENEMIES[drone.kind];
         if (def.ground == null || drone.state === 'off' || drone.state === 'emerging' || drone.lifted) continue;
         if (this.elapsed - drone.bladeHitAt < 0.4) continue;
-        const scale = (def.ground.chest * drone.size) / 1.15;
+        const scale = (this.chestOf(drone) * drone.size) / 1.15;
         const at = drone.object.position;
         this.sa.set(at.x, at.y - 0.6 * scale, at.z);
         this.sb.set(at.x, at.y + 0.45 * scale, at.z);
@@ -5373,7 +5395,7 @@ export class CombatSystem extends createSystem({
     put(RAG.kneeR, rig.kneeR);
     put(RAG.footR, rig.kneeR, 0, -0.43, 0);
     body.relink();
-    const s = drone.size * (ENEMIES[drone.kind].ground!.chest / 1.15);
+    const s = drone.size * (this.chestOf(drone) / 1.15);
     body.radius.fill(0.06 * s);
     body.radius[RAG.head] = 0.09 * s;
     body.radius[RAG.chest] = 0.12 * s;
@@ -5518,7 +5540,7 @@ export class CombatSystem extends createSystem({
     drone.size = 1.25;
     drone.hp = def.hp * 2.2;
     drone.maxHp = drone.hp;
-    if (def.ground) drone.spawn.y = def.ground.chest * drone.size;
+    if (def.ground) drone.spawn.y = this.chestOf(drone) * drone.size;
     this.flashes.spawn(drone.spawn, GOLD, 0.3, 2, 0.6);
     this.particles.burst(drone.spawn, GOLD, 50, 2.5, 0.6, this.v2);
     this.comic.pop('ELITE!', this.v1.copy(drone.spawn).setY(drone.spawn.y + 1), GOLD, 0.6);
@@ -5548,7 +5570,7 @@ export class CombatSystem extends createSystem({
     drone.champion = CHAMPIONS[this.run.stage.id] ?? 'CHAMPION';
     drone.maxHp = def.hp * 6 + 8;
     drone.hp = drone.maxHp;
-    drone.spawn.y = def.ground!.chest * drone.size;
+    drone.spawn.y = this.chestOf(drone) * drone.size;
     drone.portal.scale.setScalar(0.01);
     this.flashes.spawn(drone.spawn, ENEMY_COLOR.boss, 0.4, 3, 0.8);
     this.particles.burst(drone.spawn, ENEMY_COLOR.boss, 120, 3, 0.8, this.v2);
@@ -6739,7 +6761,7 @@ export class CombatSystem extends createSystem({
       const hand = this.hands[i];
       const psi = hand.psi;
       if (!active || !hand.tracked) {
-        if (hand.held) this.releaseHeld(i, false);
+        if (hand.held && hand.grabZone == null) this.releaseHeld(i, false);
         hand.aimObject = null;
         hand.aimDrone = null;
         psi.hide();
@@ -6782,6 +6804,127 @@ export class CombatSystem extends createSystem({
     for (const item of this.debris) if (item.state === 'flying') this.updateThrowable(item, dt);
     this.shards.update(dt, 9.8 * this.gravityScale, this.gibCollide);
     for (const slot of this.liftSlots) if (slot.state === 'flying') this.updateThrowable(slot, dt);
+  }
+
+  /**
+   * Every hero: a closed free hand takes hold of a creature by the bone it
+   * touches. Head: lift, squeeze, slam or throw. Arm: yank to disarm and
+   * stagger. Leg: trip. Opening the hand flings it.
+   */
+  private updateGrabs(realDt: number, time: number): void {
+    const palmReach = 0.16;
+    for (let i = 0; i < this.hands.length; i += 1) {
+      const hand = this.hands[i];
+      const free = this.powersLive && hand.tracked && this.hero !== 'psion' && !this.handBusy(i);
+      const fist = free && isFist(hand.joints);
+      const item = hand.grabZone != null ? hand.held : null;
+      if (item) {
+        const drone = item.drone;
+        if (!free || drone == null || drone.state === 'off' || !drone.lifted) {
+          if (drone == null || drone.state === 'off' || !drone.lifted) this.freeSlot(item);
+          else this.releaseHeld(i, false);
+          hand.held = null;
+          hand.grabZone = null;
+          continue;
+        }
+        hand.grabLoose = fist ? 0 : hand.grabLoose + realDt;
+        if (hand.grabLoose > 0.08) {
+          this.releaseHeld(i, true);
+          hand.grabZone = null;
+          continue;
+        }
+        this.holdGrabbed(i, item, drone, realDt, time);
+        continue;
+      }
+      if (!free || hand.held) continue;
+      const palm = hand.gauntlet.palmPoint;
+      let best: Drone | null = null;
+      let bestZone: GrabZone = 'head';
+      let bestDistance = palmReach * 2.2;
+      for (const drone of this.drones) {
+        const creature = drone.creature;
+        if (creature == null || !this.liftable(drone)) continue;
+        if (palm.distanceTo(drone.object.position) > 1.6) continue;
+        for (const zone of creature.zones) {
+          zone.bone.getWorldPosition(this.v1);
+          const d = this.v1.distanceTo(palm);
+          if (d < bestDistance) {
+            bestDistance = d;
+            best = drone;
+            bestZone = zone.name;
+            this.v4.copy(this.v1);
+          }
+        }
+      }
+      if (best == null) continue;
+      if (this.elapsed - hand.grabRingAt > 0.09) {
+        hand.grabRingAt = this.elapsed;
+        this.flashes.spawn(this.v4, bestDistance < palmReach ? WHITE : this.accent, 0.06, 0.8, 0.12);
+      }
+      if (!fist || bestDistance > palmReach) continue;
+      const slot = this.liftSlots.find((s) => s.state === 'off');
+      if (slot == null) continue;
+      slot.object = best.object;
+      slot.drone = best;
+      slot.radius = ENEMIES[best.kind].radius;
+      slot.state = 'held';
+      slot.thrown = false;
+      slot.previous.copy(best.object.position);
+      slot.velocity.set(0, 0, 0);
+      best.lifted = true;
+      hand.held = slot;
+      hand.grabZone = bestZone;
+      hand.grabLoose = 0;
+      hand.grabOffset.subVectors(this.v4, best.object.position);
+      this.sfx.lift();
+      this.flashes.spawn(this.v4, WHITE, 0.12, 0.9, 0.2);
+      this.particles.burst(this.v4, this.accent, 14, 1.2, 0.3, this.v2);
+      this.comic.pop(bestZone === 'head' ? 'GOT HIM!' : bestZone === 'arm' ? 'DISARM!' : 'TRIP!', this.v1.copy(this.v4).setY(this.v4.y + 0.3), this.accent, 0.4);
+      if (bestZone === 'arm') {
+        best.stun = 2.2;
+        best.creature!.play('hit', 1, true, 0.05);
+      } else best.creature!.play('run', 2.2);
+    }
+  }
+
+  /** Carries a grabbed creature by its bone: it follows the hand and thrashes. */
+  private holdGrabbed(i: number, item: Throwable, drone: Drone, dt: number, time: number): void {
+    const hand = this.hands[i];
+    const position = item.object.position;
+    item.previous.copy(position);
+    this.v3.subVectors(hand.gauntlet.palmPoint, hand.grabOffset);
+    this.v3.y = Math.max(this.v3.y, this.chestOf(drone) * (hand.grabZone === 'leg' ? 1.1 : 0.55));
+    position.lerp(this.v3, Math.min(1, dt * 16));
+    if (dt > 0) {
+      this.v4.subVectors(position, item.previous).divideScalar(dt);
+      item.velocity.lerp(this.v4, 0.45);
+    }
+    drone.object.rotation.x = Math.sin(time * 11 + i) * 0.18;
+    drone.object.rotation.z = hand.grabZone === 'leg' ? Math.PI * 0.9 : Math.sin(time * 8) * 0.12;
+    // Squeezing the head hurts.
+    if (hand.grabZone === 'head' && this.elapsed - hand.grabRingAt > 0.35) {
+      hand.grabRingAt = this.elapsed;
+      this.damageDrone(drone, 0.6);
+      this.particles.burst(this.v3.copy(position).setY(position.y + this.chestOf(drone)), BLOOD_RED, 6, 1, 0.25, this.v2);
+    }
+    // A hard downward pull slams it into the floor.
+    if (hand.palmVel.y < -2.6 * tuning.swing && this.elapsed - item.bashAt > 0.5) {
+      item.bashAt = this.elapsed;
+      const damage = hand.grabZone === 'head' ? 4 : hand.grabZone === 'leg' ? 3 : 2;
+      this.v3.copy(position);
+      this.markHit('blast', this.v3, hand.palmVel, undefined, 2.5);
+      this.sfx.catchHammer();
+      this.hitStop = Math.max(this.hitStop, 0.05);
+      this.flashes.spawn(this.v3.setY(0.05), WHITE, 0.4, 0.9, 0.2);
+      this.particles.burst(this.v3, GOLD, 22, 2.2, 0.3, this.v2);
+      this.comic.pop('SLAM!', this.v1.copy(this.v3).setY(this.v3.y + 0.6), GOLD, 0.45);
+      this.damageDrone(drone, damage, true);
+      this.haptics.pulse(this.world.renderer.xr.getSession(), 0.8, 100);
+      if (drone.state !== 'off') {
+        this.releaseHeld(i, false);
+        hand.grabZone = null;
+      }
+    }
   }
 
   /** Locks hand `i` onto the prop or alien nearest its palm direction. */
@@ -6979,7 +7122,7 @@ export class CombatSystem extends createSystem({
     }
     if (drone) {
       // A thrown alien crashes into whatever it reaches: another alien, a wall, the floor.
-      const floor = ENEMIES[drone.kind].ground!.chest;
+      const floor = this.chestOf(drone);
       const wall = this.room.collide(position, item.radius) && this.room.normal[1] < 0.7;
       if (hit == null && !wall && position.y > floor && item.t < 4) return;
       if (item.thrown) this.psiImpact(position, hit, drone);
@@ -7148,7 +7291,7 @@ export class CombatSystem extends createSystem({
           this.v4.copy(drone.object.position);
           // A shot through the head does nearly double.
           const ground = ENEMIES[drone.kind].ground;
-          const head = !crescent && ground != null && bolt.position.y > drone.object.position.y + 0.3 * ground.chest * drone.size;
+          const head = !crescent && ground != null && bolt.position.y > drone.object.position.y + 0.3 * this.chestOf(drone) * drone.size;
           if (head) {
             this.flashes.spawn(bolt.position, GOLD, 0.06, 0.6, 0.15);
             if (this.comicCooldown <= 0) {
@@ -7213,7 +7356,7 @@ export class CombatSystem extends createSystem({
       drone.normal.y = 0;
       if (drone.normal.lengthSq() < 1e-4) drone.normal.set(0, 0, 1);
       drone.normal.normalize();
-      drone.spawn.y = ground.chest;
+      drone.spawn.y = this.chestOf(drone);
       drone.stride = 0;
       drone.stagger = 0;
       drone.stun = 0;
@@ -7816,7 +7959,7 @@ export class CombatSystem extends createSystem({
   private updateWalker(drone: Drone, dt: number, time: number): void {
     const def = ENEMIES[drone.kind];
     const ground = def.ground!;
-    const chest = ground.chest * drone.size;
+    const chest = this.chestOf(drone) * drone.size;
     const object = drone.object;
     const rig = drone.rig;
     this.v1.set(this.head.x - object.position.x, 0, this.head.z - object.position.z);
@@ -8145,7 +8288,7 @@ export class CombatSystem extends createSystem({
       }
       return false;
     }
-    const scale = def.ground.chest / 1.15;
+    const scale = this.chestOf(drone) / 1.15;
     this.sa.set(at.x, at.y - 0.75 * scale, at.z);
     this.sb.set(at.x, at.y + 0.55 * scale, at.z);
     const radius = def.radius * 0.75 + 0.06;
@@ -8189,7 +8332,7 @@ export class CombatSystem extends createSystem({
     drone.knock.copy(this.hitDir).setY(0);
     if (drone.knock.lengthSq() < 1e-4) drone.knock.set(object.position.x - this.head.x, 0, object.position.z - this.head.z);
     drone.knock.normalize().multiplyScalar(this.hitStyle === 'slice' ? 0.3 : big ? 1.4 : 0.9);
-    const chest = def.ground!.chest;
+    const chest = this.chestOf(drone);
     const scale = chest / 1.15;
     // A ragdoll (before any part is cut away); skewered bodies start one when flung off.
     const ragdoll = this.hitStyle !== 'impale' && this.startRagdoll(drone, null);
@@ -8243,7 +8386,7 @@ export class CombatSystem extends createSystem({
       const def = ENEMIES[drone.kind];
       if (def.ground == null || drone.state === 'off' || drone.state === 'emerging' || drone.lifted || drone.creature) continue;
       if (this.elapsed - drone.bladeHitAt < 0.3) continue;
-      const scale = def.ground.chest / 1.15;
+      const scale = this.chestOf(drone) / 1.15;
       const at = drone.object.position;
       this.sa.set(at.x, at.y - 0.6 * scale, at.z);
       this.sb.set(at.x, at.y + 0.45 * scale, at.z);
@@ -8317,7 +8460,7 @@ export class CombatSystem extends createSystem({
   /** A thrown body tumbles, knocks over the living, and lands lying down. */
   private updateAirborne(drone: Drone, dt: number): void {
     const object = drone.object;
-    const chest = ENEMIES[drone.kind].ground!.chest;
+    const chest = this.chestOf(drone);
     drone.fly.y -= 9.8 * this.gravityScale * dt;
     object.position.addScaledVector(drone.fly, dt);
     object.rotation.x -= dt * (2 + drone.fly.length() * 0.5);
@@ -8395,7 +8538,7 @@ export class CombatSystem extends createSystem({
     const def = ENEMIES[drone.kind];
     const object = drone.object;
     const rig = drone.rig;
-    const chest = def.ground!.chest * drone.size;
+    const chest = this.chestOf(drone) * drone.size;
     const fall = drone.kind === 'titan' || drone.size > 1 ? DEATH_FALL * 1.5 : DEATH_FALL;
     const before = drone.dying;
     drone.dying += dt;
