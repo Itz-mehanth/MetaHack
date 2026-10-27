@@ -107,6 +107,13 @@ throughout (no Marvel or other third-party names/designs).
 - Room-scale MR: roomborder.ts draws the scanned walls' border (red near
   them); the VR arena follows the player; cages and props spread around the
   walls (roomgeo.ts, tested).
+- Skill: shots hit the body (creature hit areas ~60% of their size), a
+  shot through the head does x1.8 (HEADSHOT!), walkers sidestep incoming
+  shots (normal 30%, hard 55%, elites more; never giants), and aim assist and
+  homing narrow with difficulty (easy full, normal reduced, hard none for
+  plain bolts; missiles, rockets and astral darts keep guidance).
+- Suit (suit.ts): armoured forearm sleeves toward an estimated elbow and a
+  chest emblem when looking down; no helmet/torso/legs by design.
 - Hands push the world: a fast palm slaps enemy shots back at the aliens
   (SLAP!); free hands shove aliens (knockback) and props.
 - WEAVER's webs are bullets (webshot.ts): a spinning web net per shot, fired

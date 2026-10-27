@@ -416,6 +416,10 @@ interface Drone {
   creature: CreatureModel | null;
   /** When it last blocked a cut (duellists only). */
   guardAt: number;
+  /** Sidestep: seconds left, its direction, and the cooldown before the next. */
+  dodge: number;
+  dodgeDir: Vector3;
+  dodgeCool: number;
   /** A wave's last enemy: bigger, tougher, drops a power-up. */
   elite: boolean;
   /** A walker stepped forward this frame, at `moveSpeed` m/s (picks the walk or run clip). */
@@ -1243,6 +1247,9 @@ export class CombatSystem extends createSystem({
         species: '',
         creature: null,
         guardAt: -10,
+        dodge: 0,
+        dodgeDir: new Vector3(),
+        dodgeCool: 0,
         elite: false,
         moving: false,
         moveSpeed: 0,
@@ -1459,6 +1466,9 @@ export class CombatSystem extends createSystem({
       species: extra.species ?? '',
       creature,
       guardAt: -10,
+      dodge: 0,
+      dodgeDir: new Vector3(),
+      dodgeCool: 0,
       elite: false,
       moving: false,
       moveSpeed: 0,
@@ -7048,7 +7058,9 @@ export class CombatSystem extends createSystem({
     const bolt = this.bolts.find((b) => !b.active);
     if (bolt == null) return null;
     bolt.target = null;
-    let best = this.profile.settings.aimAssist ? AIM_ASSIST_COS : 2;
+    // Aim assist narrows with difficulty: easy 0.985, normal 0.993, hard none.
+    const hardness = this.profile.settings.difficulty;
+    let best = this.profile.settings.aimAssist && hardness !== 'hard' ? (hardness === 'easy' ? AIM_ASSIST_COS : 0.993) : 2;
     for (const drone of this.drones) {
       if (drone.state === 'off') continue;
       const cos = this.v2.subVectors(drone.object.position, origin).normalize().dot(direction);
@@ -7109,7 +7121,9 @@ export class CombatSystem extends createSystem({
         this.retireBolt(bolt);
         continue;
       }
-      this.steer(bolt, Math.min(1, dt * HOMING_RATE * bolt.homing));
+      // Plain bolts home less on harder settings; missiles, rockets and astral darts keep their guidance.
+      const guide = bolt.homing >= 2.4 ? 1 : this.profile.settings.difficulty === 'easy' ? 1 : this.profile.settings.difficulty === 'normal' ? 0.5 : 0.15;
+      this.steer(bolt, Math.min(1, dt * HOMING_RATE * bolt.homing * guide));
       if (bolt.gravity > 0) bolt.velocity.y -= bolt.gravity * this.gravityScale * dt;
       bolt.previous.copy(bolt.position);
       bolt.position.addScaledVector(bolt.velocity, dt);
@@ -7125,13 +7139,24 @@ export class CombatSystem extends createSystem({
 
       for (const drone of this.drones) {
         if (drone.state === 'off') continue;
-        const radius = ENEMIES[drone.kind].radius + bolt.radius;
+        // Hit areas hug the body (creatures are big but not that wide); crescent waves keep the full width.
+        const radius = ENEMIES[drone.kind].radius * (crescent ? 1 : drone.creature ? 0.62 : 0.85) * (drone.size > 1 ? 1.1 : 1) + bolt.radius;
         if (this.segmentHits(bolt.previous, bolt.position, drone.object.position, radius)) {
           if (crescent) this.markHit('slice', drone.object.position, bolt.velocity, bolt.object.up, bolt.force);
           else this.markHit('blast', drone.object.position, bolt.velocity, undefined, bolt.force);
           if (bolt.burn > 0) drone.burn = Math.max(drone.burn, bolt.burn);
           this.v4.copy(drone.object.position);
-          this.damageDrone(drone, bolt.damage);
+          // A shot through the head does nearly double.
+          const ground = ENEMIES[drone.kind].ground;
+          const head = !crescent && ground != null && bolt.position.y > drone.object.position.y + 0.3 * ground.chest * drone.size;
+          if (head) {
+            this.flashes.spawn(bolt.position, GOLD, 0.06, 0.6, 0.15);
+            if (this.comicCooldown <= 0) {
+              this.comicCooldown = 0.4;
+              this.comic.pop('HEADSHOT!', this.v1.copy(bolt.position).setY(bolt.position.y + 0.25), GOLD, 0.4);
+            }
+          }
+          this.damageDrone(drone, bolt.damage * (head ? 1.8 : 1));
           if (bolt.zap) this.chainLightning(this.v4, drone);
           if (bolt.blast > 0) {
             this.explodeAt(bolt.position, bolt.blast, 2);
@@ -7855,6 +7880,14 @@ export class CombatSystem extends createSystem({
       return;
     }
     const meleeHero = this.hero === 'ronin' || this.hero === 'talon' || this.hero === 'tempest';
+    // Sidestep out of the way of a shot that is about to land (never the giants).
+    drone.dodgeCool -= dt;
+    if (drone.dodge > 0) {
+      drone.dodge -= dt;
+      object.position.addScaledVector(drone.dodgeDir, 3.2 * dt);
+      this.room.collide(object.position, def.radius);
+      object.position.y = chest;
+    } else if (drone.dodgeCool <= 0 && drone.kind !== 'titan' && drone.snare <= 0) this.tryDodge(drone, def.radius);
     let moving = false;
     let pace = 1;
     if (drone.state === 'approach') {
@@ -7935,6 +7968,30 @@ export class CombatSystem extends createSystem({
     }
     object.rotation.z = Math.sin(p) * amp * 0.06;
     object.position.y = chest + Math.abs(Math.cos(p)) * (moving ? (this.gravityScale < 1 ? 0.12 : 0.03) : 0.004) - (moving ? 0.015 : 0);
+  }
+
+  /**
+   * A walker that sees a player bolt closing on it may sidestep: harder
+   * settings dodge more, elites most. Not while webbed, and not the giants.
+   */
+  private tryDodge(drone: Drone, radius: number): void {
+    const chance = this.profile.settings.difficulty === 'easy' ? 0 : this.profile.settings.difficulty === 'normal' ? 0.3 : 0.55;
+    if (chance === 0) return;
+    for (const bolt of this.bolts) {
+      if (!bolt.active || bolt.kind === 'crescent') continue;
+      this.sa.subVectors(drone.object.position, bolt.position);
+      const distance = this.sa.length();
+      if (distance > 3.2 || distance < 0.6) continue;
+      this.sb.copy(bolt.velocity).normalize();
+      if (this.sa.normalize().dot(this.sb) < 0.97) continue;
+      drone.dodgeCool = 1.6 + Math.random() * 1.2;
+      if (Math.random() > chance * (drone.elite ? 1.5 : 1)) return;
+      // Step across the shot's line, whichever way is nearer the open side.
+      this.sc.set(-this.sb.z, 0, this.sb.x);
+      drone.dodgeDir.copy(this.sc).multiplyScalar(Math.random() < 0.5 ? 1 : -1);
+      drone.dodge = 0.28 + radius * 0.2;
+      return;
+    }
   }
 
   /** Telegraphed strike: wind up, swing (dodge by stepping back), recover. */
