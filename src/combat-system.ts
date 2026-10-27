@@ -2437,7 +2437,7 @@ export class CombatSystem extends createSystem({
     // Pitch that frames the panel with the 3D content above it (heroes,
     // weapon) or below it (galaxy); otherwise straight at the panel.
     const pitch =
-      screen === 'heroes' ? -0.42 : screen === 'garage' ? -0.38 : screen === 'galaxy' ? -0.2 : Math.atan2(this.v1.y, Math.hypot(this.v1.x, this.v1.z));
+      screen === 'heroes' ? -0.42 : screen === 'garage' ? -0.38 : screen === 'galaxy' ? -0.3 : Math.atan2(this.v1.y, Math.hypot(this.v1.x, this.v1.z));
     this.screen.lookAt(Math.atan2(-this.v1.x, -this.v1.z), pitch);
   }
 
@@ -2745,7 +2745,7 @@ export class CombatSystem extends createSystem({
     });
     this.galaxy.build(nodes, finaleUnlocked(p), anchorsRecovered(p).length);
     this.galaxy.selected = this.menus.galaxyIndex;
-    if (!this.galaxy.visible) this.galaxy.show(this.head, this.forward, this.flat ? 0.85 : 0.5, this.flat ? 0.5 : 0.38);
+    if (!this.galaxy.visible) this.galaxy.show(this.head, this.forward, this.flat ? 0.55 : 0.35, this.flat ? 0.62 : 0.62, this.flat ? 1.05 : 1.0, this.flat ? -0.75 : -0.5);
   }
 
   /** Poking a planet picks that hero's front; the core starts the finale. */
