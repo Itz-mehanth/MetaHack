@@ -112,6 +112,9 @@ throughout (no Marvel or other third-party names/designs).
   shots (normal 30%, hard 55%, elites more; never giants), and aim assist and
   homing narrow with difficulty (easy full, normal reduced, hard none for
   plain bolts; missiles, rockets and astral darts keep guidance).
+- Grabs (updateGrabs): every hero except PSION can close a free fist on a creature's head, arm or leg bone (flash marks the zone): head = lift, squeeze, slam; arm = disarm + stun; leg = trip. Pull down hard to slam, open the hand to throw.
+- Bosses: entrance lockout + title, SHIELD UP at each phase until the adds fall, floor BARRAGE circles, orb fans, chained death blasts; OBLIVAX finale has 6x health.
+- Ground (ground.ts): in MR the scanned floor polygons are repainted per world (grid, lava, rock, ice, void, sand, garden, moss, plate, rune); walls and furniture stay passthrough.
 - Suit (suit.ts): armoured forearm sleeves toward an estimated elbow and a
   chest emblem when looking down; no helmet/torso/legs by design.
 - Hands push the world: a fast palm slaps enemy shots back at the aliens

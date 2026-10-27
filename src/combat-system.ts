@@ -72,6 +72,7 @@ import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isSi
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
+import { Ground, groundStyleFor } from './combat/ground.js';
 import { rollSpell, type SpellId, spellById } from './combat/spells.js';
 import { SpellFx } from './combat/spellfx.js';
 import { BeamFx } from './combat/beamfx.js';
@@ -757,6 +758,14 @@ export class CombatSystem extends createSystem({
   private damageMaterial!: MeshBasicMaterial;
   private lastPhase: Phase = 'title';
   private slowmo = 0;
+  /** Boss fight state: shield until the adds fall, entrance lockout, attack cycle, death throes. */
+  private bossShield = 0;
+  private bossIntro = 0;
+  private bossCycle = 0;
+  private bossShieldMesh: Mesh | null = null;
+  private bossDeath = 0;
+  private bossDeathTick = 0;
+  private readonly bossDeathAt = new Vector3();
   private elapsed = 0;
   private hudPlaced = false;
   private ready = false;
@@ -810,6 +819,8 @@ export class CombatSystem extends createSystem({
   private wallSegs: Segment[] = [];
   private wallVersion = 0;
   private roomBorder!: RoomBorder;
+  private ground!: Ground;
+  private groundFor = '';
   private suit!: Suit;
   private readonly suitWrists: Array<Vector3 | null> = [null, null];
   private buffTint: Color | null = null;
@@ -875,6 +886,7 @@ export class CombatSystem extends createSystem({
     this.lightningFx = new Lightning(this.root);
     this.webShots = new WebShots(this.root, PINK);
     this.roomBorder = new RoomBorder(this.root, CYAN);
+    this.ground = new Ground(this.root);
     this.suit = new Suit(this.root, CYAN);
     this.spellFx = new SpellFx(this.root, CYAN);
     this.handBeams = [new BeamFx(this.root, WHITE), new BeamFx(this.root, WHITE)];
@@ -2014,6 +2026,7 @@ export class CombatSystem extends createSystem({
     this.updateShield(realDt);
     this.updatePsion(realDt, dt, time);
     this.updateGrabs(realDt, time);
+    this.updateBossDeath(realDt);
     if (this.powersLive) this.updateShoves();
     this.updateScript(realDt, time);
     if (!this.paused) this.updateTwist(dt, time);
@@ -2030,6 +2043,15 @@ export class CombatSystem extends createSystem({
       }
       this.suit.update(this.suitWrists, this.head, this.forward, time);
     } else this.suit.hide();
+    {
+      const stage = this.run.stage;
+      if (this.groundFor !== stage.id) {
+        this.groundFor = stage.id;
+        const look = stage.world.id === 'oblivion' ? WORLD_LOOKS.oblivion : lookFor(stage.id, stage.world.id);
+        this.ground.setStyle(groundStyleFor(stage.world.id), look.ground, look.accent);
+      }
+      this.ground.update(realDt, this.isPassthrough() && this.run.phase !== 'title', 0.92);
+    }
     this.roomBorder.update(this.isPassthrough() ? this.wallSegs : [], this.wallVersion, this.head.x, this.head.z, time, this.accent);
     this.updateHammer(realDt, time);
     this.updateBow(realDt);
@@ -5302,6 +5324,7 @@ export class CombatSystem extends createSystem({
     room.clear();
     room.floor = 0;
     const walls: Segment[] = [];
+    const floors: number[][] = [];
     for (const entity of this.queries.planes.entities) {
       const plane = entity.getValue(XRPlane, '_plane') as XRPlane | undefined;
       const object = entity.object3D;
@@ -5321,8 +5344,16 @@ export class CombatSystem extends createSystem({
       this.ra.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
       object.localToWorld(this.ra);
       this.rb.set(0, 1, 0).transformDirection(object.matrixWorld);
-      // The floor is the infinite floor already.
-      if (plane.orientation === 'horizontal' && this.ra.y < 0.2 && this.rb.y > 0.5) continue;
+      // The floor is the infinite floor already (and gets the world's ground painted on).
+      if (plane.orientation === 'horizontal' && this.ra.y < 0.2 && this.rb.y > 0.5) {
+        const poly: number[] = [];
+        for (const corner of plane.polygon) {
+          this.rc.set(corner.x, 0, corner.z).applyMatrix4(object.matrixWorld);
+          poly.push(this.rc.x, this.rc.y, this.rc.z);
+        }
+        floors.push(poly);
+        continue;
+      }
       this.rc.subVectors(this.head, this.ra);
       if (this.rb.dot(this.rc) < 0) this.rb.negate();
       this.rd.set(1, 0, 0).transformDirection(object.matrixWorld);
@@ -5333,6 +5364,7 @@ export class CombatSystem extends createSystem({
         if (seg) walls.push(seg);
       }
     }
+    this.ground.setFloor(floors, this.head.x, this.head.z);
     // Remember the walls (and tell the border when they changed).
     let changed = walls.length !== this.wallSegs.length;
     for (let i = 0; !changed && i < walls.length; i += 1) {
@@ -5911,6 +5943,19 @@ export class CombatSystem extends createSystem({
     (m.rock.material as MeshBasicMaterial).color.set(lightning ? '#FFFFFF' : '#FF7A1A');
   }
 
+  /** A warned strike on the floor at (x, z): used by boss attacks. */
+  private strikeAt(x: number, z: number): void {
+    const m = this.meteors.find((k) => k.state === 'off');
+    if (m == null) return;
+    m.target.set(x, 0, z);
+    m.state = 'warn';
+    m.t = 0;
+    m.marker.position.set(x, 0.01, z);
+    m.marker.visible = true;
+    m.markerMaterial.color.set('#FF2A2A');
+    (m.rock.material as MeshBasicMaterial).color.set('#FF7A1A');
+  }
+
   private updateMeteor(m: Meteor, dt: number, time: number): void {
     if (m.state === 'off') return;
     m.t += dt;
@@ -5920,7 +5965,7 @@ export class CombatSystem extends createSystem({
       const p = Math.min(1, m.t / WARN);
       m.marker.scale.setScalar(0.4 + p * 0.6);
       m.markerMaterial.opacity = 0.35 + 0.45 * Math.abs(Math.sin(time * (6 + p * 14)));
-      if (this.twist === 'meteors' && m.t > WARN - FALL) {
+      if (this.twist !== 'lightning' && m.t > WARN - FALL) {
         // The rock streaks in from the sky.
         const f = (m.t - (WARN - FALL)) / FALL;
         this.sky.set(m.target.x + 3, 9, m.target.z - 2);
@@ -7418,7 +7463,7 @@ export class CombatSystem extends createSystem({
     }
     boss.creature?.reset();
     const oblivax = region === 'oblivion';
-    const scale = oblivax ? (this.script === 'finale' ? 3.2 : 1.5) : 1 + Math.min(5, REGIONS.indexOf(region)) * 0.2;
+    const scale = (oblivax ? (this.script === 'finale' ? 6 : 1.5) : 1 + Math.min(5, REGIONS.indexOf(region)) * 0.2) * (this.script === 'finale' ? 1 : 1.3);
     boss.counted = true;
     boss.maxHp = ENEMIES.boss.hp * scale;
     boss.hp = boss.maxHp;
@@ -7448,6 +7493,15 @@ export class CombatSystem extends createSystem({
     const villain = oblivax ? OBLIVAX.name : chapterForWorld(region)?.villain.name ?? 'BOSS';
     this.comic.pop('BOSS!', this.v2.copy(boss.spawn).setY(boss.spawn.y + 0.9), ENEMY_COLOR.boss, 0.9);
     this.taunt = `${villain} has arrived!`;
+    // The entrance: the room shudders, lightning cracks, and he cannot be hurt for a beat.
+    this.bossIntro = oblivax ? 3.2 : 2.2;
+    this.bossShield = 0;
+    this.bossCycle = 0;
+    this.lightning = 1;
+    this.slowmo = Math.max(this.slowmo, 0.8);
+    this.sfx.klaxon();
+    this.v1.copy(this.head).addScaledVector(this.forward, 1.6);
+    this.comic.pop(villain, this.v1, ENEMY_COLOR.boss, 1.1);
     return boss;
   }
 
@@ -7462,6 +7516,12 @@ export class CombatSystem extends createSystem({
     boss.eye.scale.setScalar(1 + Math.sin(time * 6) * 0.15);
     const roar = boss.creature;
     if (roar && !(roar.playing === 'attack' && !roar.finished)) roar.play('walk', 1);
+    this.syncBossShield(boss, dt, time);
+    if (this.bossIntro > 0) {
+      this.bossIntro -= dt;
+      if (Math.random() < dt * 10) this.flashes.spawn(this.v2.copy(object.position).add(this.v1.set((Math.random() - 0.5) * 2, Math.random(), (Math.random() - 0.5) * 2)), ENEMY_COLOR.boss, 0.15, 1.4, 0.3);
+      return;
+    }
     if (this.bossLocked) return;
     const fraction = boss.hp / boss.maxHp;
     const phase = fraction > 0.66 ? 1 : fraction > 0.33 ? 2 : 3;
@@ -7474,12 +7534,42 @@ export class CombatSystem extends createSystem({
       boss.creature?.play('attack', 0.7, true, 0.1);
       this.flashes.spawn(object.position, ENEMY_COLOR.boss, 0.5, 2.5, 0.6);
       const minion = REGIONS.indexOf(boss.world) === 1 ? 'swarmer' : 'drone';
-      for (let i = 0; i < phase + 1; i += 1) this.spawnDrone(minion, 0.9 + phase * 0.2, false);
+      const adds = phase + 1 + (this.script === 'finale' ? 2 : 0);
+      for (let i = 0; i < adds; i += 1) this.spawnDrone(i === 0 && phase === 3 ? 'armored' : minion, 0.9 + phase * 0.2, false);
+      // He shields himself until the adds fall.
+      this.bossShield = 18;
+      this.v1.copy(object.position).setY(object.position.y + 1.2);
+      this.comic.pop('SHIELD UP!', this.v1, OBLIVAX_COLOR, 0.7);
+      this.sfx.thunder();
     }
     boss.attackTimer -= dt;
     if (boss.attackTimer <= 0) {
-      boss.attackTimer = 3.4 - phase * 0.7;
+      boss.attackTimer = (this.script === 'finale' ? 3.0 : 3.4) - phase * 0.6;
       boss.creature?.play('attack', 1.2, true, 0.1);
+      const cycle = this.bossCycle;
+      this.bossCycle += 1;
+      if (phase >= 2 && cycle % 3 === 1) {
+        // Barrage: red circles on the floor around you, then rocks. Step out of them.
+        this.comic.pop('BARRAGE!', this.v1.copy(this.head).addScaledVector(this.forward, 1.3), ORANGE, 0.6);
+        for (let k = 0; k < phase + 2; k += 1) {
+          const a = Math.random() * Math.PI * 2;
+          const r = k === 0 ? 0.25 : 0.9 + Math.random() * 1.8;
+          this.strikeAt(this.head.x + Math.cos(a) * r, this.head.z + Math.sin(a) * r);
+        }
+        this.sfx.klaxon();
+        return;
+      }
+      if (phase >= 2 && cycle % 3 === 2 && this.bossShield <= 0) {
+        // A fan of orbs that sweeps across the room.
+        for (let k = 0; k < 5 + phase; k += 1) {
+          this.v1.copy(object.position);
+          this.v1.x += (k - 3) * 0.28;
+          this.v1.y += Math.sin(k * 1.7) * 0.4;
+          this.spawnOrb(this.v1, 1.6 + phase * 0.35);
+        }
+        this.sfx.blast();
+        return;
+      }
       for (let i = 0; i < phase + 1; i += 1) {
         this.v1.copy(object.position);
         this.v1.x += (Math.random() - 0.5) * 0.9;
@@ -7487,6 +7577,65 @@ export class CombatSystem extends createSystem({
         this.spawnOrb(this.v1, 1.8 + phase * 0.45);
       }
       this.sfx.blast();
+    }
+  }
+
+  /** Keeps the boss's shield bubble in step: it drops once the adds are gone (or after a while). */
+  private syncBossShield(boss: Drone, dt: number, time: number): void {
+    let mesh = this.bossShieldMesh;
+    if (mesh == null) {
+      mesh = new Mesh(
+        new IcosahedronGeometry(1, 1),
+        new MeshBasicMaterial({ color: '#FFFFFF', wireframe: true, transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false, toneMapped: false }),
+      );
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      this.root.add(mesh);
+      this.bossShieldMesh = mesh;
+    }
+    if (this.bossShield > 0) {
+      this.bossShield -= dt;
+      let adds = 0;
+      for (const d of this.drones) {
+        if (d !== boss && d.state !== 'off' && d.state !== 'emerging' && d.kind !== 'pod' && d.kind !== 'orb' && d.kind !== 'boss') adds += 1;
+      }
+      if (adds === 0 && this.bossShield > 0.5) this.bossShield = 0.5;
+      if (this.bossShield <= 0) {
+        this.flashes.spawn(boss.object.position, WHITE, 0.6, 2.5, 0.5);
+        this.particles.burst(boss.object.position, OBLIVAX_COLOR, 60, 3, 0.6, this.v2);
+        this.comic.pop('SHIELD DOWN!', this.v1.copy(boss.object.position).setY(boss.object.position.y + 1.2), GOLD, 0.7);
+        this.sfx.explode(true);
+      }
+    }
+    const on = this.bossShield > 0 && boss.state !== 'off';
+    mesh.visible = on;
+    if (!on) return;
+    const radius = (boss.creature?.height ?? 1.6) * 0.75;
+    mesh.position.copy(boss.object.position);
+    mesh.scale.setScalar(radius * (1 + Math.sin(time * 9) * 0.03));
+    mesh.rotation.y += dt * 0.8;
+    mesh.rotation.x += dt * 0.5;
+    (mesh.material as MeshBasicMaterial).color.copy(ENEMY_COLOR.boss);
+    (mesh.material as MeshBasicMaterial).opacity = this.bossShield < 1 ? this.bossShield * 0.5 : 0.5;
+  }
+
+  /** The boss's death throes: a string of blasts over the spot, then the finishing flash. */
+  private updateBossDeath(dt: number): void {
+    if (this.bossDeath <= 0) return;
+    this.bossDeath -= dt;
+    this.bossDeathTick -= dt;
+    if (this.bossDeathTick <= 0) {
+      this.bossDeathTick = 0.14;
+      this.v1.set((Math.random() - 0.5) * 2.2, Math.random() * 1.8, (Math.random() - 0.5) * 2.2).add(this.bossDeathAt);
+      this.flashes.spawn(this.v1, Math.random() < 0.5 ? GOLD : ENEMY_COLOR.boss, 0.3, 2.4, 0.5);
+      this.particles.burst(this.v1, Math.random() < 0.5 ? WHITE : ORANGE, 30, 3.5, 0.6, this.v2);
+      this.sfx.explode(Math.random() < 0.4);
+    }
+    if (this.bossDeath <= 0) {
+      this.flashes.spawn(this.bossDeathAt, WHITE, 1.2, 4, 1.1);
+      this.particles.burst(this.bossDeathAt, GOLD, 200, 9, 1.4, this.v2);
+      this.lightning = 1;
+      this.sfx.thunder();
     }
   }
 
@@ -8657,8 +8806,12 @@ export class CombatSystem extends createSystem({
     }
     this.hitSet = false;
     if (drone.stun > 0) amount *= 2;
-    if (drone.kind === 'boss' && this.bossLocked) {
+    if (drone.kind === 'boss' && (this.bossLocked || this.bossShield > 0 || this.bossIntro > 0)) {
       this.flashes.spawn(drone.object.position, OBLIVAX_COLOR, 0.2, 0.9, 0.2);
+      if (this.bossShield > 0 && this.comicCooldown <= 0) {
+        this.comicCooldown = 0.6;
+        this.comic.pop('SHIELDED!', this.v1.copy(this.hitPoint).setY(this.hitPoint.y + 0.3), OBLIVAX_COLOR, 0.4);
+      }
       return;
     }
     drone.hp -= raw ? amount : amount * this.damageScale();
@@ -8720,7 +8873,11 @@ export class CombatSystem extends createSystem({
     for (const drone of this.drones) {
       if (drone !== boss && drone.state !== 'off' && !drone.counted && drone.kind !== 'pod') this.explodeDrone(drone, false);
     }
-    this.slowmo = 2;
+    this.slowmo = 2.4;
+    this.bossDeath = 1.9;
+    this.bossDeathTick = 0;
+    this.bossDeathAt.copy(at);
+    this.bossShield = 0;
     this.sfx.explode(true);
     this.sfx.thunder();
     this.explodeDrone(boss, true);
