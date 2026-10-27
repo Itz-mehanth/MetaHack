@@ -7,11 +7,15 @@ import {
   MeshBasicMaterial,
   type Object3D,
   RepeatWrapping,
+  ShapeUtils,
   SRGBColorSpace,
+  Vector2,
 } from '@iwsdk/core';
 
 const MAX_VERTS = 8 * 66;
 const SIZE = 512;
+/** How much of the scanned floor polygon is painted (the edges are the least reliable). */
+const INSET = 0.94;
 
 export type GroundStyle = 'grid' | 'lava' | 'rock' | 'ice' | 'void' | 'sand' | 'garden' | 'moss' | 'plate' | 'rune';
 
@@ -252,8 +256,13 @@ export class Ground {
     this.texture.needsUpdate = true;
   }
 
-  /** Replaces the covered area with `polygons` (flat x,y,z triples, world space) or a disc. */
-  setFloor(polygons: readonly (readonly number[])[], fallbackX: number, fallbackZ: number): void {
+  /**
+   * Replaces the covered area with the scanned floor `polygons` (flat x,y,z
+   * triples, world space), each triangulated properly (rooms are rarely
+   * convex) and pulled in a little so the paint never spills past the edge.
+   * With no scan there is no ground: only what the headset found is covered.
+   */
+  setFloor(polygons: readonly (readonly number[])[]): void {
     let n = 0;
     const push = (x: number, y: number, z: number) => {
       if (n >= MAX_VERTS) return;
@@ -266,10 +275,10 @@ export class Ground {
     };
     for (const poly of polygons) {
       const corners = poly.length / 3;
-      if (corners < 3 || n + corners * 3 > MAX_VERTS) continue;
+      if (corners < 3 || n + (corners - 2) * 3 > MAX_VERTS) continue;
       let cx = 0;
-      let cy = 0;
       let cz = 0;
+      let cy = 0;
       for (let i = 0; i < corners; i += 1) {
         cx += poly[i * 3];
         cy += poly[i * 3 + 1];
@@ -278,23 +287,10 @@ export class Ground {
       cx /= corners;
       cy /= corners;
       cz /= corners;
-      for (let i = 0; i < corners; i += 1) {
-        const j = (i + 1) % corners;
-        push(cx, cy, cz);
-        push(poly[i * 3], poly[i * 3 + 1], poly[i * 3 + 2]);
-        push(poly[j * 3], poly[j * 3 + 1], poly[j * 3 + 2]);
-      }
-    }
-    if (n === 0) {
-      // No scanned floor yet: a disc around the player.
-      const steps = 24;
-      for (let i = 0; i < steps; i += 1) {
-        const a = (i / steps) * Math.PI * 2;
-        const b = ((i + 1) / steps) * Math.PI * 2;
-        push(fallbackX, 0, fallbackZ);
-        push(fallbackX + Math.cos(a) * 2.4, 0, fallbackZ + Math.sin(a) * 2.4);
-        push(fallbackX + Math.cos(b) * 2.4, 0, fallbackZ + Math.sin(b) * 2.4);
-      }
+      const pts: Vector2[] = [];
+      for (let i = 0; i < corners; i += 1) pts.push(new Vector2(cx + (poly[i * 3] - cx) * INSET, cz + (poly[i * 3 + 2] - cz) * INSET));
+      const tris = ShapeUtils.triangulateShape(pts, []);
+      for (const t of tris) for (const k of t) push(pts[k].x, cy, pts[k].y);
     }
     this.count = n;
     this.geometry.setDrawRange(0, n);

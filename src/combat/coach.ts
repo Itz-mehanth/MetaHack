@@ -31,7 +31,7 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   ],
   talon: [
     { gesture: 'fist', title: 'MAKE A FIST', sub: 'Claws come out. Punch through enemies.' },
-    { gesture: 'swing', title: 'SWING FAST', sub: 'A fast swing throws a slash wave.' },
+    { gesture: 'swing', title: 'SWING FAST', sub: 'Slash through them. Only the blade hurts.' },
     { gesture: 'throw', title: 'STAB AND THROW', sub: 'Thrust into them to skewer, whip to throw the body.' },
   ],
   tempest: [
@@ -54,7 +54,7 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   ],
   ronin: [
     { gesture: 'fist', title: 'MAKE A FIST', sub: 'Each fist ignites a katana.' },
-    { gesture: 'swing', title: 'SWING HARD', sub: 'Cuts limbs off. A hard swing sends a slash wave.' },
+    { gesture: 'swing', title: 'SWING HARD', sub: 'Cuts limbs off. Slash the blade right through them.' },
     { gesture: 'throw', title: 'STAB AND THROW', sub: 'Thrust to skewer them, whip to fling the body.' },
     { gesture: 'cross', title: 'CROSS BOTH BLADES', sub: 'Unleashes an X-STRIKE.' },
     { gesture: 'swing', title: 'BLOCK THEIR SWING', sub: 'Meet an enemy blade with yours to PARRY.' },
@@ -87,7 +87,7 @@ export const SCREEN_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   ],
   talon: [
     { gesture: 'fist', title: 'TAP TO STRIKE', sub: 'Claws rake what you tap. Hold to keep slashing.' },
-    { gesture: 'swing', title: 'SWIPE TO SLASH', sub: 'Fast swipes throw slash waves.' },
+    { gesture: 'swing', title: 'SWIPE TO SLASH', sub: 'Slash across an enemy: only the blade cuts.' },
   ],
   tempest: [
     { gesture: 'throw', title: 'TAP TO THROW THE HAMMER', sub: 'It flies at what you tap, then comes back.' },

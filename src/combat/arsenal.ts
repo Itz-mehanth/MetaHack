@@ -35,7 +35,7 @@ export const ARSENAL: readonly WeaponDef[] = [
   W('arc-rockets', 'arc', 'SWARM ROCKETS', 'Homing rockets burst from the wrist', 1200, 2, '#FF8A1F'),
   W('talon-steel', 'talon', 'TITAN STEEL', 'Unbreakable claws', 0, 0),
   W('talon-molten', 'talon', 'MOLTEN CLAWS', 'Every cut sets them on fire', 600, 1, '#FF6A1A'),
-  W('talon-phase', 'talon', 'PHASE CLAWS', 'Longer blades, waves cut through crowds', 1200, 2, '#3DFFE0'),
+  W('talon-phase', 'talon', 'PHASE CLAWS', 'Longer blades that cut through crowds', 1200, 2, '#3DFFE0'),
   W('tempest-thunder', 'tempest', 'THUNDERCLAP', 'Chain lightning on every hit', 0, 0),
   W('tempest-inferno', 'tempest', 'INFERNO', 'A hammer of living fire', 700, 1, '#FF5A1F'),
   W('tempest-godbreaker', 'tempest', 'GODBREAKER', 'Huge; every impact quakes the ground', 1400, 2, '#FFD23F'),

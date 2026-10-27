@@ -4959,13 +4959,6 @@ export class CombatSystem extends createSystem({
 
       this.bladeProps(claws.base, claws.tip, hand.clawPrev);
       this.checkParry(claws.base, claws.tip);
-      if (speed > CRESCENT_MIN_SWING * tuning.swing && hand.slashCooldown <= 0) {
-        hand.slashCooldown = CRESCENT_COOLDOWN * (1 - 0.12 * this.level('talon-tempo')) * (this.buffRapid > 0 ? 0.5 : 1);
-        this.v4.subVectors(claws.tip, hand.clawPrev).normalize();
-        const target = this.aimWave(this.v4);
-        const wave = this.fireCrescent(claws.tip, this.v4, claws.direction);
-        if (wave && target) wave.target = target;
-      }
       hand.clawPrev.copy(claws.tip);
     }
   }
@@ -5364,7 +5357,7 @@ export class CombatSystem extends createSystem({
         if (seg) walls.push(seg);
       }
     }
-    this.ground.setFloor(floors, this.head.x, this.head.z);
+    this.ground.setFloor(floors);
     // Remember the walls (and tell the border when they changed).
     let changed = walls.length !== this.wallSegs.length;
     for (let i = 0; !changed && i < walls.length; i += 1) {
@@ -5896,7 +5889,7 @@ export class CombatSystem extends createSystem({
       this.handLight.intensity = on ? 3.2 : 0;
       this.handLight.color.copy(this.accent).lerp(WHITE, 0.5);
       if (on) this.handLight.position.copy(hand.gauntlet.palmPoint).addScaledVector(hand.gauntlet.palmNormal, 0.1);
-      this.veilTarget = this.run.phase === 'title' ? 0 : this.isPassthrough() ? 0.55 : 0;
+      this.veilTarget = this.run.phase === 'title' ? 0 : this.isPassthrough() ? 0.12 : 0;
     } else if (this.twist === 'lowgrav' && fighting && Math.random() < dt * 6) {
       // Pebbles drifting upward.
       this.v1.set(this.head.x + (Math.random() - 0.5) * 6, 0.05, this.head.z + (Math.random() - 0.5) * 6);
@@ -6085,7 +6078,7 @@ export class CombatSystem extends createSystem({
     if (this.script === 'prologue') this.updatePrologue(dt);
     else if (this.script === 'finale') this.updateFinale(dt, time);
     else if (this.run.phase === 'title') this.eraseTarget = 0;
-    else this.eraseTarget = this.isPassthrough() ? this.riftLevel : 1;
+    else this.eraseTarget = this.isPassthrough() ? this.riftLevel * 0.3 : 1;
   }
 
   private updatePrologue(dt: number): void {
@@ -6608,15 +6601,6 @@ export class CombatSystem extends createSystem({
         this.swishArmed[i] = false;
         this.sfx.swish();
       } else if (sword.speed < 1.8) this.swishArmed[i] = true;
-      hand.slashCooldown -= dt;
-      if (sword.speed > SWORD_WAVE_SPEED * tuning.swing && hand.slashCooldown <= 0) {
-        hand.slashCooldown = SWORD_WAVE_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
-        const wave = this.level('ronin-wave');
-        this.v4.subVectors(sword.tip, hand.prevTip).normalize();
-        const target = this.aimWave(this.v4);
-        const bolt = this.fireCrescent(sword.tip, this.v4, sword.direction, 0.3 + 0.04 * wave, 2 + Math.ceil(wave / 2), 1.5 + 0.12 * wave);
-        if (bolt && target) bolt.target = target;
-      }
       // Weapon tier (and the flame blade): flames lick up the blade.
       const flame = this.weaponDef.id === 'ronin-flame';
       if ((this.weaponTierNow > 0 || flame) && Math.random() < (flame ? 0.9 : this.weaponTierNow * 0.15)) {
@@ -6661,11 +6645,15 @@ export class CombatSystem extends createSystem({
     }
     this.xRight.set(0, 1, 0).cross(this.xDir).normalize();
     this.xUp.crossVectors(this.xDir, this.xRight).normalize();
+    // The crossed blades cut everything within reach of them (no flying waves).
     const damage = 5 + this.level('ronin-cross');
-    for (let k = 0; k < 2; k += 1) {
-      this.xDiag.copy(this.xRight).multiplyScalar(k === 0 ? 1 : -1).add(this.xUp).normalize();
-      this.fireCrescent(at, this.xDir, this.xDiag, 0.55, damage, 2.6, true);
+    for (const drone of this.drones) {
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.state === 'shot' || drone.kind === 'pod' || drone.kind === 'orb') continue;
+      if (drone.object.position.distanceTo(at) > 1.3 + ENEMIES[drone.kind].radius) continue;
+      this.markHit('slice', drone.object.position, this.xDir, undefined, 3);
+      this.damageDrone(drone, damage);
     }
+    this.hitStop = Math.max(this.hitStop, 0.08);
     this.flashes.spawn(at, this.accent, 0.2, 1.6, 0.45);
     this.particles.burst(at, this.accent, 70, 4, 0.5, this.v2);
     this.v1.copy(at).addScaledVector(this.xDir, 0.6);
