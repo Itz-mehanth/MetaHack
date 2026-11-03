@@ -189,6 +189,8 @@ interface Flash {
 export class Flashes {
   private readonly pool: Flash[] = [];
   private next = 0;
+  /** Called for every flash: the combat system spills its light onto the floor. */
+  onSpawn: ((position: Vector3, color: Color, to: number, duration: number) => void) | null = null;
 
   constructor(parent: Object3D, count = 24) {
     for (let i = 0; i < count; i += 1) {
@@ -217,6 +219,7 @@ export class Flashes {
     flash.from = from;
     flash.to = to;
     flash.sprite.visible = true;
+    this.onSpawn?.(position, color, to, duration);
   }
 
   update(dt: number): void {

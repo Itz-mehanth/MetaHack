@@ -75,6 +75,7 @@ import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
 import { BlobShadows } from './combat/shadows.js';
+import { FloorGlow, ScorchMarks, Telegraphs, WallCracks } from './combat/decals.js';
 import { Scenery } from './combat/scenery.js';
 import { FrameStats, planFor, QualityGovernor, type QualityPlan } from './combat/quality.js';
 import { rollSpell, type SpellId, spellById } from './combat/spells.js';
@@ -827,6 +828,10 @@ export class CombatSystem extends createSystem({
   private groundFor = '';
   private perfHud!: PerfHud;
   private shadows!: BlobShadows;
+  private floorGlow!: FloorGlow;
+  private scorch!: ScorchMarks;
+  private cracks!: WallCracks;
+  private telegraphs!: Telegraphs;
   private scenery: Scenery | null = null;
   private readonly frameStats = new FrameStats();
   private readonly governor = new QualityGovernor();
@@ -902,6 +907,16 @@ export class CombatSystem extends createSystem({
     this.ground = new Ground(this.root);
     this.perfHud = new PerfHud(this.world.camera);
     this.shadows = new BlobShadows(this.root);
+    this.floorGlow = new FloorGlow(this.root);
+    this.scorch = new ScorchMarks(this.root);
+    this.cracks = new WallCracks(this.root);
+    this.telegraphs = new Telegraphs(this.root);
+    // Bright flashes near the floor light it up (in passthrough, the real floor).
+    this.flashes.onSpawn = (position, color, to, duration) => {
+      if (to < 0.9 || position.y > 2.4 || !this.quality.auras) return;
+      const radius = Math.min(2.6, 0.5 + to * 0.7) * (1 - position.y / 3.2);
+      this.floorGlow.add(position.x, position.z, 0, radius, color, Math.min(1, 0.3 + to * 0.14), duration * 1.3);
+    };
     {
       const params = new URLSearchParams(window.location.search);
       try {
@@ -2166,8 +2181,10 @@ export class CombatSystem extends createSystem({
       if (order && !(this.attract && this.reelCrowd() >= REEL_CROWD)) this.queueSpawn(order);
       this.updatePending(dt);
       this.updateDrones(dt, time);
+      this.separateWalkers(dt);
       this.updateBlobs();
       this.updateShadows();
+      this.updateDecals(dt);
       this.updateBolts(dt);
       this.onPhaseChange();
       this.updateCountdown();
@@ -5891,6 +5908,7 @@ export class CombatSystem extends createSystem({
     this.particles.burst(p, ORANGE, 40, 3, 0.5, this.v2);
     this.particles.burst(p, DUST, 20, 1.5, 0.8, this.v2);
     this.sfx.explode(false);
+    this.scorchAt(p, Math.max(0.5, radius * 0.7));
     for (const drone of this.drones) {
       if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'orb') continue;
       if (drone.object.position.distanceTo(p) > radius + ENEMIES[drone.kind].radius) continue;
@@ -6105,6 +6123,7 @@ export class CombatSystem extends createSystem({
     this.flashes.spawn(at, WHITE, 0.1, 0.9, 0.2);
     this.particles.burst(at, color, 60, 4, 0.6, this.v2);
     this.particles.burst(at, DUST, 30, 2, 0.8, this.v2);
+    this.scorchAt(at, 0.9);
     // Crushes aliens in the circle...
     for (const drone of this.drones) {
       if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'boss') continue;
@@ -7554,6 +7573,7 @@ export class CombatSystem extends createSystem({
     drone.portal.visible = true;
     drone.portalMaterial.opacity = 1;
     this.particles.burst(drone.spawn, ENEMY_COLOR[kind], kind === 'titan' ? 60 : 24, 1.2, 0.5, this.v2);
+    if (this.isPassthrough() && this.wallSegs.length > 0) this.cracks.add(drone.spawn, drone.normal, ENEMY_COLOR[kind], kind === 'titan' ? 2.2 : 1.3);
     this.sfx.portal();
     return drone;
   }
@@ -7593,6 +7613,7 @@ export class CombatSystem extends createSystem({
     boss.portal.visible = true;
     boss.portalMaterial.opacity = 1;
     this.particles.burst(boss.spawn, ENEMY_COLOR.boss, 160, 3, 0.9, this.v2);
+    if (this.isPassthrough() && this.wallSegs.length > 0) this.cracks.add(boss.spawn, boss.normal, ENEMY_COLOR.boss, 3.4);
     this.flashes.spawn(boss.spawn, ENEMY_COLOR.boss, 0.5, 3, 0.8);
     this.sfx.thunder();
     this.riftLevel = Math.min(0.6, this.riftLevel + 0.15);
@@ -8183,8 +8204,13 @@ export class CombatSystem extends createSystem({
     this.damageMaterial.opacity = 0.18;
     this.damage.visible = true;
     this.sfx.hurt();
-    this.v1.copy(this.head).addScaledVector(this.forward, 0.6);
-    this.comic.random('hurt', this.v1, MAGENTA, 0.3);
+    // Low and to one side, so it never hides what hit you.
+    this.v1.copy(this.head).addScaledVector(this.forward, 0.9);
+    this.v1.y -= 0.28;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    this.v1.x += side * 0.32 * this.forward.z;
+    this.v1.z -= side * 0.32 * this.forward.x;
+    this.comic.random('hurt', this.v1, MAGENTA, 0.24);
   }
 
   /** `raw` skips the hero damage multiplier (already applied, or environmental). */
@@ -8202,12 +8228,61 @@ export class CombatSystem extends createSystem({
   }
 
   /**
+   * Walkers push each other apart so a crowd spreads into an arc around the
+   * player instead of stacking into one blob in the middle of the view.
+   */
+  private separateWalkers(dt: number): void {
+    const drones = this.drones;
+    for (let i = 0; i < drones.length; i += 1) {
+      const a = drones[i];
+      if (a.state === 'off' || a.state === 'emerging' || a.lifted || a.dropY > 0 || ENEMIES[a.kind].ground == null) continue;
+      for (let j = i + 1; j < drones.length; j += 1) {
+        const b = drones[j];
+        if (b.state === 'off' || b.state === 'emerging' || b.lifted || b.dropY > 0 || ENEMIES[b.kind].ground == null) continue;
+        const dx = b.object.position.x - a.object.position.x;
+        const dz = b.object.position.z - a.object.position.z;
+        const reach = (ENEMIES[a.kind].radius * Math.max(0.5, a.size) + ENEMIES[b.kind].radius * Math.max(0.5, b.size)) * 1.25;
+        const d2 = dx * dx + dz * dz;
+        if (d2 >= reach * reach) continue;
+        const d = Math.sqrt(d2);
+        // Exactly on top of each other: push along an arbitrary axis.
+        const nx = d > 1e-3 ? dx / d : 1;
+        const nz = d > 1e-3 ? dz / d : 0;
+        const push = Math.min((reach - d) * 0.5, 2.2 * dt);
+        // Heavier things (giants, bosses' minions) shove lighter ones more than they move.
+        const heavy = a.kind === 'titan' ? 0.25 : 0.5;
+        const light = 1 - heavy;
+        a.object.position.x -= nx * push * heavy * 2 * (b.kind === 'titan' ? 1 : light);
+        a.object.position.z -= nz * push * heavy * 2 * (b.kind === 'titan' ? 1 : light);
+        b.object.position.x += nx * push * light * 2 * (a.kind === 'titan' ? 0.5 : 1);
+        b.object.position.z += nz * push * light * 2 * (a.kind === 'titan' ? 0.5 : 1);
+      }
+    }
+  }
+
+  /** Advances the floor light, scorch marks and wall cracks. */
+  private updateDecals(dt: number): void {
+    this.comic.head.copy(this.head);
+    this.floorGlow.update(dt);
+    this.scorch.update(dt);
+    this.cracks.update(dt);
+  }
+
+  /** A burn mark under a blast, if it happened near the floor. */
+  private scorchAt(at: Vector3, radius: number): void {
+    if (at.y > 2.2) return;
+    this.scorch.add(at.x, at.z, 0, radius);
+  }
+
+  /**
    * Contact shadows for what the walkers' own blobs do not cover: flyers, the
    * boss, cages and every prop, fading and widening with height.
    */
   private updateShadows(): void {
     const shadows = this.shadows;
     shadows.begin();
+    const rings = this.telegraphs;
+    rings.begin();
     for (const drone of this.drones) {
       if (drone.blob != null || drone.kind === 'orb') continue;
       if (drone.state === 'off' || drone.state === 'emerging' || drone.state === 'shot') continue;
@@ -8223,6 +8298,15 @@ export class CombatSystem extends createSystem({
       shadows.add(p.x, 0, p.z, item.radius * 1.5 * (1 + height * 0.25), 0.5 * Math.max(0, 1 - height / 3.5));
     }
     shadows.end();
+    // Red rings under enemies winding up a strike, brightening as the blow nears.
+    for (const drone of this.drones) {
+      if (drone.state !== 'melee' || drone.meleeStage !== 1) continue;
+      const windup = drone.kind === 'blade' ? 0.75 : drone.kind === 'swarmer' ? 0.45 : drone.kind === 'titan' ? 0.9 : 0.65;
+      const k = Math.min(1, drone.melee / windup);
+      const p = drone.object.position;
+      rings.add(p.x, p.z, 0, ENEMIES[drone.kind].radius * Math.max(0.5, drone.size) * (1.5 + 0.9 * k), 0.35 + 0.65 * k);
+    }
+    rings.end();
   }
 
   /** Turns an upright walker to face the player (yaw only). */
@@ -9016,6 +9100,7 @@ export class CombatSystem extends createSystem({
   }
 
   private explodeDrone(drone: Drone, big: boolean): void {
+    if (big) this.scorchAt(drone.object.position, ENEMIES[drone.kind].radius * 2.4);
     if (drone.creature && drone.object.visible) {
       this.killCreature(drone, big);
       return;

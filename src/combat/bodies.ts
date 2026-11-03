@@ -194,7 +194,7 @@ export class BloodScreen {
       const y = rand() * size;
       const x = Math.pow(rand(), 2.2) * size * 0.4;
       const r = 4 + rand() * 26 * (1 - x / (size * 0.45));
-      c.fillStyle = `rgba(${110 + rand() * 60}, 0, ${rand() * 12}, ${0.55 + rand() * 0.4})`;
+      c.fillStyle = `rgba(${110 + rand() * 60}, 0, ${rand() * 12}, ${0.35 + rand() * 0.35})`;
       c.beginPath();
       c.arc(x, y, r, 0, Math.PI * 2);
       c.fill();
@@ -215,13 +215,13 @@ export class BloodScreen {
 
   /** A hit from screen direction `angle` (radians, 0 = from the left, going counter-clockwise). */
   hit(angle: number, strength = 1): void {
-    this.level = Math.min(1, this.level + 0.75 * strength);
+    this.level = Math.min(0.7, this.level + 0.5 * strength);
     this.mesh.rotation.z = angle;
   }
 
   /** `danger` 0..1: low health makes the edges pulse. */
   update(dt: number, danger: number): void {
-    this.level = Math.max(0, this.level - dt * 0.7);
+    this.level = Math.max(0, this.level - dt * 1.1);
     this.pulse += dt * (2 + danger * 3);
     const beat = danger > 0 ? danger * 0.35 * Math.max(0, Math.sin(this.pulse * Math.PI)) : 0;
     const opacity = Math.min(1, this.level + beat);

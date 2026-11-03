@@ -8,7 +8,7 @@ import {
   Sprite,
   SpriteMaterial,
   SRGBColorSpace,
-  type Vector3,
+  Vector3,
 } from '@iwsdk/core';
 
 /**
@@ -120,8 +120,14 @@ export class Onomatopoeia {
     return texture;
   }
 
+  /** Where the player's head is (set each frame by the combat system). */
+  readonly head = new Vector3();
+
   /** Pops `word` at `at`; `size` is its width in metres. */
   pop(word: string, at: Vector3, color: Color, size = 0.35): void {
+    // Words right in the player's face would hide the fight: shrink them up close.
+    const near = at.distanceTo(this.head);
+    if (near < 2.6) size *= Math.max(0.4, near / 2.6);
     const p = this.pool[this.next];
     this.next = (this.next + 1) % this.pool.length;
     p.material.map = this.texture(word, color);

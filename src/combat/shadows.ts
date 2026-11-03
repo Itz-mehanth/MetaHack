@@ -28,17 +28,40 @@ export class BlobShadows {
   private readonly strength = new Color();
   private count = 0;
 
-  constructor(parent: Object3D) {
+  /** `variant`: 'soft' is a smooth contact shadow; 'scorch' a ragged burn mark. */
+  constructor(parent: Object3D, variant: 'soft' | 'scorch' = 'soft') {
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
     const c = canvas.getContext('2d')!;
-    const gradient = c.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(0,0,0,1)');
-    gradient.addColorStop(0.45, 'rgba(0,0,0,0.62)');
-    gradient.addColorStop(1, 'rgba(0,0,0,0)');
-    c.fillStyle = gradient;
-    c.fillRect(0, 0, 64, 64);
+    if (variant === 'soft') {
+      const gradient = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gradient.addColorStop(0, 'rgba(0,0,0,1)');
+      gradient.addColorStop(0.45, 'rgba(0,0,0,0.62)');
+      gradient.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = gradient;
+      c.fillRect(0, 0, 64, 64);
+    } else {
+      // Overlapping blotches around the centre make an uneven scar.
+      let seed = 23;
+      const rand = () => {
+        seed = (seed * 16807) % 2147483647;
+        return seed / 2147483647;
+      };
+      for (let i = 0; i < 9; i += 1) {
+        const a = rand() * Math.PI * 2;
+        const d = rand() * 12;
+        const r = 10 + rand() * 12;
+        const x = 32 + Math.cos(a) * d;
+        const y = 32 + Math.sin(a) * d;
+        const g = c.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, 'rgba(0,0,0,0.9)');
+        g.addColorStop(0.6, 'rgba(0,0,0,0.5)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = g;
+        c.fillRect(0, 0, 64, 64);
+      }
+    }
     const geometry = new PlaneGeometry(1, 1);
     geometry.rotateX(-Math.PI / 2);
     const material = new MeshBasicMaterial({
