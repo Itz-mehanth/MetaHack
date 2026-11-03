@@ -152,7 +152,7 @@ export const THEMES: Readonly<Record<string, Theme>> = {
 };
 
 /** Recolours the shared arena materials in place. */
-export function applyTheme(arena: Object3D, theme: Theme): void {
+export function applyTheme(arena: Object3D, theme: Theme, painted = false): void {
   const dome = arena.getObjectByName('Dome') as Mesh | undefined;
   const floor = arena.getObjectByName('Floor') as Mesh | undefined;
   if (dome) {
@@ -167,6 +167,9 @@ export function applyTheme(arena: Object3D, theme: Theme): void {
     (u.uMinor.value as Color).set(theme.gridMinor);
     (u.uMajor.value as Color).set(theme.gridMajor);
     (u.uRing.value as Color).set(theme.ring);
+    // A painted ground replaces the grid (a faint trace of it stays) and the flat dark fill.
+    u.uGrid.value = painted ? 0.18 : 1;
+    u.uFill.value = painted ? 0 : 1;
   }
   for (const [name, color] of [
     ['BandA', theme.bandA],

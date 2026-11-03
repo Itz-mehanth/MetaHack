@@ -2,6 +2,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   CanvasTexture,
+  CircleGeometry,
   DoubleSide,
   Mesh,
   MeshBasicMaterial,
@@ -14,6 +15,9 @@ import {
 
 const MAX_VERTS = 8 * 66;
 const SIZE = 512;
+/** Radius of the VR / flat-screen floor disc, and tiles per metre (matches the MR floor). */
+const DISC_RADIUS = 26;
+const TILES_PER_METRE = 0.6;
 /** How much of the scanned floor polygon is painted (the edges are the least reliable). */
 const INSET = 0.94;
 
@@ -34,6 +38,16 @@ export function groundStyleFor(worldId: string): GroundStyle {
   return 'rock';
 }
 
+/** Mid-dark ground colours for worlds whose own ground tone is nearly black. */
+const STYLE_BASE: Partial<Record<GroundStyle, string>> = {
+  garden: '#18391E',
+  moss: '#17413A',
+  ice: '#1D4660',
+  sand: '#5A4426',
+  rock: '#1B1F38',
+  plate: '#1F2733',
+};
+
 /** Tiny seeded random so a style always paints the same tile. */
 function rng(seed: number): () => number {
   let s = seed >>> 0 || 1;
@@ -47,22 +61,24 @@ function rng(seed: number): () => number {
 function paint(c: CanvasRenderingContext2D, style: GroundStyle, base: string, glow: string): void {
   const rand = rng(style.length * 977 + 13);
   c.globalCompositeOperation = 'source-over';
-  c.fillStyle = base;
+  c.fillStyle = STYLE_BASE[style] ?? base;
   c.fillRect(0, 0, SIZE, SIZE);
   // Wrap-around drawing: every stroke is repeated at the edges so the tile tiles.
   const wrap = (draw: (dx: number, dy: number) => void) => {
     for (const dx of [-SIZE, 0, SIZE]) for (const dy of [-SIZE, 0, SIZE]) draw(dx, dy);
   };
-  const speckle = (count: number, colors: string[], min: number, max: number) => {
+  const speckle = (count: number, colors: string[], min: number, max: number, amp = 0.22) => {
     for (let i = 0; i < count; i += 1) {
       c.fillStyle = colors[Math.floor(rand() * colors.length)];
-      c.globalAlpha = 0.15 + rand() * 0.4;
+      c.globalAlpha = 0.04 + rand() * amp;
       const r = min + rand() * (max - min);
+      const squash = 0.45 + rand() * 0.55;
+      const turn = rand() * Math.PI;
       const x = rand() * SIZE;
       const y = rand() * SIZE;
       wrap((dx, dy) => {
         c.beginPath();
-        c.arc(x + dx, y + dy, r, 0, Math.PI * 2);
+        c.ellipse(x + dx, y + dy, r, r * squash, turn, 0, Math.PI * 2);
         c.fill();
       });
     }
@@ -118,13 +134,15 @@ function paint(c: CanvasRenderingContext2D, style: GroundStyle, base: string, gl
       cracks(9, '#FFE08A', 1.5, 6);
       break;
     case 'rock':
-      speckle(320, ['#20243A', '#3A4060', '#101428'], 3, 18);
-      cracks(5, '#0A0C18', 3, 0);
+      speckle(90, ['#2C3156', '#0E1124', '#3B4270'], 14, 46, 0.3);
+      speckle(260, ['#3A4060', '#0A0C18'], 2, 9, 0.35);
+      cracks(5, '#080A16', 3, 0);
       cracks(2, glow, 2, 12);
       break;
     case 'ice':
-      speckle(200, ['#CFF4FF', '#7FD0F0', '#FFFFFF'], 3, 20);
-      cracks(12, '#EAFBFF', 2, 8);
+      speckle(60, ['#A8E8FF', '#5FB4DA', '#E8FBFF'], 22, 70, 0.16);
+      speckle(150, ['#FFFFFF'], 1, 3, 0.7);
+      cracks(14, '#EAFBFF', 1.6, 8);
       cracks(4, glow, 3, 14);
       break;
     case 'void':
@@ -132,38 +150,65 @@ function paint(c: CanvasRenderingContext2D, style: GroundStyle, base: string, gl
       cracks(7, glow, 3, 20);
       break;
     case 'sand':
-      speckle(500, ['#C89A5A', '#8A6A3A', '#E0BC7A'], 2, 12);
-      cracks(4, '#4A3418', 2, 0);
+      speckle(80, ['#C89A5A', '#7A5A30', '#E0BC7A'], 16, 54, 0.2);
+      speckle(500, ['#E0BC7A', '#6A4A24'], 1, 5, 0.4);
+      cracks(4, '#3A2810', 2, 0);
       break;
     case 'garden': {
-      // Lawn, flower beds and stepping stones.
-      speckle(700, ['#2E6A2A', '#4A9A3A', '#1E4A20'], 2, 9);
-      for (let i = 0; i < 70; i += 1) {
+      // Lawn in soft patches, thousands of grass blades, a few flowers, and worn paving stones.
+      speckle(70, ['#2F6B30', '#17391C', '#3E8A3A'], 20, 60, 0.3);
+      c.lineCap = 'round';
+      for (let i = 0; i < 2600; i += 1) {
+        const x = rand() * SIZE;
+        const y = rand() * SIZE;
+        const a = -Math.PI / 2 + (rand() - 0.5) * 0.9;
+        const len = 5 + rand() * 9;
+        c.strokeStyle = ['#2F6F34', '#46903F', '#1F5226', '#5CA64A'][Math.floor(rand() * 4)];
+        c.globalAlpha = 0.3 + rand() * 0.35;
+        c.lineWidth = 1.3;
+        wrap((dx, dy) => {
+          c.beginPath();
+          c.moveTo(x + dx, y + dy);
+          c.lineTo(x + dx + Math.cos(a) * len, y + dy + Math.sin(a) * len);
+          c.stroke();
+        });
+      }
+      c.globalAlpha = 1;
+      for (let i = 0; i < 26; i += 1) {
         const x = rand() * SIZE;
         const y = rand() * SIZE;
         c.fillStyle = ['#FF9AD5', '#FFFFFF', '#FFE070', '#B6A6FF'][Math.floor(rand() * 4)];
         wrap((dx, dy) => {
           c.beginPath();
-          c.arc(x + dx, y + dy, 3 + rand() * 3, 0, Math.PI * 2);
+          c.arc(x + dx, y + dy, 2.2 + rand() * 1.8, 0, Math.PI * 2);
           c.fill();
         });
       }
-      c.fillStyle = '#9A9A92';
-      for (let i = 0; i < 6; i += 1) {
-        const x = (i % 3) * 170 + 40;
-        const y = Math.floor(i / 3) * 256 + 70;
+      // Stepping stones: a loose path of irregular slabs.
+      for (let i = 0; i < 3; i += 1) {
+        const x = 70 + i * 170 + rand() * 30;
+        const y = 120 + Math.sin(i * 1.7) * 120 + 130 + rand() * 20;
+        c.fillStyle = '#7C7B72';
         c.beginPath();
-        c.ellipse(x, y, 54, 38, rand(), 0, Math.PI * 2);
+        c.ellipse(x, y, 40 + rand() * 12, 28 + rand() * 8, rand() * 0.8, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = '#4A4A44';
+        c.lineWidth = 3;
+        c.stroke();
+        c.fillStyle = 'rgba(255,255,255,0.10)';
+        c.beginPath();
+        c.ellipse(x - 6, y - 5, 24, 14, 0.3, 0, Math.PI * 2);
         c.fill();
       }
       break;
     }
     case 'moss':
-      speckle(600, ['#3A7A5A', '#5ABA8A', '#2A5A4A', glow], 2, 10);
-      cracks(3, '#0A2A20', 3, 0);
+      speckle(80, ['#2E7A5C', '#12362C', '#3E9A74'], 18, 56, 0.3);
+      speckle(300, ['#5ABA8A', glow], 1.5, 5, 0.35);
+      cracks(3, '#082018', 3, 0);
       break;
     case 'plate': {
-      speckle(120, ['#3A4A5A', '#1A2230'], 3, 10);
+      speckle(60, ['#2E3A4A', '#141A24'], 16, 48, 0.25);
       c.strokeStyle = '#0A1018';
       c.lineWidth = 6;
       c.strokeRect(0, 0, SIZE, SIZE);
@@ -208,6 +253,9 @@ function paint(c: CanvasRenderingContext2D, style: GroundStyle, base: string, gl
  */
 export class Ground {
   readonly mesh: Mesh;
+  /** The painted floor for VR and flat screens: a big disc that fades out; the owner parents it to the arena. */
+  readonly disc: Mesh;
+  private readonly discTexture: CanvasTexture;
   private readonly material: MeshBasicMaterial;
   private readonly texture: CanvasTexture;
   private readonly canvas: HTMLCanvasElement;
@@ -244,6 +292,47 @@ export class Ground {
     this.mesh.renderOrder = -2;
     this.mesh.visible = false;
     parent.add(this.mesh);
+
+    this.discTexture = new CanvasTexture(this.canvas);
+    this.discTexture.wrapS = RepeatWrapping;
+    this.discTexture.wrapT = RepeatWrapping;
+    this.discTexture.colorSpace = SRGBColorSpace;
+    this.discTexture.anisotropy = 4;
+    const tiles = DISC_RADIUS * 2 * TILES_PER_METRE;
+    this.discTexture.repeat.set(tiles, tiles);
+    const discGeometry = new CircleGeometry(DISC_RADIUS, 72);
+    discGeometry.rotateX(-Math.PI / 2);
+    const discMaterial = new MeshBasicMaterial({ map: this.discTexture, transparent: true, depthWrite: false, toneMapped: false });
+    discMaterial.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying float vRad;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>\n  vRad = length(position.xz) / ${DISC_RADIUS.toFixed(1)};`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vRad;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.a *= 1.0 - smoothstep(0.3, 1.0, vRad);');
+    };
+    this.disc = new Mesh(discGeometry, discMaterial);
+    this.disc.name = 'GroundDisc';
+    this.disc.position.y = 0.002;
+    this.disc.renderOrder = -3;
+    this.disc.frustumCulled = false;
+    this.disc.visible = false;
+  }
+
+  /** True when the current world paints its own ground (the neon grid keeps the arena's shader grid). */
+  get painted(): boolean {
+    return this.style !== '' && this.style !== 'grid';
+  }
+
+  /**
+   * Keeps the VR disc's pattern fixed in the world while the arena follows the
+   * player: `x`, `z` are the arena's position.
+   */
+  syncDisc(x: number, z: number, show: boolean): void {
+    this.disc.visible = show && this.painted;
+    if (!this.disc.visible) return;
+    const half = DISC_RADIUS * TILES_PER_METRE;
+    this.discTexture.offset.set(x * TILES_PER_METRE - half, -z * TILES_PER_METRE - half);
   }
 
   /** Repaints for a world (no-op when unchanged). */
@@ -254,6 +343,7 @@ export class Ground {
     this.style = style;
     paint(this.canvas.getContext('2d')!, style, base, glow);
     this.texture.needsUpdate = true;
+    this.discTexture.needsUpdate = true;
   }
 
   /**

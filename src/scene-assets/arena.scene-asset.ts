@@ -71,6 +71,8 @@ const floorMaterial = new ShaderMaterial({
     uMinor: { value: new Color('#1AD9FF') },
     uMajor: { value: new Color('#FF338F') },
     uRing: { value: new Color('#33FFFF') },
+    uGrid: { value: 1 },
+    uFill: { value: 1 },
   },
   vertexShader: /* glsl */ `
     varying vec3 vPos;
@@ -84,6 +86,8 @@ const floorMaterial = new ShaderMaterial({
     uniform vec3 uMinor;
     uniform vec3 uMajor;
     uniform vec3 uRing;
+    uniform float uGrid;
+    uniform float uFill;
     float grid(vec2 p, float size) {
       vec2 g = abs(fract(p / size - 0.5) - 0.5) / fwidth(p / size);
       return 1.0 - min(min(g.x, g.y), 1.0);
@@ -93,11 +97,13 @@ const floorMaterial = new ShaderMaterial({
       float fade = 1.0 - smoothstep(4.0, 26.0, d);
       float minor = grid(vPos.xz, 1.0) * 0.35;
       float major = grid(vPos.xz, 5.0);
+      minor *= uGrid;
+      major *= uGrid;
       vec3 col = uMinor * minor + uMajor * major;
       float ring = smoothstep(0.04, 0.0, abs(d - 1.2)) * 0.8;
       col += uRing * ring;
       float a = max(max(minor, major), ring) * fade;
-      gl_FragColor = vec4(col + vec3(0.02, 0.0, 0.05), max(a, 0.85 * fade));
+      gl_FragColor = vec4(col + vec3(0.02, 0.0, 0.05) * uFill, max(a, 0.85 * fade * uFill));
     }
   `,
 });

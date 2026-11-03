@@ -5,10 +5,13 @@ import {
   BackSide,
   Box3,
   type BufferGeometry,
+  Color,
   Group,
   LoopOnce,
   LoopRepeat,
+  type Material,
   MeshBasicMaterial,
+  type MeshStandardMaterial,
   type Object3D,
   SkinnedMesh,
   Vector3,
@@ -37,6 +40,40 @@ const ZONE_BONES: readonly (readonly [GrabZone, string])[] = [
   ['leg', 'LowerLeg.L'],
   ['leg', 'LowerLeg.R'],
 ];
+
+/**
+ * Colours shared by every creature material: a glowing rim in the world's
+ * accent and a gentle tint toward its sky, so cartoon monsters read as part of
+ * one world (and menacing) instead of stock models. Set per world.
+ */
+const palette = {
+  uRimColor: { value: new Color('#3DF5FF') },
+  uRimK: { value: 0.9 },
+  uTint: { value: new Color('#FFFFFF') },
+  uTintK: { value: 0.4 },
+};
+
+/** Applies the rim/tint shader patch to a lit creature material (once). */
+function patchMaterial(material: Material): void {
+  const standard = material as MeshStandardMaterial;
+  if (!standard.isMeshStandardMaterial || standard.userData.surgePatched) return;
+  standard.userData.surgePatched = true;
+  standard.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, palette);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor;\nuniform float uRimK;\nuniform vec3 uTint;\nuniform float uTintK;')
+      .replace(
+        '#include <dithering_fragment>',
+        `
+        gl_FragColor.rgb *= mix(vec3(1.0), uTint, uTintK);
+        float rim = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 2.6);
+        gl_FragColor.rgb += uRimColor * rim * uRimK;
+        #include <dithering_fragment>`,
+      );
+  };
+  standard.customProgramCacheKey = () => 'surge-creature-rim';
+  standard.needsUpdate = true;
+}
 
 let outlineMaterial: MeshBasicMaterial | null = null;
 
@@ -67,6 +104,15 @@ export class CreatureModel {
   private current: ClipName | '' = '';
   private currentAction: AnimationAction | null = null;
   private once = false;
+  /** Sets the rim glow (the world's accent) and the tint (its sky) for all creatures. */
+  static setPalette(rim: string, tint: string): void {
+    palette.uRimColor.value.set(rim);
+    // Only the hue of the tint: scaled so its brightest channel is 1, so it never darkens.
+    const t = palette.uTint.value.set(tint);
+    const peak = Math.max(t.r, t.g, t.b, 1e-3);
+    t.setRGB(t.r / peak, t.g / peak, t.b / peak);
+  }
+
   /** Ink outlines on every creature; the quality governor turns them off to save a skinned draw each. */
   static ink = true;
   private readonly outlines: Object3D[] = [];
@@ -98,6 +144,7 @@ export class CreatureModel {
       const skinned = child as SkinnedMesh;
       if (!skinned.isSkinnedMesh) return;
       skinned.frustumCulled = false;
+      for (const material of Array.isArray(skinned.material) ? skinned.material : [skinned.material]) patchMaterial(material);
       const outline = new SkinnedMesh(skinned.geometry as BufferGeometry, getOutlineMaterial());
       outline.name = 'Outline';
       outline.bind(skinned.skeleton, skinned.bindMatrix);

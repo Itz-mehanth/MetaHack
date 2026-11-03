@@ -74,6 +74,8 @@ import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
+import { BlobShadows } from './combat/shadows.js';
+import { Scenery } from './combat/scenery.js';
 import { FrameStats, planFor, QualityGovernor, type QualityPlan } from './combat/quality.js';
 import { rollSpell, type SpellId, spellById } from './combat/spells.js';
 import { SpellFx } from './combat/spellfx.js';
@@ -824,6 +826,8 @@ export class CombatSystem extends createSystem({
   private ground!: Ground;
   private groundFor = '';
   private perfHud!: PerfHud;
+  private shadows!: BlobShadows;
+  private scenery: Scenery | null = null;
   private readonly frameStats = new FrameStats();
   private readonly governor = new QualityGovernor();
   private quality: QualityPlan = planFor(0);
@@ -897,6 +901,7 @@ export class CombatSystem extends createSystem({
     this.roomBorder = new RoomBorder(this.root, CYAN);
     this.ground = new Ground(this.root);
     this.perfHud = new PerfHud(this.world.camera);
+    this.shadows = new BlobShadows(this.root);
     {
       const params = new URLSearchParams(window.location.search);
       try {
@@ -912,6 +917,16 @@ export class CombatSystem extends createSystem({
         this.applyQuality(this.governor.tier);
       }
       (window as unknown as { __surgePerf: () => PerfReadout }).__surgePerf = () => this.perfReadout();
+      (window as unknown as { __surgeWorld: () => unknown }).__surgeWorld = () => ({
+        arena: this.arena?.visible ?? null,
+        arenaPos: this.arena ? [this.arena.position.x, this.arena.position.z] : null,
+        disc: this.ground.disc.visible,
+        discParent: this.ground.disc.parent?.name ?? null,
+        painted: this.ground.painted,
+        scenery: this.scenery ? this.scenery.group.children.map((m) => `${m.name}:${(m as unknown as { count: number }).count}:${m.visible}`) : null,
+        stage: this.run.stage.id,
+        theme: this.theme.accent,
+      });
     }
     this.suit = new Suit(this.root, CYAN);
     this.spellFx = new SpellFx(this.root, CYAN);
@@ -1206,7 +1221,9 @@ export class CombatSystem extends createSystem({
     this.arena = await this.world.assets.instantiate('arena');
     this.arena.name = 'Arena';
     this.root.add(this.arena);
-    applyTheme(this.arena, this.theme);
+    this.arena.add(this.ground.disc);
+    this.scenery = new Scenery(this.arena);
+    this.styleWorld(this.stageWorld());
     const portalGeometry = new RingGeometry(0.17, 0.26, 48);
     let index = 0;
     for (const kind of Object.keys(ENEMY_POOL) as EnemyKind[]) {
@@ -2049,6 +2066,7 @@ export class CombatSystem extends createSystem({
       this.arena.visible = !this.isPassthrough();
       // The arena travels with the player, so walking never leaves it behind.
       if (this.arena.visible) this.arena.position.set(this.world.camera.getWorldPosition(this.v1).x, 0, this.v1.z);
+      this.ground.syncDisc(this.arena.position.x, this.arena.position.z, this.arena.visible && this.quality.ground);
     }
     if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) return;
     const realDt = Math.min(delta, this.maxDt);
@@ -2149,6 +2167,7 @@ export class CombatSystem extends createSystem({
       this.updatePending(dt);
       this.updateDrones(dt, time);
       this.updateBlobs();
+      this.updateShadows();
       this.updateBolts(dt);
       this.onPhaseChange();
       this.updateCountdown();
@@ -3386,9 +3405,25 @@ export class CombatSystem extends createSystem({
     this.music.play('menu');
   }
 
+  /** The world id of the stage in play (the hub's neon grid before any). */
+  private stageWorld(): string {
+    return this.run.stage.world.id in THEMES ? this.run.stage.world.id : 'neon-grid';
+  }
+
+  /** Dresses the arena for world `id`: sky and grid colours, painted ground, and the skyline. */
+  private styleWorld(id: string): void {
+    if (!this.arena) return;
+    const style = groundStyleFor(id);
+    const look = id === 'oblivion' ? WORLD_LOOKS.oblivion : lookFor(`${id}-1`, id);
+    this.ground.setStyle(style, look.ground, look.accent);
+    applyTheme(this.arena, this.theme, this.ground.painted);
+    this.scenery?.build(style, this.theme.mid, this.theme.accent, this.theme.horizon);
+  }
+
   private setTheme(id: string): void {
     this.theme = THEMES[id] ?? THEMES['neon-grid'];
-    if (this.arena) applyTheme(this.arena, this.theme);
+    CreatureModel.setPalette(this.theme.accent, this.theme.horizon);
+    this.styleWorld(id);
     this.lightning = 0;
     this.nextStrike = 3;
   }
@@ -8164,6 +8199,30 @@ export class CombatSystem extends createSystem({
       blob.position.set(position.x, 0.006, position.z);
       blob.scale.setScalar(ENEMIES[drone.kind].radius * (drone.dying >= 0 ? 4.2 : 3.2) * Math.max(0.01, drone.object.scale.x));
     }
+  }
+
+  /**
+   * Contact shadows for what the walkers' own blobs do not cover: flyers, the
+   * boss, cages and every prop, fading and widening with height.
+   */
+  private updateShadows(): void {
+    const shadows = this.shadows;
+    shadows.begin();
+    for (const drone of this.drones) {
+      if (drone.blob != null || drone.kind === 'orb') continue;
+      if (drone.state === 'off' || drone.state === 'emerging' || drone.state === 'shot') continue;
+      const p = drone.object.position;
+      const height = Math.max(0, p.y);
+      const radius = ENEMIES[drone.kind].radius * (drone.kind === 'boss' ? 1.7 : 1.5) * Math.max(0.5, drone.size) * (1 + height * 0.18);
+      shadows.add(p.x, 0, p.z, radius, 0.55 * Math.max(0, 1 - height / 4.5));
+    }
+    for (const item of this.debris) {
+      if (item.state === 'off' || item.state === 'spawn') continue;
+      const p = item.object.position;
+      const height = Math.max(0, p.y - item.radius);
+      shadows.add(p.x, 0, p.z, item.radius * 1.5 * (1 + height * 0.25), 0.5 * Math.max(0, 1 - height / 3.5));
+    }
+    shadows.end();
   }
 
   /** Turns an upright walker to face the player (yaw only). */
