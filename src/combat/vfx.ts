@@ -70,6 +70,8 @@ export class Particles {
   private readonly drag: Float32Array;
   private readonly gravity: Float32Array;
   private next = 0;
+  /** Share of emitted particles that actually spawn (the quality governor lowers it). */
+  density = 1;
 
   constructor(
     private readonly capacity = 900,
@@ -112,6 +114,7 @@ export class Particles {
     drag = 1.5,
     gravity = 1.2,
   ): void {
+    if (this.density < 1 && Math.random() > this.density) return;
     const i = this.next;
     this.next = (this.next + 1) % this.capacity;
     const j = i * 3;

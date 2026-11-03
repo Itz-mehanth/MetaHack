@@ -50,6 +50,8 @@ export class Run {
   private phaseTime = 0;
   private spawned = 0;
   private alive = 0;
+  /** Share of the wave's crowd cap kept alive at once (the quality governor lowers it). */
+  crowdScale = 1;
   private spawnTimer = 0;
   private burstLeft = 0;
   private bossSpawned = false;
@@ -131,7 +133,7 @@ export class Run {
       if (this.spawnTimer <= 0) {
         const def = this.waveDef;
         // A crowd cap: the next one waits until there is room.
-        if (this.alive >= (def.alive ?? 99)) {
+        if (this.alive >= (def.alive != null ? Math.max(2, Math.floor(def.alive * this.crowdScale)) : 99)) {
           this.spawnTimer = 0.25;
           return null;
         }

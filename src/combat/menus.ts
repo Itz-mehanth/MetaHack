@@ -636,12 +636,13 @@ export class GameMenus {
           color: '#FF3B5C',
           size: 34,
         },
+        { id: 'perfhud', x: 64, y: 850, w: 620, h: 90, label: 'PERFORMANCE HUD', sub: s.perfHud ? 'ON' : 'OFF', selected: s.perfHud, size: 30 },
         {
           id: 'settings-note',
           kind: 'text',
-          x: 64,
+          x: 704,
           y: 850,
-          w: 1470,
+          w: 830,
           h: 80,
           label: 'Progress, coins and settings are saved on this device. Subtitles always show.',
           size: 30,
@@ -894,6 +895,10 @@ export class GameMenus {
         return;
       case 'handdebug':
         p.settings.handDebug = !p.settings.handDebug;
+        this.actions.changed();
+        return;
+      case 'perfhud':
+        p.settings.perfHud = !p.settings.perfHud;
         this.actions.changed();
         return;
       case 'lefty':

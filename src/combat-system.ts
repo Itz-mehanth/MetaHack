@@ -73,6 +73,8 @@ import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
+import { PerfHud, type PerfReadout } from './combat/perfhud.js';
+import { FrameStats, planFor, QualityGovernor, type QualityPlan } from './combat/quality.js';
 import { rollSpell, type SpellId, spellById } from './combat/spells.js';
 import { SpellFx } from './combat/spellfx.js';
 import { BeamFx } from './combat/beamfx.js';
@@ -821,6 +823,13 @@ export class CombatSystem extends createSystem({
   private roomBorder!: RoomBorder;
   private ground!: Ground;
   private groundFor = '';
+  private perfHud!: PerfHud;
+  private readonly frameStats = new FrameStats();
+  private readonly governor = new QualityGovernor();
+  private quality: QualityPlan = planFor(0);
+  private perfOn = false;
+  /** ?perf=1 / ?perf=0 are remembered; ?q=0..3 pins a quality tier for testing. */
+  private perfParam: boolean | null = null;
   private suit!: Suit;
   private readonly suitWrists: Array<Vector3 | null> = [null, null];
   private buffTint: Color | null = null;
@@ -887,6 +896,23 @@ export class CombatSystem extends createSystem({
     this.webShots = new WebShots(this.root, PINK);
     this.roomBorder = new RoomBorder(this.root, CYAN);
     this.ground = new Ground(this.root);
+    this.perfHud = new PerfHud(this.world.camera);
+    {
+      const params = new URLSearchParams(window.location.search);
+      try {
+        if (params.has('perf')) window.localStorage.setItem('surge.perf', params.get('perf') === '0' ? '0' : '1');
+        this.perfParam = window.localStorage.getItem('surge.perf') === '1' ? true : null;
+      } catch {
+        this.perfParam = params.get('perf') === '1' ? true : null;
+      }
+      const forced = Number(params.get('q'));
+      if (params.has('q') && Number.isFinite(forced)) {
+        this.governor.tier = Math.max(0, Math.min(3, Math.round(forced)));
+        this.governor.locked = true;
+        this.applyQuality(this.governor.tier);
+      }
+      (window as unknown as { __surgePerf: () => PerfReadout }).__surgePerf = () => this.perfReadout();
+    }
     this.suit = new Suit(this.root, CYAN);
     this.spellFx = new SpellFx(this.root, CYAN);
     this.handBeams = [new BeamFx(this.root, WHITE), new BeamFx(this.root, WHITE)];
@@ -1150,6 +1176,8 @@ export class CombatSystem extends createSystem({
     const onSessionStart = () => {
       if (this.attract) this.stopAttract();
       this.roomAsked = false;
+      this.governor.settle(6);
+      this.requestFrameRate(xr.getSession());
       this.sfx.unlock();
       this.hudPlaced = false;
       if (this.panel.visible) this.replaceMenuAt = this.elapsed + 0.6;
@@ -1957,6 +1985,61 @@ export class CombatSystem extends createSystem({
   }
 
   private lastErrorAt = -10;
+
+  /** Asks the headset for a steady 72 Hz: cheaper than 90 and above the 60 fps bar. */
+  private requestFrameRate(session: XRSession | null | undefined): void {
+    const s = session as (XRSession & { supportedFrameRates?: Float32Array; updateTargetFrameRate?: (rate: number) => Promise<void> }) | null | undefined;
+    if (!s?.supportedFrameRates || !s.updateTargetFrameRate) return;
+    const rates = Array.from(s.supportedFrameRates);
+    const want = rates.includes(72) ? 72 : rates.filter((r) => r >= 60).sort((a, b) => a - b)[0];
+    if (want) void s.updateTargetFrameRate(want).catch(() => undefined);
+  }
+
+  /** Feeds frame times to the stats and the governor, and refreshes the HUD. */
+  private updatePerf(delta: number, realDt: number): void {
+    const ms = delta * 1000;
+    if (ms > 0 && ms < 250) this.frameStats.push(ms);
+    if (!this.paused && this.run.phase === 'fighting') {
+      const moved = this.governor.push(ms);
+      if (moved >= 0) this.applyQuality(moved);
+    }
+    const on = this.perfParam === true || this.profile.settings.perfHud;
+    if (on !== this.perfOn) {
+      this.perfOn = on;
+      this.perfHud.setEnabled(on);
+    }
+    this.perfHud.update(realDt, () => this.perfReadout(), this.world.renderer.xr.isPresenting);
+  }
+
+  private applyQuality(tier: number): void {
+    const plan = planFor(tier);
+    this.quality = plan;
+    CreatureModel.ink = plan.ink;
+    this.particles.density = plan.particles;
+    this.run.crowdScale = plan.crowd;
+    console.info('[Quality] tier', tier, plan);
+  }
+
+  private perfReadout(): PerfReadout {
+    let enemies = 0;
+    for (const drone of this.drones) if (drone.state !== 'off' && drone.kind !== 'orb' && drone.kind !== 'pod') enemies += 1;
+    const info = this.world.renderer.info;
+    const stats = this.frameStats;
+    return {
+      fps: stats.fps(),
+      avgMs: stats.avgMs(),
+      p95Ms: stats.p95Ms(),
+      slowPct: stats.slowShare() * 100,
+      tier: this.governor.tier,
+      locked: this.governor.locked,
+      calls: info.render.calls,
+      triangles: info.render.triangles,
+      geometries: info.memory.geometries,
+      textures: info.memory.textures,
+      enemies,
+      mode: `${this.world.renderer.xr.isPresenting ? (this.isPassthrough() ? 'MR' : 'VR') : 'FLAT'}  ${this.run.phase}`,
+    };
+  }
   /** Longest frame step; headless tests raise it (?dtmax=) to run at real time on a slow renderer. */
   private readonly maxDt = Math.min(0.25, Number(new URLSearchParams(window.location.search).get('dtmax')) || 0.05);
 
@@ -1971,6 +2054,7 @@ export class CombatSystem extends createSystem({
     const realDt = Math.min(delta, this.maxDt);
     this.elapsed = time;
     this.frameDt = realDt;
+    this.updatePerf(delta, realDt);
     if (this.slowmo > 0) this.slowmo -= realDt;
     let dt = this.slowmo > 0 ? realDt * SLOWMO_SCALE : realDt;
     // Hit-stop: the world nearly freezes for a blink when a heavy blow lands.
@@ -2032,7 +2116,7 @@ export class CombatSystem extends createSystem({
     if (!this.paused) this.updateTwist(dt, time);
     this.coach.update(realDt, this.head, this.forward);
     this.erasure.update(realDt, time, this.head, this.eraseTarget, this.veilTarget);
-    this.updateAuras(realDt, time);
+    if (this.quality.auras) this.updateAuras(realDt, time);
     this.updateSorcerer(realDt, time);
     // The suit: forearm sleeves and the chest emblem, while a stage runs.
     if (this.powersLive) {
@@ -2050,7 +2134,7 @@ export class CombatSystem extends createSystem({
         const look = stage.world.id === 'oblivion' ? WORLD_LOOKS.oblivion : lookFor(stage.id, stage.world.id);
         this.ground.setStyle(groundStyleFor(stage.world.id), look.ground, look.accent);
       }
-      this.ground.update(realDt, this.isPassthrough() && this.run.phase !== 'title', 0.92);
+      this.ground.update(realDt, this.isPassthrough() && this.run.phase !== 'title' && this.quality.ground, 0.92);
     }
     this.roomBorder.update(this.isPassthrough() ? this.wallSegs : [], this.wallVersion, this.head.x, this.head.z, time, this.accent);
     this.updateHammer(realDt, time);

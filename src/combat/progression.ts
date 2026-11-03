@@ -242,6 +242,8 @@ export interface Settings {
   gestures: 'low' | 'normal' | 'high';
   /** Live readout of finger values and detected gestures above each hand. */
   handDebug: boolean;
+  /** Developer readout of fps, draw calls and the quality tier. */
+  perfHud: boolean;
 }
 
 export interface Profile {
@@ -278,7 +280,7 @@ export function defaultProfile(): Profile {
     loadout: {},
     finishes: [],
     finish: {},
-    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false },
+    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false, perfHud: false },
   };
 }
 

@@ -67,6 +67,10 @@ export class CreatureModel {
   private current: ClipName | '' = '';
   private currentAction: AnimationAction | null = null;
   private once = false;
+  /** Ink outlines on every creature; the quality governor turns them off to save a skinned draw each. */
+  static ink = true;
+  private readonly outlines: Object3D[] = [];
+  private inkOn = true;
   /** Bones a free hand can take hold of. */
   readonly zones: { name: GrabZone; bone: Object3D }[] = [];
 
@@ -99,6 +103,7 @@ export class CreatureModel {
       outline.bind(skinned.skeleton, skinned.bindMatrix);
       outline.frustumCulled = false;
       skinned.parent!.add(outline);
+      this.outlines.push(outline);
     });
     for (const [name, bone] of ZONE_BONES) {
       const found = model.getObjectByName(bone);
@@ -169,6 +174,10 @@ export class CreatureModel {
   }
 
   update(dt: number): void {
+    if (this.inkOn !== CreatureModel.ink) {
+      this.inkOn = CreatureModel.ink;
+      for (const outline of this.outlines) outline.visible = this.inkOn;
+    }
     this.mixer.update(dt);
   }
 
