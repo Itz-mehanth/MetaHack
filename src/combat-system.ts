@@ -42,6 +42,7 @@ import { Shards, type ShardStuff } from './combat/shards.js';
 import { createRagdoll, RAG, Room, type Verlet } from './combat/physics.js';
 import { lookFor, transitFor, WORLD_LOOKS } from './combat/worlds.js';
 import { CHAMPIONS, TWIST_INFO, type TwistId, twistFor } from './combat/twists.js';
+import { bossRound, championName, dailyStage, dayKey, endlessStage, endlessWorldOf, recordEndless } from './combat/endless.js';
 import { Transit } from './combat/transit.js';
 import { ARSENAL, equippedWeapon, finishFor, type WeaponDef } from './combat/arsenal.js';
 import { applyFinish } from './scene-assets/lib/forge.js';
@@ -230,7 +231,7 @@ const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   pod: GOLD,
 };
 const OBLIVAX_COLOR = new Color(OBLIVAX.color);
-const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins', 'iron-bastion', 'oblivion'];
+const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins', 'iron-bastion', 'veil-sanctum', 'oblivion'];
 type PickupKind = 'heal' | 'rapid' | 'power' | 'rune';
 const BUFF_SECONDS = 8;
 
@@ -1019,6 +1020,7 @@ export class CombatSystem extends createSystem({
       },
       txNext: () => this.nextTransmissionLine(),
       txSkip: () => this.endTransmission(),
+      endless: (hero, daily) => this.startEndless(hero, daily),
       story: () => this.startStage('arc', PROLOGUE),
       finale: () => this.startStage('arc', FINALE),
       exit: () => {
@@ -2032,20 +2034,24 @@ export class CombatSystem extends createSystem({
         this.damageDrone(drone, 999, true);
       }
     };
+    (window as unknown as { __surgeHurt: (n: number) => void }).__surgeHurt = (n: number) => this.run.damage(n);
     const params = new URLSearchParams(window.location.search);
     const screen = params.get('menu');
-    if (screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings' || screen === 'galaxy') {
+    if (screen === 'main' || screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings' || screen === 'galaxy') {
       const hero = HEROES.find((h) => h.id === params.get('hero'))?.id;
       if (hero) this.menus.hero = hero;
       if (screen === 'garage') this.menus.handle({ id: 'garage', point: this.v1.set(0, 0, 0) });
       this.showMenu(screen);
       return;
     }
-    const stage = [...STAGES, PROLOGUE, FINALE].find((s) => s.id === params.get('autostart'));
+    const start = params.get('autostart');
+    const day = params.get('day') ?? dayKey(new Date());
+    const heroId = (HEROES.find((h) => h.id === params.get('hero'))?.id ?? 'arc') as HeroId;
+    const stage = start === 'daily' ? dailyStage(day) : start === 'endless' ? endlessStage(endlessWorldOf(heroId), day) : [...STAGES, PROLOGUE, FINALE].find((s) => s.id === start);
     if (stage == null) return;
     const hero = (HEROES.find((h) => h.id === params.get('hero'))?.id ?? 'arc') as HeroId;
     if (params.has('skipstory') && !isSagaStage(stage)) {
-      this.story = levelStory(stage.world.id, stage.number) ?? null;
+      this.story = stage.endless ? null : (levelStory(stage.world.id, stage.number) ?? null);
       void this.prepareCreatures(stage.world.id).then(() => this.launchStage(hero, stage));
     } else this.startStage(hero, stage);
   }
@@ -2774,6 +2780,18 @@ export class CombatSystem extends createSystem({
     return upgradeLevel(this.profile, id);
   }
 
+  /** Starts an endless run in the hero's home world, or today's daily challenge. */
+  private startEndless(hero: HeroId, daily: boolean): void {
+    const day = dayKey(new Date());
+    this.startStage(hero, daily ? dailyStage(day) : endlessStage(endlessWorldOf(hero), day));
+  }
+
+  /** The twist a stage plays with: a daily rolls its own, the campaign has one per level. */
+  private twistOf(stage: Stage): TwistId {
+    if (isSagaStage(stage)) return 'none';
+    return stage.endless ? stage.endless.twist : twistFor(stage.id);
+  }
+
   /** Plays the level's intro transmission (if any), then the level. */
   private startStage(hero: HeroId, stage: Stage): void {
     this.autoPrologueAt = -1;
@@ -2785,7 +2803,7 @@ export class CombatSystem extends createSystem({
     } else {
       this.endScript();
       this.menus.hero = hero;
-      this.story = levelStory(stage.world.id, stage.number) ?? null;
+      this.story = stage.endless ? null : (levelStory(stage.world.id, stage.number) ?? null);
     }
     this.hero = hero;
     this.setTheme(stage.world.id);
@@ -2843,7 +2861,7 @@ export class CombatSystem extends createSystem({
     this.syncArmory();
     this.setTheme(stage.world.id);
     this.music.play(stage.world.id);
-    const frenzy = !isSagaStage(stage) && twistFor(stage.id) === 'frenzy';
+    const frenzy = this.twistOf(stage) === 'frenzy';
     this.run.start(stage, {
       maxHealth: maxHealth(this.profile),
       speedScale: DIFFICULTY[this.profile.settings.difficulty].speed * (frenzy ? 1.3 : 1),
@@ -2866,7 +2884,7 @@ export class CombatSystem extends createSystem({
     this.erasure.setLook(look);
     this.riftLevel = look.rift;
     this.pools.clear();
-    this.setTwist(isSagaStage(stage) ? 'none' : twistFor(stage.id));
+    this.setTwist(this.twistOf(stage));
     this.spawnPods(this.story?.hostages ?? 0);
   }
 
@@ -3488,6 +3506,10 @@ export class CombatSystem extends createSystem({
       this.finishFinale(won);
       return;
     }
+    if (run.stage.endless) {
+      this.finishEndless(won);
+      return;
+    }
     const reward = recordResult(this.profile, run.stage, {
       won,
       health: run.health,
@@ -3508,6 +3530,26 @@ export class CombatSystem extends createSystem({
       return;
     }
     this.presentResults(info);
+  }
+
+  /** Records an endless or daily run and shows its results. */
+  private finishEndless(won: boolean): void {
+    const run = this.run;
+    const info = run.stage.endless!;
+    const waves = won ? run.totalWaves : run.wave;
+    const reward = recordEndless(this.profile, { info, waves, score: run.score, killCoins: run.coins });
+    saveProfile(this.profile);
+    this.presentResults({
+      won,
+      stage: run.stage,
+      reward: { stars: 0, coins: reward.coins, newBest: reward.newBest },
+      score: run.score,
+      kills: run.kills,
+      bestCombo: run.bestCombo,
+      saved: 0,
+      hostages: 0,
+      endless: { mode: info.mode, waves, best: reward.best, streak: reward.streak, bestStreak: reward.bestStreak },
+    });
   }
 
   private presentResults(info: Parameters<GameMenus['showResults']>[0]): void {
@@ -5828,7 +5870,7 @@ export class CombatSystem extends createSystem({
     // A champion: bigger, much tougher, named, with a burning portal.
     const def = ENEMIES[drone.kind];
     drone.size = drone.kind === 'titan' ? 1.25 : 1.5;
-    drone.champion = CHAMPIONS[this.run.stage.id] ?? 'CHAMPION';
+    drone.champion = this.run.stage.endless ? championName(this.run.stage.world.id, this.run.wave) : (CHAMPIONS[this.run.stage.id] ?? 'CHAMPION');
     drone.maxHp = def.hp * 6 + 8;
     drone.hp = drone.maxHp;
     drone.spawn.y = this.chestOf(drone) * drone.size;
@@ -7690,7 +7732,9 @@ export class CombatSystem extends createSystem({
     }
     boss.creature?.reset();
     const oblivax = region === 'oblivion';
-    const scale = (oblivax ? (this.script === 'finale' ? 6 : 1.5) : 1 + Math.min(5, REGIONS.indexOf(region)) * 0.2) * (this.script === 'finale' ? 1 : 1.3);
+    // Endless bosses return tougher each time, every fifth wave.
+    const round = this.run.stage.endless ? 1 + (bossRound(this.run.wave) - 1) * 0.4 : 1;
+    const scale = (oblivax ? (this.script === 'finale' ? 6 : 1.5) : 1 + Math.min(5, REGIONS.indexOf(region)) * 0.2) * (this.script === 'finale' ? 1 : 1.3) * round;
     boss.counted = true;
     boss.maxHp = ENEMIES.boss.hp * scale;
     boss.hp = boss.maxHp;
@@ -9371,6 +9415,16 @@ export class CombatSystem extends createSystem({
     if (phase === this.lastPhase) return;
     this.lastPhase = phase;
     if (phase === 'intro') this.sfx.wave();
+    if (phase === 'cleared' && this.run.stage.endless) {
+      // Endless has no checkpoints: a cleared wave patches you up, a boss wave more so.
+      const gain = this.run.waveDef.boss ? 2 : 1;
+      if (this.run.health < this.run.maxHealth) {
+        this.run.heal(gain);
+        this.v1.copy(this.head).addScaledVector(this.forward, 1.3);
+        this.v1.y -= 0.15;
+        this.comic.pop('PATCHED UP!', this.v1, new Color('#39FF88'), 0.45);
+      }
+    }
     if (phase === 'victory' || phase === 'defeat') {
       this.resultTimer = 0;
       for (const drone of this.drones) {
@@ -9400,7 +9454,7 @@ export class CombatSystem extends createSystem({
         break;
       case 'intro':
         if (run.wave === 0 && run.elapsedInPhase < 1) {
-          message = this.story ? this.story.location : `${run.stage.world.name} ${run.stage.number}`;
+          message = this.story ? this.story.location : run.stage.endless ? run.stage.world.name : `${run.stage.world.name} ${run.stage.number}`;
           hint = TWIST_INFO[this.twist].name ? `TWIST: ${TWIST_INFO[this.twist].name}  |  ${TWIST_INFO[this.twist].hint}` : `${run.stage.name}  |  ${run.stage.objective}`;
         } else if (run.wave === 0) {
           message = String(Math.max(1, 3 - Math.floor(run.elapsedInPhase - 1)));
@@ -9426,7 +9480,7 @@ export class CombatSystem extends createSystem({
     }
     if (this.pending) {
       message = '!! WARNING !!';
-      hint = this.pending.champion ? `CHAMPION INCOMING: ${CHAMPIONS[run.stage.id] ?? 'ELITE'}` : 'BOSS INCOMING';
+      hint = this.pending.champion ? `CHAMPION INCOMING: ${run.stage.endless ? championName(run.stage.world.id, run.wave) : (CHAMPIONS[run.stage.id] ?? 'ELITE')}` : 'BOSS INCOMING';
     }
     if (this.paused) message = 'PAUSED';
     this.hud.mesh.visible = !this.attract && run.phase !== 'title' && !(this.panel.visible && !this.paused);

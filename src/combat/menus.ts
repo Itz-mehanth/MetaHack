@@ -24,6 +24,7 @@ import {
 import { chapterFor, type Speaker } from './story.js';
 import { ANCHORS_TO_FINALE, anchorsRecovered, finaleUnlocked, PROLOGUE_DONE } from './saga.js';
 import { TWIST_INFO, twistFor } from './twists.js';
+import { dailyBestToday, dailyChallenge, dayKey, liveStreak } from './endless.js';
 import { buyFinish, buyWeapon, equippedWeapon, FINISHES, finishFor, ownsFinish, ownsWeapon, weaponById, weaponsFor, weaponUnlocked } from './arsenal.js';
 
 export type Screen = 'main' | 'galaxy' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
@@ -75,6 +76,8 @@ export interface MenuActions {
   txNext(): void;
   txSkip(): void;
   resetProgress(): void;
+  /** Starts an endless run in the hero's home world, or today's daily challenge. */
+  endless(hero: HeroId, daily: boolean): void;
   /** Starts the prologue. */
   story(): void;
   /** Starts the finale, CONVERGENCE. */
@@ -94,6 +97,8 @@ export interface ResultInfo {
   bestCombo: number;
   saved: number;
   hostages: number;
+  /** Set for an endless or daily run. */
+  endless?: { mode: 'endless' | 'daily'; waves: number; best: number; streak: number; bestStreak: number };
 }
 
 const BACK: Widget = { id: 'back', x: 1236, y: 150, w: 300, h: 70, label: 'BACK', size: 32 };
@@ -233,7 +238,7 @@ export class GameMenus {
       : { id: 'story', x: 640, y: 220, w: 896, h: 200, label: 'START STORY', icon: 'play', sub: 'PROLOGUE: learn your powers in 4 minutes', selected: true, color: '#FF4FD8', size: 72 };
     return {
       title: 'SURGE',
-      subtitle: begun ? `OBLIVAX is unmaking reality. Win back the Anchors. ${anchors}/${HEROES.length}` : 'Hands of Heroes',
+      subtitle: begun ? `OBLIVAX is unmaking reality. Win back the Anchors. ${anchors}/${HEROES.length}   |   Stars ${totalStars(this.profile)}/${STAGES.length * 3}` : 'Hands of Heroes',
       coins: this.profile.coins,
       accent,
       widgets: [
@@ -255,18 +260,10 @@ export class GameMenus {
         play,
         { id: 'garage', x: 640, y: 450, w: 438, h: 150, label: 'GARAGE', sub: 'Upgrades & skins', icon: 'garage' },
         { id: 'settings', x: 1098, y: 450, w: 438, h: 150, label: 'SETTINGS', sub: 'Sound & difficulty', icon: 'settings' },
-        { id: 'howto', x: 640, y: 630, w: 438, h: 150, label: 'HOW TO PLAY', icon: 'map' },
+        { id: 'howto', x: 640, y: 630, w: 280, h: 150, label: 'HOW TO PLAY', icon: 'map', size: 34 },
+        { id: 'endless', x: 936, y: 630, w: 280, h: 150, label: 'ENDLESS', sub: this.profile.arcade.endlessBest > 0 ? `Best wave ${this.profile.arcade.endlessBest}` : 'A boss every 5 waves', icon: 'skull', size: 40 },
+        { id: 'daily', x: 1232, y: 630, w: 304, h: 150, label: 'DAILY', sub: this.dailySub(), icon: 'timer', color: '#FFD23F', size: 40 },
         { id: 'exit', x: 1236, y: 150, w: 300, h: 70, label: this.flat ? 'HOME' : 'EXIT', sub: this.flat ? undefined : 'Back to the site', size: 32, color: '#FF3B5C' },
-        {
-          id: 'stats',
-          kind: 'text',
-          x: 1120,
-          y: 650,
-          w: 400,
-          h: 120,
-          label: `Stars ${totalStars(this.profile)}/${STAGES.length * 3}\nHeroes ${this.profile.heroes.length}/${HEROES.length}`,
-          size: 36,
-        },
         begun
           ? {
               id: 'finale',
@@ -295,6 +292,17 @@ export class GameMenus {
             },
       ],
     };
+  }
+
+  /** The DAILY button's second line: today's twist, plus the streak or today's best. */
+  private dailySub(): string {
+    const day = dayKey(new Date());
+    const today = dailyChallenge(day);
+    const best = dailyBestToday(this.profile, day);
+    const streak = liveStreak(this.profile, day);
+    const name = TWIST_INFO[today.twist].name;
+    if (best > 0) return `Best ${best}${streak > 1 ? ` | ${streak} day streak` : ''}`;
+    return streak > 0 ? `${name} | ${streak} day streak` : name;
   }
 
   private galaxyScreen(): PanelContent {
@@ -697,6 +705,7 @@ export class GameMenus {
 
   private resultsScreen(accent: string): PanelContent {
     const r = this.result!;
+    if (r.endless) return this.endlessResults(r, r.endless, accent);
     const next = STAGES[r.stage.index + 1];
     const canNext = r.won && next != null && next.world.id === r.stage.world.id && isStageUnlocked(this.profile, next);
     const story = chapterFor(this.hero).levels[r.stage.number - 1];
@@ -723,6 +732,29 @@ export class GameMenus {
         { id: 'next', x: 64, y: 780, w: 470, h: 140, label: 'NEXT MISSION', disabled: !canNext, selected: canNext, color: accent, icon: 'play' },
         { id: 'retry', x: 565, y: 780, w: 470, h: 140, label: 'RETRY', icon: 'timer' },
         { id: 'menu', x: 1066, y: 780, w: 470, h: 140, label: 'WAR MAP', icon: 'map' },
+      ],
+    };
+  }
+
+  /** Results for an endless or daily run: waves cleared, best, streak. */
+  private endlessResults(r: ResultInfo, e: NonNullable<ResultInfo['endless']>, accent: string): PanelContent {
+    const daily = e.mode === 'daily';
+    const lines = [
+      `Score ${r.score.toLocaleString('en-US')}   |   Kills ${r.kills}   |   Best combo x${r.bestCombo}`,
+      `+${r.reward.coins} coins${r.reward.newBest ? `   |   NEW ${daily ? "TODAY'S " : ''}BEST!` : `   |   ${daily ? "Today's best" : 'Best'} ${e.best}`}`,
+    ];
+    if (daily && e.streak > 0) lines.push(`${e.streak} day streak${e.bestStreak > e.streak ? `   |   best ${e.bestStreak}` : ''}   |   Come back tomorrow for a new world`);
+    return {
+      title: r.won ? 'LEGENDARY' : 'RUN OVER',
+      subtitle: `${daily ? 'DAILY CHALLENGE' : 'ENDLESS'} - ${r.stage.world.name}`,
+      coins: this.profile.coins,
+      accent: r.won ? accent : '#FF3B5C',
+      widgets: [
+        { id: 'res-waves', kind: 'text', x: 80, y: 220, w: 1440, h: 90, label: 'WAVES CLEARED', size: 44, align: 'center', color: 'rgba(233,252,255,0.75)' },
+        { id: 'res-stars', kind: 'text', x: 80, y: 300, w: 1440, h: 180, label: String(e.waves), size: 170, align: 'center', color: '#FFD23F' },
+        { id: 'res-stats', kind: 'text', x: 80, y: 500, w: 1440, h: 240, align: 'center', size: 38, label: lines.join('\n') },
+        { id: 'retry', x: 64, y: 780, w: 700, h: 140, label: 'RUN AGAIN', selected: true, color: accent, icon: 'play' },
+        { id: 'back', x: 836, y: 780, w: 700, h: 140, label: 'MAIN MENU', icon: 'map' },
       ],
     };
   }
@@ -773,6 +805,10 @@ export class GameMenus {
         return;
       case 'howto':
         this.open('howto');
+        return;
+      case 'endless':
+      case 'daily':
+        this.actions.endless(this.hero, kind === 'daily');
         return;
       case 'story':
         this.actions.story();
@@ -934,7 +970,7 @@ export class GameMenus {
         return;
       case 'next': {
         const r = this.result;
-        const next = r ? STAGES[r.stage.index + 1] : undefined;
+        const next = r && !r.endless ? STAGES[r.stage.index + 1] : undefined;
         if (r && next && next.world.id === r.stage.world.id && isStageUnlocked(p, next)) this.actions.play(this.hero, next);
         return;
       }

@@ -83,7 +83,7 @@ B. **THE ROOM FIGHTS BACK** (the MR showpiece): meshDetection is already on. Use
    Reality-integrity meter: the Unmaker erases the room, your kills restore it.
 C. **Spatial audio**: HRTF PannerNode pool (16) for enemy growls, wind-ups, shots and deaths; listener
    follows the head. Cheap and a big realism win in MR.
-D. **SURGE endless + DAILY CHALLENGE**: escalating waves, a boss every 5, seeded by UTC date, streak,
+D. **[DONE 2026-11-10, local only] SURGE endless + DAILY CHALLENGE**: escalating waves, a boss every 5, seeded by UTC date, streak,
    local bests. Optional global leaderboard (Vercel function + free Upstash/KV, ~half a day, needs the
    owner to create the store). Pure wave generator gets unit tests.
 E. **AI Director** (invisible): reads accuracy, damage taken and kill speed to adapt pacing; same signals

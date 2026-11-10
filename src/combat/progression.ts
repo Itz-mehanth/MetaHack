@@ -1,6 +1,7 @@
 import type { HeroId } from './heroes.js';
 import type { EnemyKind, WaveDef } from './missions.js';
 import { chapterFor, levelStory } from './story.js';
+import type { TwistId } from './twists.js';
 
 /**
  * Pure game progression: worlds and stages, difficulty, rewards, the coin
@@ -32,6 +33,14 @@ export const WORLDS: readonly World[] = [
 
 export const STAGES_PER_WORLD = 3;
 
+/** An endless or daily-challenge run: a generated stage with no story. */
+export interface EndlessInfo {
+  readonly mode: 'endless' | 'daily';
+  /** UTC day (YYYY-MM-DD) the run was started for; seeds the daily. */
+  readonly day: string;
+  readonly twist: TwistId;
+}
+
 export interface Stage {
   readonly id: string;
   readonly world: World;
@@ -41,6 +50,8 @@ export interface Stage {
   readonly name: string;
   readonly objective: string;
   readonly waves: readonly WaveDef[];
+  /** Set for endless and daily runs. */
+  readonly endless?: EndlessInfo;
 }
 
 const STAGE_NAMES = ['BREACH', 'ONSLAUGHT', 'OVERLORD'];
@@ -250,6 +261,21 @@ export interface Settings {
   calm: boolean;
 }
 
+/** Endless and daily-challenge records. */
+export interface Arcade {
+  endlessBest: number;
+  endlessScore: number;
+  endlessRuns: number;
+  /** The UTC day the daily numbers below belong to. */
+  dailyDay: string;
+  dailyBest: number;
+  dailyScore: number;
+  /** Consecutive days the daily was played, and the last day it was. */
+  streak: number;
+  streakDay: string;
+  bestStreak: number;
+}
+
 export interface Profile {
   version: 1;
   coins: number;
@@ -267,6 +293,7 @@ export interface Profile {
   /** Weapon finishes owned (`hero:finish`) and equipped per hero. */
   finishes: string[];
   finish: Partial<Record<HeroId, string>>;
+  arcade: Arcade;
   settings: Settings;
 }
 
@@ -284,6 +311,7 @@ export function defaultProfile(): Profile {
     loadout: {},
     finishes: [],
     finish: {},
+    arcade: { endlessBest: 0, endlessScore: 0, endlessRuns: 0, dailyDay: '', dailyBest: 0, dailyScore: 0, streak: 0, streakDay: '', bestStreak: 0 },
     settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false, perfHud: false, seated: 'auto', calm: false },
   };
 }
@@ -306,6 +334,7 @@ export function normalizeProfile(raw: unknown): Profile {
     loadout: { ...(r.loadout ?? {}) },
     finishes: Array.isArray(r.finishes) ? [...r.finishes] : [],
     finish: { ...(r.finish ?? {}) },
+    arcade: { ...base.arcade, ...(r.arcade ?? {}) },
     settings: { ...base.settings, ...(r.settings ?? {}) },
   };
 }

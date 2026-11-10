@@ -172,7 +172,7 @@ export class Hud {
     c.fillText('WAVE', 58, 54);
     c.fillStyle = '#FFFFFF';
     c.font = `900 46px ${FONT}`;
-    c.fillText(`${Math.min(run.wave + 1, run.totalWaves)}/${run.totalWaves}`, 56, 94);
+    c.fillText(run.stage.endless ? String(run.wave + 1) : `${Math.min(run.wave + 1, run.totalWaves)}/${run.totalWaves}`, 56, 94);
 
     // Health: segmented bar in the middle.
     const segments = run.maxHealth;

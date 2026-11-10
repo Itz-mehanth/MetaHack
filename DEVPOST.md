@@ -41,7 +41,7 @@ Each mission is fought by a squad of three: swap heroes on the fly by touching y
 Enemies are nearly 40 rigged creatures and mechs that walk out of your real walls (found with plane
 detection), wind up telegraphed attacks, dodge, flinch, ragdoll and break into gibs. There are 30 missions across
 10 worlds, shielded multi-phase bosses, a guided prologue, an armory with weapons, upgrades and finishes, a
-galaxy-map campaign and a convergence finale where every hero joins the last strike.
+galaxy-map campaign and a convergence finale where every hero joins the last strike. After the story, ENDLESS keeps going with escalating waves and a tougher boss every fifth wave, and a DAILY CHALLENGE rolls a new world and rule every UTC day, with a streak to keep.
 
 ## How I built it
 SURGE is a WebXR app built with the Immersive Web SDK (IWSDK), TypeScript, Vite and Three.js. It opens from a
@@ -62,7 +62,7 @@ Ten heroes that feel different in the hand, a story that uses the player's real 
 fully playable end to end without ever touching a controller.
 
 ## What's next
-Gaze-and-pinch input for Meta VR Glasses, an endless daily challenge with a leaderboard, and co-op for friends on phones.
+Gaze-and-pinch input for Meta VR Glasses, a global leaderboard for the daily challenge, and co-op for friends on phones.
 ```
 
 ### Built with (25 max, 19 used)
