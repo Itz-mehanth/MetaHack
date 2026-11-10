@@ -63,7 +63,7 @@ Weak or unknown (these lose points in the criteria above):
 2. **Accessibility pack** (targets the $25k award): seated, one-handed play, left/right hand swap, reduce
    flashes (cap lightning/strobes, no slow-mo), text size and contrast, directional threat cues, toggle
    instead of hold, aim-assist slider, colour-blind-safe telegraphs.
-3. **Glasses-ready**: gaze + pinch for menus and a gaze lock-on for ARC / ORION / HAVOC; HUD and threat arrows
+3. **[PARTLY DONE 2026-11-10: gaze + pinch for menus; gaze lock-on and the 37/25/43 degree HUD check still open] Glasses-ready**: gaze + pinch for menus and a gaze lock-on for ARC / ORION / HAVOC; HUD and threat arrows
    inside 37 deg left/right, 25 up, 43 down (skill `iwsdk-glasses-test`).
 4. **First Five Minutes rebuild**: ENTER -> first kill in 20 s -> first hero swap at 60 s -> boss tease at
    2 min -> first mission clear + reward by minute 4-5. Compress the 4-min prologue to ~2.5 min with a skip.

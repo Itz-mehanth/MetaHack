@@ -62,7 +62,7 @@ Ten heroes that feel different in the hand, a story that uses the player's real 
 fully playable end to end without ever touching a controller.
 
 ## What's next
-Gaze-and-pinch input for Meta VR Glasses, a global leaderboard for the daily challenge, and co-op for friends on phones.
+Tuning gaze-and-pinch on real Meta VR Glasses hardware (menus already use it), a global leaderboard for the daily challenge, and co-op for friends on phones.
 ```
 
 ### Built with (25 max, 19 used)
@@ -105,7 +105,7 @@ The whole game is controller-free. Every pose is classified from the 25 WebXR ha
 tunable thresholds and a live debug readout.
 - Open palm facing out: ARC palm blaster and PSION telekinesis lock-on
 - Fist: TALON claws, RONIN blade ignition, TEMPEST hammer grip, grabbing any enemy by head, arm or leg
-- Pinch (with the off hand): ORION bow draw, menu selection by poking with the index finger
+- Pinch (with the off hand): ORION bow draw; in menus, look at a button and pinch to press it (head or eye gaze), or poke it with the index finger
 - Web pose / two-finger sigil: WEAVER web bullets, VESPER runic darts; seven spell gestures for VESPER
 - Palm to chest, then push out: ARC chest beam. Clap: overdrive and the finale volley
 - Swings are measured by tip and palm velocity: slashes, parries against enemy weapons, slaps that return
@@ -113,7 +113,7 @@ tunable thresholds and a live debug readout.
 TAG-IN: touch both fists together, then pull them apart to swap to the next hero in your squad.
 Physical weapons (hammer, bow, pistol, shield) can be dropped, land on real tables or the floor, and are
 re-grabbed or recalled by either hand. A flat-screen "puppet hand" layer feeds the same gesture code on phones
-and desktops. Menus are poked with a finger; nothing ever requires a controller.
+and desktops. Menus are poked with a finger or pressed with look-and-pinch; nothing ever requires a controller.
 ```
 
 ### What makes you excited about the future of VR? (150 words max, 79 used)

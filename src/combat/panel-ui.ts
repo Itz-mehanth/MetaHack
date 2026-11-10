@@ -128,6 +128,8 @@ export class Panel {
   private readonly glow: MeshBasicMaterial;
   private content: PanelContent = { title: '', accent: '#3DF5FF', widgets: [] };
   private hoverId = '';
+  /** Widget under the gaze ray this frame (set by `aim`, consumed by `update`). */
+  private aimId = '';
   private flashId = '';
   private flash = 0;
   private armed = true;
@@ -289,6 +291,8 @@ export class Panel {
     let hover = '';
     let result: PanelEvent | null = null;
     let anyClose = false;
+    const aimed = this.aimId;
+    this.aimId = '';
     for (const tip of tips) {
       this.toPanel(tip);
       const { x, y, z } = this.local;
@@ -309,6 +313,8 @@ export class Panel {
       }
     }
     if (!anyClose) this.armed = true;
+    // A fingertip wins; otherwise the gaze ray lights the button it rests on.
+    if (!hover) hover = aimed;
     if (hover !== this.hoverId) {
       this.hoverId = hover;
       this.dirty = true;
@@ -320,19 +326,37 @@ export class Panel {
 
   /** Desktop click: intersects a ray with the panel plane. */
   click(origin: Vector3, direction: Vector3): PanelEvent | null {
-    if (!this.visible) return null;
-    this.face.getWorldPosition(this.flat);
-    this.local.set(0, 0, 1).applyQuaternion(this.group.quaternion);
-    const denom = direction.dot(this.local);
-    if (Math.abs(denom) < 1e-5) return null;
-    const t = this.flat.sub(origin).dot(this.local) / denom;
-    if (t <= 0) return null;
-    const hit = this.event.point.copy(origin).addScaledVector(direction, t);
-    this.toPanel(hit);
+    if (!this.visible || !this.rayHit(origin, direction, this.event.point)) return null;
     const widget = this.widgetAt(this.local.x, this.local.y);
     if (widget == null || widget.disabled) return null;
     const value = widget.kind === 'slider' ? Math.min(1, Math.max(0, (this.local.x - widget.x - 40) / (widget.w - 80))) : undefined;
-    return this.emit(widget, hit, value);
+    return this.emit(widget, this.event.point, value);
+  }
+
+  /**
+   * Gaze hover: lights the button the ray rests on (for the next `update`) and
+   * writes where the ray meets the panel to `out`. False if the ray misses the panel.
+   */
+  aim(origin: Vector3, direction: Vector3, out: Vector3): boolean {
+    this.aimId = '';
+    if (!this.visible || !this.rayHit(origin, direction, out)) return false;
+    if (this.local.x < 0 || this.local.x > PANEL_PX_W || this.local.y < 0 || this.local.y > PANEL_PX_H) return false;
+    const widget = this.widgetAt(this.local.x, this.local.y);
+    if (widget != null && !widget.disabled) this.aimId = widget.id;
+    return true;
+  }
+
+  /** Where the ray meets the panel plane (world point into `out`); leaves the panel-pixel position in `this.local`. */
+  private rayHit(origin: Vector3, direction: Vector3, out: Vector3): boolean {
+    this.face.getWorldPosition(this.flat);
+    this.local.set(0, 0, 1).applyQuaternion(this.group.quaternion);
+    const denom = direction.dot(this.local);
+    if (Math.abs(denom) < 1e-5) return false;
+    const t = this.flat.sub(origin).dot(this.local) / denom;
+    if (t <= 0) return false;
+    out.copy(origin).addScaledVector(direction, t);
+    this.toPanel(out);
+    return true;
   }
 
   private emit(widget: Widget, point: Vector3, value?: number): PanelEvent {

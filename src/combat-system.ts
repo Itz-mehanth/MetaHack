@@ -75,6 +75,7 @@ import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
+import { PinchEdge } from './combat/gaze.js';
 import { buildSquad, nextInSquad, SWAP_COOLDOWN, SwapGesture, TAG_BUFF_SECONDS, TAG_DAMAGE } from './combat/squad.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
 import { SquadBar } from './combat/squadbar.js';
@@ -857,6 +858,15 @@ export class CombatSystem extends createSystem({
   private noHandTime = 0;
   private readonly padInput = new PadInput();
   private padRay!: Mesh;
+  /** Gaze and pinch menus: the reticle, the eye ray (when the headset has one) and each hand's pinch. */
+  private gazeReticle!: Mesh;
+  private readonly pinchEdges = [new PinchEdge(), new PinchEdge()];
+  private readonly eyeOrigin = new Vector3();
+  private readonly eyeDir = new Vector3();
+  private eyeValid = false;
+  private readonly gazePoint = new Vector3();
+  private gazeArm = 0;
+  private gazePulse = 0;
   private readonly padQuat = new Quaternion();
   private readonly padForward = new Vector3(0, 0, -1);
   private shadows!: BlobShadows;
@@ -948,6 +958,12 @@ export class CombatSystem extends createSystem({
       this.padRay.visible = false;
       this.padRay.renderOrder = 20;
       this.root.add(this.padRay);
+      this.gazeReticle = new Mesh(new RingGeometry(0.007, 0.011, 28), new MeshBasicMaterial({ color: '#FFFFFF', transparent: true, opacity: 0.9, depthTest: false, depthWrite: false, blending: AdditiveBlending, toneMapped: false }));
+      this.gazeReticle.name = 'GazeReticle';
+      this.gazeReticle.frustumCulled = false;
+      this.gazeReticle.visible = false;
+      this.gazeReticle.renderOrder = 40;
+      this.root.add(this.gazeReticle);
     }
     this.shadows = new BlobShadows(this.root);
     this.floorGlow = new FloorGlow(this.root);
@@ -2186,6 +2202,7 @@ export class CombatSystem extends createSystem({
       this.replaceMenuAt = -1;
       if (this.panel.visible) this.panel.place(this.head, this.forward);
     }
+    this.updateGaze(realDt);
     const event = this.panel.update(realDt, this.tips);
     if (event) this.onPanelEvent(event.point, () => this.menus.handle(event));
 
@@ -2359,6 +2376,19 @@ export class CombatSystem extends createSystem({
     this.noHandTime = anyHand ? 0 : this.noHandTime + this.frameDt;
     const usePad = !anyHand && this.noHandTime > 0.7 && this.padInput.read(frame, space, origin, this.playerQuat, session);
     if (usePad !== this.pad) this.setPad(usePad);
+    // Headsets with eye tracking (and Meta's glasses) report a gaze ray as an input source.
+    this.eyeValid = false;
+    for (const source of session.inputSources) {
+      if (source.targetRayMode !== 'gaze') continue;
+      const gaze = frame.getPose(source.targetRaySpace, space);
+      if (gaze == null) continue;
+      const p = gaze.transform.position;
+      const o = gaze.transform.orientation;
+      this.eyeOrigin.set(p.x, p.y, p.z).applyMatrix4(origin);
+      this.eyeDir.set(0, 0, -1).applyQuaternion(this.jointQuat.set(o.x, o.y, o.z, o.w)).applyQuaternion(this.playerQuat).normalize();
+      this.eyeValid = true;
+      break;
+    }
     if (usePad) {
       this.padInput.apply(this.elapsed, this.screen.intent, this.screen.ndc, this.world.camera);
       this.aimNdc = this.screen.ndc;
@@ -2372,6 +2402,54 @@ export class CombatSystem extends createSystem({
     this.padRay.visible = on;
     // The how-to-play card goes first in whatever the coach is teaching.
     if (on) this.teach([PAD_TIP, ...this.tipQueue.filter((tip) => tip !== PAD_TIP)]);
+  }
+
+  /**
+   * Gaze and pinch for the menus: a reticle where you look (eye gaze if the
+   * headset reports it, else where the head points), and a pinch of either
+   * hand presses the button under it. Poking with a fingertip still works.
+   */
+  private updateGaze(dt: number): void {
+    const handA = this.hands[0].tracked;
+    const handB = this.hands[1].tracked;
+    // Pinches are tracked all the time so one already held when a menu opens is not a click.
+    let pinched = false;
+    for (let i = 0; i < 2; i += 1) {
+      const distance = this.hands[i].tracked ? this.pinchPoint(i, this.gazePoint) : null;
+      if (this.pinchEdges[i].update(distance, this.elapsed)) pinched = true;
+    }
+    const menu = this.panel.visible || this.galaxy.visible;
+    const active = menu && (handA || handB) && !this.flat && !this.pad && this.tx == null;
+    this.gazeArm = active ? this.gazeArm + dt : 0;
+    if (!active) {
+      this.gazeReticle.visible = false;
+      return;
+    }
+    const origin = this.eyeValid ? this.eyeOrigin : this.head;
+    const direction = this.eyeValid ? this.eyeDir : this.forward;
+    // The reticle sits on the panel where the ray meets it, or floats along the ray over the galaxy.
+    const onPanel = this.panel.visible && this.panel.aim(origin, direction, this.gazePoint);
+    if (onPanel) {
+      this.gazeReticle.position.copy(this.gazePoint);
+      this.gazeReticle.quaternion.copy(this.panel.group.quaternion);
+      this.v1.set(0, 0, 1).applyQuaternion(this.panel.group.quaternion);
+      this.gazeReticle.position.addScaledVector(this.v1, 0.006);
+    } else {
+      this.gazeReticle.position.copy(origin).addScaledVector(direction, 0.8);
+      this.gazeReticle.quaternion.copy(this.world.camera.quaternion);
+    }
+    this.gazePulse = Math.max(0, this.gazePulse - dt * 5);
+    this.gazeReticle.scale.setScalar(1 + this.gazePulse * 1.2);
+    this.gazeReticle.visible = this.gazeArm > 0.25;
+    if (!pinched || this.gazeArm < 0.4) return;
+    this.sfx.unlock();
+    this.gazePulse = 1;
+    const event = this.panel.visible ? this.panel.click(origin, direction) : null;
+    if (event) this.onPanelEvent(event.point, () => this.menus.handle(event));
+    else if (this.galaxy.visible) {
+      const index = this.galaxy.pick(origin, direction);
+      if (index !== -2) this.galaxyChoose(index, this.head);
+    }
   }
 
   /** Controller extras each frame: pause, menu clicks along the ray, and the ray itself. */

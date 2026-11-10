@@ -286,7 +286,7 @@ export class GameMenus {
               y: 830,
               w: 896,
               h: 80,
-              label: this.flat ? 'Tap the buttons. The II button pauses a fight.' : 'Poke buttons with a fingertip. Left wrist button pauses a fight.',
+              label: this.flat ? 'Tap the buttons. The II button pauses a fight.' : 'Poke a button, or look at it and pinch. Left wrist button pauses a fight.',
               size: 30,
               color: 'rgba(233,252,255,0.6)',
             },
