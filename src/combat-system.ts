@@ -5298,10 +5298,11 @@ export class CombatSystem extends createSystem({
       hand.tipVel.copy(this.v3).divideScalar(dt);
       const index = this.hands.indexOf(hand);
       if (hand.skewer == null) this.tryImpale(index, claws.base, claws.tip, claws.direction);
-
-
+      // SHOCK EDGE cuts deeper; FURY lets the claws strike again sooner and, at its upper levels, harder.
+      const clawDamage = 2 + Math.floor(this.level('talon-wave') / 2) + Math.floor(this.level('talon-tempo') / 3);
+      const clawGap = 0.25 * (1 - 0.12 * this.level('talon-tempo'));
       for (const drone of this.drones) {
-        if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < 0.25) continue;
+        if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < clawGap) continue;
         if (!this.bladeHits(drone, claws.base, claws.tip, hand.clawPrev)) continue;
         drone.bladeHitAt = this.elapsed;
         this.sfx.slash();
@@ -5309,7 +5310,7 @@ export class CombatSystem extends createSystem({
         this.v2.crossVectors(this.v4, claws.direction);
         this.markHit('slice', this.hitPoint, this.v4, this.v2);
         if (this.weaponDef.id === 'talon-molten') drone.burn = Math.max(drone.burn, 3);
-        this.damageDrone(drone, 2);
+        this.damageDrone(drone, clawDamage);
         this.hitStop = Math.max(this.hitStop, 0.045);
       }
 
@@ -6923,7 +6924,8 @@ export class CombatSystem extends createSystem({
       }
       hand.tipVel.subVectors(sword.tip, hand.prevTip).divideScalar(dt);
       if (hand.skewer == null) this.tryImpale(i, sword.base, sword.tip, sword.direction);
-      const damage = 2 + Math.floor(this.level('ronin-edge') / 2);
+      // KEEN EDGE and WIND CUTTER each add a point of damage every two levels.
+      const damage = 2 + Math.floor(this.level('ronin-edge') / 2) + Math.floor(this.level('ronin-wave') / 2);
       for (const drone of this.drones) {
         if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < 0.3) continue;
         if (!this.bladeHits(drone, sword.base, sword.tip, hand.prevTip)) continue;
