@@ -23,7 +23,7 @@ throughout (no Marvel or other third-party names/designs).
   ORION light bow, WEAVER light webs, HAVOC plasma pistol, RONIN, PSION. Hammer, bow and
   pistol are physical: they drop onto the floor or real tables, either hand
   grabs or recalls them. RONIN twin katanas (fist ignites a blade per hand,
-  fast swings throw slash waves, crossing both blades fires an X-strike).
+  cuts land only where the blade touches; crossing both blades is an X-strike that cuts everything in reach).
   PSION telekinesis (open palm locks onto a prop or alien, close to lift,
   fling and open to throw; impacts blast nearby enemies).
 - Enemy bodies: anatomical aliens (merged parts per rigid limb). Hits make
@@ -115,6 +115,12 @@ throughout (no Marvel or other third-party names/designs).
 - Grabs (updateGrabs): every hero except PSION can close a free fist on a creature's head, arm or leg bone (flash marks the zone): head = lift, squeeze, slam; arm = disarm + stun; leg = trip. Pull down hard to slam, open the hand to throw.
 - Bosses: entrance lockout + title, SHIELD UP at each phase until the adds fall, floor BARRAGE circles, orb fans, chained death blasts; OBLIVAX finale has 6x health.
 - Ground (ground.ts): in MR the scanned floor polygons are repainted per world (grid, lava, rock, ice, void, sand, garden, moss, plate, rune); walls and furniture stay passthrough.
+- Tag team (squad.ts): each mission fights with a squad of three (lead, owned heroes, then heroes lent to a new player). Swap with fists together then apart (thumbstick on controllers, Q or the TAG IN button on screens): a TAG-IN quake ring and 4 s of x1.6 damage. Strip at the bottom of the view shows the squad.
+- Comfort and access: SEATED play (AUTO by head height, or forced in Settings): front-arc spawns, lean 15 cm to dodge a melee strike, no room-scale layout. REDUCE FLASHES: no slow-motion or hit-stop, weak lightning and damage flashes. Aim assist, gesture sensitivity and a swappable bow hand already exist.
+- Controller fallback (pad.ts): with no hands tracked for 0.7 s and a controller in use, the pointing ray is the flat-screen pointer (trigger attack, grip or A special, B pause, thumbstick tag-in) and the pilot plays the hero's real hand poses.
+- Performance (quality.ts, perfhud.ts): `?perf=1` or Settings > PERF HUD shows fps, frame time, draw calls and the quality tier; a governor drops ink outlines, particles, crowd size, auras and the painted ground when frames run slow and recovers after 30 clean seconds (`?q=0..3` pins a tier). The headset is asked for 72 Hz.
+- Look (scenery.ts, ground.ts, holo.ts, decals.ts, shadows.ts): each world has a painted ground and a skyline in VR and on screens; creatures glow at the edges in the world's accent; heroes in the select screen are holograms; blasts light and scorch the floor, portals crack real walls, enemies spread out and show a red ring before a strike; flyers, bosses and props cast contact shadows.
+- Audio: enemy wind-ups, shots, portals and blasts are positional (HRTF panners in sfx.ts).
 - Suit (suit.ts): armoured forearm sleeves toward an estimated elbow and a
   chest emblem when looking down; no helmet/torso/legs by design.
 - Hands push the world: a fast palm slaps enemy shots back at the aliens

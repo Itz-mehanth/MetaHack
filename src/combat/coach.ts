@@ -101,7 +101,7 @@ export const SCREEN_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   ],
   havoc: [{ gesture: 'trigger', title: 'HOLD TO FIRE', sub: 'The gun follows your finger.' }],
   ronin: [
-    { gesture: 'fist', title: 'TAP TO CUT, SWIPE TO SLASH', sub: 'Hard swipes send slash waves.' },
+    { gesture: 'fist', title: 'TAP TO CUT, SWIPE TO SLASH', sub: 'Slash across an enemy: only the blade cuts.' },
     { gesture: 'cross', title: 'X-STRIKE', sub: 'Press X-STRIKE (or a second finger) to cross both blades.' },
   ],
   vanguard: [

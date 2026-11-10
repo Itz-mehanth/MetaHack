@@ -44,6 +44,9 @@ const CSS = `
 #sc-special{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(22px,env(safe-area-inset-bottom));min-width:110px;height:64px;
   font-size:22px;background:linear-gradient(135deg,#3DF5FF,#FF2D9A);display:none}
 #sc-special.ready{display:block;animation:sc-pulse .8s ease-in-out infinite}
+#sc-swap{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:calc(max(22px,env(safe-area-inset-bottom)) + 78px);min-width:110px;height:52px;
+  font-size:20px;background:#FFD23F;display:none}
+#sc-swap.on{display:block}
 @keyframes sc-pulse{50%{transform:scale(1.08)}}
 #sc-gyro{position:absolute;top:max(12px,env(safe-area-inset-top));right:calc(max(12px,env(safe-area-inset-right)) + 64px);height:52px;
   padding:0 12px;font-size:16px;background:#E9FCFF;display:none}
@@ -99,6 +102,8 @@ export class ScreenInput {
   private pressedFlag = false;
   private releasedFlag = false;
   private specialFlag = false;
+  private swapFlag = false;
+  private readonly swapButton: HTMLButtonElement;
   private dragId = -1;
   private dragX = 0;
   private dragY = 0;
@@ -135,10 +140,12 @@ export class ScreenInput {
       <button id="sc-gyro">GYRO</button>
       <div id="sc-look"><i></i></div>
       <button id="sc-special">SPECIAL</button>
+      <button id="sc-swap">TAG IN (Q)</button>
       <div id="sc-tip"></div>
       <div id="sc-rotate"><div><b>&#x21BB;</b>TURN YOUR PHONE SIDEWAYS</div></div>`;
     document.body.appendChild(this.root);
     this.special = this.root.querySelector('#sc-special')!;
+    this.swapButton = this.root.querySelector('#sc-swap')!;
     this.gyroButton = this.root.querySelector('#sc-gyro')!;
     this.look = this.root.querySelector('#sc-look')!;
     this.knob = this.look.querySelector('i')!;
@@ -172,6 +179,10 @@ export class ScreenInput {
     };
     on(this.look, 'pointerup', release);
     on(this.look, 'pointercancel', release);
+    on<PointerEvent>(this.swapButton, 'pointerdown', (e) => {
+      e.preventDefault();
+      this.swapFlag = true;
+    });
     on<PointerEvent>(this.special, 'pointerdown', (e) => {
       e.preventDefault();
       this.specialFlag = true;
@@ -184,6 +195,7 @@ export class ScreenInput {
     on<KeyboardEvent>(window, 'keydown', (e) => {
       const key = e.key.toLowerCase();
       if (key === ' ' || key === 'e') this.specialFlag = true;
+      if (key === 'q') this.swapFlag = true;
       if ((key === 'escape' || key === 'p') && !this.root.classList.contains('off')) this.onPause?.();
       this.keys.add(key);
     });
@@ -209,6 +221,18 @@ export class ScreenInput {
     this.look.style.display = this.touch && playing ? 'block' : 'none';
     this.gyroButton.style.display = this.touch && playing && this.gyroSeen ? 'block' : 'none';
     if (!playing) this.setSpecial('');
+  }
+
+  /** Shows or hides the TAG IN button (a squad is in play). */
+  setSwap(on: boolean): void {
+    this.swapButton.classList.toggle('on', on);
+  }
+
+  /** True once per Q press or tap of TAG IN. */
+  takeSwap(): boolean {
+    const pressed = this.swapFlag;
+    this.swapFlag = false;
+    return pressed;
   }
 
   /** Labels the special button; empty hides it. */

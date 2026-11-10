@@ -74,7 +74,9 @@ import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
+import { buildSquad, nextInSquad, SWAP_COOLDOWN, SwapGesture, TAG_BUFF_SECONDS, TAG_DAMAGE } from './combat/squad.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
+import { SquadBar } from './combat/squadbar.js';
 import { BlobShadows } from './combat/shadows.js';
 import { FloorGlow, ScorchMarks, Telegraphs, WallCracks } from './combat/decals.js';
 import { Scenery } from './combat/scenery.js';
@@ -164,6 +166,11 @@ const X_STRIKE_COOLDOWN = 2.5;
 const TIP_SECONDS = 3.4;
 /** Walkers stop this far from the player (horizontal) to strike. */
 const MELEE_RANGE = 1.05;
+
+/** How to swap heroes, by input kind. */
+const SWAP_TIP: Tip = { gesture: 'fist', title: 'TAG IN', sub: 'Touch your fists together, then pull them apart to swap to the next hero.' };
+const SWAP_TIP_PAD: Tip = { gesture: 'trigger', title: 'TAG IN', sub: 'Press the thumbstick to swap to the next hero.' };
+const SWAP_TIP_FLAT: Tip = { gesture: 'fist', title: 'TAG IN', sub: 'Press Q or the TAG IN button to swap to the next hero.' };
 
 /** Shown first when the controller fallback switches on. */
 const PAD_TIP: Tip = { gesture: 'trigger', title: 'CONTROLLER MODE', sub: 'Trigger: attack. Grip or A: special. B: pause. Put the controllers down to use your hands.' };
@@ -831,6 +838,13 @@ export class CombatSystem extends createSystem({
   private ground!: Ground;
   private groundFor = '';
   private perfHud!: PerfHud;
+  /** Tag team: the mission's squad, the strip showing it, and the swap state. */
+  private squad: HeroId[] = [];
+  private squadBar!: SquadBar;
+  private readonly swapGesture = new SwapGesture();
+  private swapCooldown = 0;
+  private tagBuff = 0;
+  private squadHintUntil = 0;
   /** Head-height sampling at the start of an XR session, for AUTO seated play. */
   private autoSeated = false;
   private seatSum = 0;
@@ -923,6 +937,7 @@ export class CombatSystem extends createSystem({
     this.roomBorder = new RoomBorder(this.root, CYAN);
     this.ground = new Ground(this.root);
     this.perfHud = new PerfHud(this.world.camera);
+    this.squadBar = new SquadBar(this.world.camera);
     {
       const rayGeometry = new BoxGeometry(0.004, 0.004, 1);
       rayGeometry.translate(0, 0, -0.5);
@@ -2180,6 +2195,7 @@ export class CombatSystem extends createSystem({
     this.updateShield(realDt);
     this.updatePsion(realDt, dt, time);
     this.updateGrabs(realDt, time);
+    this.updateSwap(realDt);
     this.updateBossDeath(realDt);
     if (this.powersLive) this.updateShoves();
     this.updateScript(realDt, time);
@@ -2477,7 +2493,11 @@ export class CombatSystem extends createSystem({
       const uni = this.hero === 'arc' && this.uniCooldown <= 0 && this.uniState === 'idle';
       const cast = this.hero === 'vesper' && this.spell !== '';
       this.screen.setSpecial(clap ? 'CLAP!' : this.hero === 'ronin' && this.xCooldown <= 0 ? 'X-STRIKE' : storm ? 'STORM' : uni ? 'UNI-BEAM' : cast ? 'CAST' : '');
-    } else intent.special = false;
+      this.screen.setSwap(this.squad.length > 1 && this.run.phase === 'fighting' && this.script == null);
+    } else {
+      intent.special = false;
+      this.screen.setSwap(false);
+    }
     if (page && this.screen.clicked && !playing) this.screenClick();
   }
 
@@ -2839,6 +2859,7 @@ export class CombatSystem extends createSystem({
     this.resetScript();
     this.pending = null;
     this.equipHero(hero);
+    this.buildSquadFor(hero, stage);
     if (!this.attract) this.heroSurge();
     // Each level is its own world, tearing through the room in MR.
     const look = isSagaStage(stage) ? WORLD_LOOKS.oblivion : lookFor(stage.id, stage.world.id);
@@ -7929,7 +7950,7 @@ export class CombatSystem extends createSystem({
 
   /** Damage multiplier from the hero's power core and the power buff. */
   private damageScale(): number {
-    return (hasUnlock(this.profile, `core-${this.hero}`) ? 1.25 : 1) * (this.buffPower > 0 ? 2 : 1);
+    return (hasUnlock(this.profile, `core-${this.hero}`) ? 1.25 : 1) * (this.buffPower > 0 ? 2 : 1) * (this.tagBuff > 0 ? TAG_DAMAGE : 1);
   }
 
   private dropPickup(at: Vector3, always = false): void {
@@ -8344,6 +8365,72 @@ export class CombatSystem extends createSystem({
   /** Plays a sound so that it comes from `at` in the room. */
   private sfxAt(at: Vector3, play: () => void): void {
     this.sfx.spatial(at.x, at.y, at.z, play);
+  }
+
+  // ---------------------------------------------------------------- tag team
+
+  /** A squad of three for the mission: the lead, owned heroes, and lent ones for a new player. */
+  private buildSquadFor(hero: HeroId, stage: Stage): void {
+    this.squad = isSagaStage(stage) || this.attract ? [] : buildSquad(hero, this.profile.heroes);
+    this.swapCooldown = 0;
+    this.tagBuff = 0;
+    this.squadHintUntil = this.elapsed + 16;
+    this.swapGesture.update(0, false, 1);
+    if (this.squad.length > 1) this.teach([...this.tipQueue, this.pad ? SWAP_TIP_PAD : this.flat ? SWAP_TIP_FLAT : SWAP_TIP]);
+    this.syncSquadBar();
+  }
+
+  private swapHint(): string {
+    return this.pad ? 'THUMBSTICK = TAG IN' : this.flat ? 'Q = TAG IN' : 'FISTS TOGETHER, THEN APART = TAG IN';
+  }
+
+  private syncSquadBar(): void {
+    if (this.squad.length < 2) {
+      this.squadBar.hide();
+      return;
+    }
+    const chips = this.squad.map((id) => ({ id, color: HEROES.find((h) => h.id === id)?.color ?? '#FFFFFF', lent: !this.profile.heroes.includes(id) }));
+    this.squadBar.set(chips, this.hero, this.elapsed < this.squadHintUntil ? this.swapHint() : '');
+  }
+
+  /** Reads the swap input each frame and runs the cooldown, the damage boost and the strip. */
+  private updateSwap(dt: number): void {
+    this.swapCooldown = Math.max(0, this.swapCooldown - dt);
+    this.tagBuff = Math.max(0, this.tagBuff - dt);
+    this.squadBar.update(dt);
+    if (this.squad.length < 2) return;
+    this.squadBar.mesh.visible = this.run.phase !== 'title' && !this.paused && !this.panel.visible && this.script == null;
+    if (this.squadHintUntil > 0 && this.elapsed > this.squadHintUntil) {
+      this.squadHintUntil = 0;
+      this.syncSquadBar();
+    }
+    const live = this.powersLive && this.run.phase === 'fighting' && this.script == null && !this.attract;
+    let swap = false;
+    const left = this.hands[0];
+    const right = this.hands[1];
+    if (this.flat) swap = this.screen.takeSwap();
+    else if (this.pad) swap = this.padInput.swapPressed;
+    else swap = this.swapGesture.update(dt, live && left.tracked && right.tracked && isFist(left.joints) && isFist(right.joints), left.gauntlet.palmPoint.distanceTo(right.gauntlet.palmPoint));
+    if (swap && live && this.swapCooldown <= 0) this.tagIn();
+  }
+
+  /** Swaps to the next hero in the squad with a shock ring and a few seconds of extra damage. */
+  private tagIn(): void {
+    const next = nextInSquad(this.squad, this.hero);
+    if (next === this.hero) return;
+    for (let i = 0; i < 2; i += 1) if (this.hands[i].held) this.releaseHeld(i, false);
+    this.swapFx(next);
+    this.equipHero(next);
+    this.teach(HERO_TIPS[next].slice(0, 1));
+    this.swapCooldown = SWAP_COOLDOWN;
+    this.tagBuff = TAG_BUFF_SECONDS;
+    this.squadHintUntil = 0;
+    // The TAG-IN strike: a ring that hits everything around the player.
+    this.quake(this.v1.set(this.head.x, 0, this.head.z));
+    this.v1.copy(this.head).addScaledVector(this.forward, 1.3);
+    this.comic.pop('TAG IN!', this.v1, this.accent, 0.6);
+    this.squadBar.pulse();
+    this.syncSquadBar();
   }
 
   /** Seated play: by setting, or (AUTO) when the head sat below 1.3 m at the start of the session. */

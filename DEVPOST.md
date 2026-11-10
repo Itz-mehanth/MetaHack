@@ -37,7 +37,7 @@ lives in a different hand pose:
 - **VANGUARD** wears an energy shield on the off hand and throws it to ricochet
 - **VESPER**, a sorcerer, casts spells with seven distinct hand gestures
 
-Any hero can also reach out, close a fist on a creature's head, arm or leg, then lift, slam, disarm or trip it.
+Each mission is fought by a squad of three: swap heroes on the fly by touching your fists together and pulling them apart for a TAG-IN strike and a burst of extra damage. Any hero can also reach out, close a fist on a creature's head, arm or leg, then lift, slam, disarm or trip it.
 Enemies are nearly 40 rigged creatures and mechs that walk out of your real walls (found with plane
 detection), wind up telegraphed attacks, dodge, flinch, ragdoll and break into gibs. There are 30 missions across
 10 worlds, shielded multi-phase bosses, a guided prologue, an armory with weapons, upgrades and finishes, a
@@ -62,8 +62,7 @@ Ten heroes that feel different in the hand, a story that uses the player's real 
 fully playable end to end without ever touching a controller.
 
 ## What's next
-**[UPDATE before submit]** Seated mode, accessibility options, gaze-and-pinch input for Meta VR Glasses,
-squad tag-team swaps, an endless daily challenge and spatial audio.
+Gaze-and-pinch input for Meta VR Glasses, an endless daily challenge with a leaderboard, and co-op for friends on phones.
 ```
 
 ### Built with (25 max, 19 used)
@@ -111,6 +110,7 @@ tunable thresholds and a live debug readout.
 - Palm to chest, then push out: ARC chest beam. Clap: overdrive and the finale volley
 - Swings are measured by tip and palm velocity: slashes, parries against enemy weapons, slaps that return
   shots, hammer and shield throws, slam-downs
+TAG-IN: touch both fists together, then pull them apart to swap to the next hero in your squad.
 Physical weapons (hammer, bow, pistol, shield) can be dropped, land on real tables or the floor, and are
 re-grabbed or recalled by either hand. A flat-screen "puppet hand" layer feeds the same gesture code on phones
 and desktops. Menus are poked with a finger; nothing ever requires a controller.

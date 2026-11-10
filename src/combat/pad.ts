@@ -26,6 +26,8 @@ export class PadInput {
   /** One-frame edges. */
   pressed = false;
   pausePressed = false;
+  /** Thumbstick click: tag in the next hero. */
+  swapPressed = false;
 
   private trigger = 0;
   private squeeze = false;
@@ -42,6 +44,8 @@ export class PadInput {
   private wasSqueeze = false;
   private wasAction = false;
   private wasPause = false;
+  private stickButton = false;
+  private wasStick = false;
   private readonly rotation = new Quaternion();
   private readonly point = new Vector3();
 
@@ -80,6 +84,7 @@ export class PadInput {
     this.trigger = buttons[0]?.value ?? 0;
     this.squeeze = buttons[1]?.pressed ?? false;
     this.actionButton = buttons[4]?.pressed ?? false;
+    this.stickButton = buttons[3]?.pressed ?? false;
     return true;
   }
 
@@ -138,5 +143,7 @@ export class PadInput {
     this.wasAction = this.actionButton;
     this.pausePressed = this.pauseButton && !this.wasPause;
     this.wasPause = this.pauseButton;
+    this.swapPressed = this.stickButton && !this.wasStick;
+    this.wasStick = this.stickButton;
   }
 }
