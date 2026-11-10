@@ -73,6 +73,7 @@ import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
+import { PadInput } from './combat/pad.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
 import { BlobShadows } from './combat/shadows.js';
 import { FloorGlow, ScorchMarks, Telegraphs, WallCracks } from './combat/decals.js';
@@ -163,6 +164,9 @@ const X_STRIKE_COOLDOWN = 2.5;
 const TIP_SECONDS = 3.4;
 /** Walkers stop this far from the player (horizontal) to strike. */
 const MELEE_RANGE = 1.05;
+
+/** Shown first when the controller fallback switches on. */
+const PAD_TIP: Tip = { gesture: 'trigger', title: 'CONTROLLER MODE', sub: 'Trigger: attack. Grip or A: special. B: pause. Put the controllers down to use your hands.' };
 /** Seconds a killed walker takes to fall, lie, and sink away. */
 const DEATH_FALL = 0.6;
 const DEATH_LIE = 1.8;
@@ -827,6 +831,13 @@ export class CombatSystem extends createSystem({
   private ground!: Ground;
   private groundFor = '';
   private perfHud!: PerfHud;
+  /** Controller fallback: no hands tracked, a controller in use (see pad.ts). */
+  private pad = false;
+  private noHandTime = 0;
+  private readonly padInput = new PadInput();
+  private padRay!: Mesh;
+  private readonly padQuat = new Quaternion();
+  private readonly padForward = new Vector3(0, 0, -1);
   private shadows!: BlobShadows;
   private floorGlow!: FloorGlow;
   private scorch!: ScorchMarks;
@@ -906,6 +917,16 @@ export class CombatSystem extends createSystem({
     this.roomBorder = new RoomBorder(this.root, CYAN);
     this.ground = new Ground(this.root);
     this.perfHud = new PerfHud(this.world.camera);
+    {
+      const rayGeometry = new BoxGeometry(0.004, 0.004, 1);
+      rayGeometry.translate(0, 0, -0.5);
+      this.padRay = new Mesh(rayGeometry, new MeshBasicMaterial({ color: '#8CF6FF', transparent: true, opacity: 0.55, depthWrite: false, blending: AdditiveBlending, toneMapped: false }));
+      this.padRay.name = 'PadRay';
+      this.padRay.frustumCulled = false;
+      this.padRay.visible = false;
+      this.padRay.renderOrder = 20;
+      this.root.add(this.padRay);
+    }
     this.shadows = new BlobShadows(this.root);
     this.floorGlow = new FloorGlow(this.root);
     this.scorch = new ScorchMarks(this.root);
@@ -2113,8 +2134,9 @@ export class CombatSystem extends createSystem({
     for (const hand of this.hands) hand.gauntlet.update(hand.pose, Math.min(1, hand.armTime / ARM_TIME), time);
     this.updateHandMotion(realDt);
     this.updateHandDebug(realDt);
+    this.updatePad();
     // On a flat screen the pause button replaces the wrist button.
-    if (this.flat) this.wrist.group.visible = false;
+    if (this.flat || this.pad) this.wrist.group.visible = false;
     else if (this.wrist.update(this.hands[0].pose, this.hands[1].pose, realDt)) this.wristPressed();
 
     this.tips.length = 0;
@@ -2295,6 +2317,48 @@ export class CombatSystem extends createSystem({
     }
     // Re-hide after any loss: a reconnecting hand may restore the default model.
     for (const hand of this.hands) if (!hand.tracked) hand.visualHidden = false;
+    // No hands for a moment but a controller in use: play with the controller.
+    const anyHand = this.hands[0].tracked || this.hands[1].tracked;
+    this.noHandTime = anyHand ? 0 : this.noHandTime + this.frameDt;
+    const usePad = !anyHand && this.noHandTime > 0.7 && this.padInput.read(frame, space, origin, this.playerQuat, session);
+    if (usePad !== this.pad) this.setPad(usePad);
+    if (usePad) {
+      this.padInput.apply(this.elapsed, this.screen.intent, this.screen.ndc, this.world.camera);
+      this.aimNdc = this.screen.ndc;
+      this.readPuppets();
+    }
+  }
+
+  /** Switches the controller fallback on or off, with a one-time card saying how to play. */
+  private setPad(on: boolean): void {
+    this.pad = on;
+    this.padRay.visible = on;
+    // The how-to-play card goes first in whatever the coach is teaching.
+    if (on) this.teach([PAD_TIP, ...this.tipQueue.filter((tip) => tip !== PAD_TIP)]);
+  }
+
+  /** Controller extras each frame: pause, menu clicks along the ray, and the ray itself. */
+  private updatePad(): void {
+    if (!this.pad) return;
+    const pad = this.padInput;
+    if (pad.pausePressed) this.wristPressed();
+    // In menus (and while paused) a trigger press clicks what the ray points at.
+    if (pad.pressed && !this.pilot.active) {
+      this.sfx.unlock();
+      this.world.camera.getWorldPosition(this.head);
+      const event = this.panel.visible ? this.panel.click(pad.origin, pad.direction) : null;
+      if (event) this.onPanelEvent(event.point, () => this.menus.handle(event));
+      else if (this.galaxy.visible) {
+        const index = this.galaxy.pick(pad.origin, pad.direction);
+        if (index !== -2) this.galaxyChoose(index, this.head);
+      }
+    }
+    // The ray: a thin line from the controller, longer in menus.
+    const reach = this.panel.visible || this.galaxy.visible ? 2.4 : 1.2;
+    this.padRay.position.copy(pad.origin);
+    this.padRay.quaternion.setFromUnitVectors(this.padForward, pad.direction);
+    this.padRay.scale.set(1, 1, reach);
+    (this.padRay.material as MeshBasicMaterial).opacity = this.pilot.active ? 0.22 : 0.6;
   }
 
   private updateHands(dt: number): void {
@@ -2362,7 +2426,7 @@ export class CombatSystem extends createSystem({
     const intent = this.screen.frame(dt);
     if (!this.flat) {
       this.screen.show(false, false);
-      this.pilot.active = false;
+      this.pilot.active = this.pad && this.ready && !this.paused && !this.panel.visible && this.run.phase !== 'title';
       this.menus.flat = false;
       return;
     }
