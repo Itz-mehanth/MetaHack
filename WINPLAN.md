@@ -51,7 +51,7 @@ Weak or unknown (these lose points in the criteria above):
    `tuning` per player; keep HAND DEBUG; add hysteresis so gestures do not flicker.
 3. **Controller-as-hand fallback** (reuse puppet.ts shapes): judges who cannot get hand tracking still
    see the game. "Put your controllers down" prompt when hand tracking is off.
-4. **Cold start + PWA**: manifest, icons, service worker, auto-enter XR on launch (skill
+4. **[PARTLY DONE 2026-11-10: manifest, icons, context-loss message; no service worker on purpose, a stale cache during judging is the bigger risk] Cold start + PWA**: manifest, icons, service worker, auto-enter XR on launch (skill
    `iwsdk-pwa-packaging`), split the 3 MB bundle, preload only the first world's creatures.
 5. **Pause/resume + exit** that always works (visibilitychange, XR session end, the EXIT button).
 6. Error-proofing: no-plane fallback ring (exists), no-hand fallback, WebGL context loss message.

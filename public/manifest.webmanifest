@@ -1,0 +1,17 @@
+{
+  "name": "SURGE: Hands of Heroes",
+  "short_name": "SURGE",
+  "description": "A hands-only mixed-reality hero-combat game. Your bare hands become ten heroes.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#06020F",
+  "theme_color": "#06020F",
+  "categories": ["games"],
+  "icons": [
+    { "src": "icons/app-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
