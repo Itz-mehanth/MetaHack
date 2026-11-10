@@ -636,14 +636,16 @@ export class GameMenus {
           color: '#FF3B5C',
           size: 34,
         },
-        { id: 'perfhud', x: 64, y: 850, w: 620, h: 90, label: 'PERFORMANCE HUD', sub: s.perfHud ? 'ON' : 'OFF', selected: s.perfHud, size: 30 },
+        { id: 'seat', x: 64, y: 850, w: 500, h: 80, label: 'PLAY STYLE', sub: s.seated === 'on' ? 'SEATED' : s.seated === 'off' ? 'STANDING' : 'AUTO (BY HEIGHT)', selected: s.seated === 'on', size: 30 },
+        { id: 'calm', x: 584, y: 850, w: 500, h: 80, label: 'REDUCE FLASHES', sub: s.calm ? 'ON: NO SLOW-MO OR STROBES' : 'OFF', selected: s.calm, size: 30 },
+        { id: 'perfhud', x: 1104, y: 850, w: 432, h: 80, label: 'PERF HUD', sub: s.perfHud ? 'ON' : 'OFF', selected: s.perfHud, size: 30 },
         {
           id: 'settings-note',
           kind: 'text',
-          x: 704,
-          y: 850,
-          w: 830,
-          h: 80,
+          x: 64,
+          y: 942,
+          w: 1470,
+          h: 56,
           label: 'Progress, coins and settings are saved on this device. Subtitles always show.',
           size: 30,
         },
@@ -895,6 +897,14 @@ export class GameMenus {
         return;
       case 'handdebug':
         p.settings.handDebug = !p.settings.handDebug;
+        this.actions.changed();
+        return;
+      case 'seat':
+        p.settings.seated = p.settings.seated === 'auto' ? 'on' : p.settings.seated === 'on' ? 'off' : 'auto';
+        this.actions.changed();
+        return;
+      case 'calm':
+        p.settings.calm = !p.settings.calm;
         this.actions.changed();
         return;
       case 'perfhud':

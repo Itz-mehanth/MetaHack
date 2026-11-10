@@ -15,6 +15,10 @@ export class Sfx {
   private sfxVolume = 0.8;
   private musicVolume = 0.6;
   private readonly listeners: Array<(ctx: AudioContext) => void> = [];
+  /** While set, effects play from this positional node instead of straight to the master bus. */
+  private bus: AudioNode | null = null;
+  private readonly panners: PannerNode[] = [];
+  private pannerNext = 0;
 
   unlock(): void {
     if (this.ctx == null) {
@@ -71,10 +75,69 @@ export class Sfx {
     if (this.musicOut) this.musicOut.gain.value = 0.35 * music;
   }
 
+  // ---------------------------------------------------------------- space
+
+  /**
+   * Runs `play` so that everything it sounds comes from the world position
+   * (x, y, z): an HRTF panner (head-related, so it works on headphones and
+   * the headset speakers alike) from a small pool. The reverb send stays
+   * non-positional, as a room's does.
+   */
+  spatial(x: number, y: number, z: number, play: () => void): void {
+    const ctx = this.ctx;
+    if (ctx == null || this.master == null) {
+      play();
+      return;
+    }
+    let panner = this.panners[this.pannerNext];
+    if (panner == null) {
+      panner = ctx.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 1.4;
+      panner.rolloffFactor = 1.1;
+      panner.maxDistance = 40;
+      panner.connect(this.master);
+      this.panners[this.pannerNext] = panner;
+    }
+    this.pannerNext = (this.pannerNext + 1) % 16;
+    if (panner.positionX) {
+      panner.positionX.value = x;
+      panner.positionY.value = y;
+      panner.positionZ.value = z;
+    } else panner.setPosition(x, y, z);
+    this.bus = panner;
+    try {
+      play();
+    } finally {
+      this.bus = null;
+    }
+  }
+
+  /** Places the listener at the head, looking along (fx, fy, fz) with +Y up. */
+  setListener(px: number, py: number, pz: number, fx: number, fy: number, fz: number): void {
+    const l = this.ctx?.listener;
+    if (l == null) return;
+    if (l.positionX) {
+      l.positionX.value = px;
+      l.positionY.value = py;
+      l.positionZ.value = pz;
+      l.forwardX.value = fx;
+      l.forwardY.value = fy;
+      l.forwardZ.value = fz;
+      l.upX.value = 0;
+      l.upY.value = 1;
+      l.upZ.value = 0;
+    } else {
+      l.setPosition(px, py, pz);
+      l.setOrientation(fx, fy, fz, 0, 1, 0);
+    }
+  }
+
   // ---------------------------------------------------------------- building blocks
 
   private out(node: AudioNode, reverb: number): void {
-    node.connect(this.master!);
+    node.connect(this.bus ?? this.master!);
     if (reverb > 0 && this.reverb) {
       const send = this.ctx!.createGain();
       send.gain.value = reverb;

@@ -831,6 +831,12 @@ export class CombatSystem extends createSystem({
   private ground!: Ground;
   private groundFor = '';
   private perfHud!: PerfHud;
+  /** Head-height sampling at the start of an XR session, for AUTO seated play. */
+  private autoSeated = false;
+  private seatSum = 0;
+  private seatCount = 0;
+  private seatUntil = 0;
+  private readonly windHead = new WeakMap<Drone, Float32Array>();
   /** Controller fallback: no hands tracked, a controller in use (see pad.ts). */
   private pad = false;
   private noHandTime = 0;
@@ -1228,6 +1234,10 @@ export class CombatSystem extends createSystem({
       if (this.attract) this.stopAttract();
       this.roomAsked = false;
       this.governor.settle(6);
+      this.seatSum = 0;
+      this.seatCount = 0;
+      this.seatUntil = this.elapsed + 3.5;
+      this.autoSeated = false;
       this.requestFrameRate(xr.getSession());
       this.sfx.unlock();
       this.hudPlaced = false;
@@ -1721,7 +1731,7 @@ export class CombatSystem extends createSystem({
     if (slice) {
       this.sfx.splat();
       this.sfx.slash();
-    } else this.sfx.explode(big);
+    } else this.sfxAt(drone.object.position, () => this.sfx.explode(big));
   }
 
   private updateCreatureDeath(drone: Drone, dt: number): void {
@@ -1810,7 +1820,7 @@ export class CombatSystem extends createSystem({
         } else {
           drone.meleeStage = 1;
           drone.melee = 0;
-          this.sfx.creak();
+          this.sfxAt(object.position, () => this.sfx.creak());
           this.spiderSense(object.position);
           creature?.play('attack', 0.8, true, 0.1);
         }
@@ -2109,7 +2119,12 @@ export class CombatSystem extends createSystem({
     this.elapsed = time;
     this.frameDt = realDt;
     this.updatePerf(delta, realDt);
-    if (this.slowmo > 0) this.slowmo -= realDt;
+    this.sfx.setListener(this.head.x, this.head.y, this.head.z, this.forward.x, this.forward.y, this.forward.z);
+    if (this.profile.settings.calm) {
+      this.slowmo = 0;
+      this.hitStop = 0;
+    } else if (this.slowmo > 0) this.slowmo -= realDt;
+    this.sampleSeat(realDt);
     let dt = this.slowmo > 0 ? realDt * SLOWMO_SCALE : realDt;
     // Hit-stop: the world nearly freezes for a blink when a heavy blow lands.
     if (this.hitStop > 0) {
@@ -2191,7 +2206,7 @@ export class CombatSystem extends createSystem({
       }
       this.ground.update(realDt, this.isPassthrough() && this.run.phase !== 'title' && this.quality.ground, 0.92);
     }
-    this.roomBorder.update(this.isPassthrough() ? this.wallSegs : [], this.wallVersion, this.head.x, this.head.z, time, this.accent);
+    this.roomBorder.update(this.isPassthrough() && !this.seatedNow() ? this.wallSegs : [], this.wallVersion, this.head.x, this.head.z, time, this.accent);
     this.updateHammer(realDt, time);
     this.updateBow(realDt);
     this.updateGun(realDt);
@@ -3567,7 +3582,7 @@ export class CombatSystem extends createSystem({
     if (this.lightning > 0) {
       this.lightning = Math.max(0, this.lightning - dt * 1.8);
       const flicker = this.lightning * (0.55 + 0.45 * Math.sin(time * 60));
-      setFlash(this.arena, flicker);
+      setFlash(this.arena, flicker * (this.profile.settings.calm ? 0.2 : 1));
     }
   }
 
@@ -5971,7 +5986,7 @@ export class CombatSystem extends createSystem({
     this.flashes.spawn(p, WHITE, 0.1, radius * 0.6, 0.15);
     this.particles.burst(p, ORANGE, 40, 3, 0.5, this.v2);
     this.particles.burst(p, DUST, 20, 1.5, 0.8, this.v2);
-    this.sfx.explode(false);
+    this.sfxAt(p, () => this.sfx.explode(false));
     this.scorchAt(p, Math.max(0.5, radius * 0.7));
     for (const drone of this.drones) {
       if (drone.state === 'off' || drone.kind === 'pod' || drone.kind === 'orb') continue;
@@ -6181,7 +6196,7 @@ export class CombatSystem extends createSystem({
       this.lightningFx.strike(this.sky, at, VIOLET, 0.35);
       this.lightning = 1;
       this.sfx.thunderHit();
-    } else this.sfx.explode(true);
+    } else this.sfxAt(at, () => this.sfx.explode(true));
     const color = lightning ? VIOLET : ORANGE;
     this.flashes.spawn(at, color, 0.3, 2.2, 0.5);
     this.flashes.spawn(at, WHITE, 0.1, 0.9, 0.2);
@@ -6901,7 +6916,7 @@ export class CombatSystem extends createSystem({
     let crate = false;
     let barrel = false;
     let n = 0;
-    const spots = this.isPassthrough() ? roomSpots(this.wallSegs, total, 0.7, this.head.x, this.head.z, 1.2) : [];
+    const spots = this.isPassthrough() && !this.seatedNow() ? roomSpots(this.wallSegs, total, 0.7, this.head.x, this.head.z, 1.2) : [];
     for (const item of this.debris) {
       item.placed = false;
       let use = psion || item.kind === 'explosive';
@@ -7638,7 +7653,7 @@ export class CombatSystem extends createSystem({
     drone.portalMaterial.opacity = 1;
     this.particles.burst(drone.spawn, ENEMY_COLOR[kind], kind === 'titan' ? 60 : 24, 1.2, 0.5, this.v2);
     if (this.isPassthrough() && this.wallSegs.length > 0) this.cracks.add(drone.spawn, drone.normal, ENEMY_COLOR[kind], kind === 'titan' ? 2.2 : 1.3);
-    this.sfx.portal();
+    this.sfxAt(drone.spawn, () => this.sfx.portal());
     return drone;
   }
 
@@ -7856,7 +7871,7 @@ export class CombatSystem extends createSystem({
     this.v1.normalize();
     let placed = 0;
     // With a scanned room the cages are spread around its walls: walk over to free them.
-    const spots = this.isPassthrough() ? roomSpots(this.wallSegs, count, 0.8, this.head.x, this.head.z, 1.8) : [];
+    const spots = this.isPassthrough() && !this.seatedNow() ? roomSpots(this.wallSegs, count, 0.8, this.head.x, this.head.z, 1.8) : [];
     for (const pod of this.drones) {
       if (placed >= count) break;
       if (pod.kind !== 'pod' || pod.state !== 'off') continue;
@@ -8086,12 +8101,13 @@ export class CombatSystem extends createSystem({
       if (plane == null || object == null || plane.orientation !== 'vertical') continue;
       object.getWorldPosition(this.v1);
       const d = this.v1.distanceTo(this.head);
-      if (d <= 2.6 || d >= 8) continue;
-      if (!this.profile.settings.allAround) {
-        // Front arc only (about +/-100 degrees from where the player faces).
+      const seated = this.seatedNow();
+      if (d <= (seated ? 2 : 2.6) || d >= (seated ? 6 : 8)) continue;
+      if (seated || !this.profile.settings.allAround) {
+        // Front arc only (about +/-100 degrees from where the player faces; +/-70 seated).
         this.v2.subVectors(this.v1, this.head).setY(0).normalize();
         this.v3.set(this.forward.x, 0, this.forward.z).normalize();
-        if (this.v2.dot(this.v3) < -0.17) continue;
+        if (this.v2.dot(this.v3) < (seated ? 0.34 : -0.17)) continue;
       }
       walls.push(object);
     }
@@ -8109,12 +8125,13 @@ export class CombatSystem extends createSystem({
     this.v1.set(this.forward.x, 0, this.forward.z);
     if (this.v1.lengthSq() < 1e-4) this.v1.set(0, 0, -1);
     this.v1.normalize();
-    const angle = (Math.random() - 0.5) * (this.profile.settings.allAround ? Math.PI * 2 : Math.PI * 0.8);
+    const seated = this.seatedNow();
+    const angle = (Math.random() - 0.5) * (seated ? Math.PI * 0.62 : this.profile.settings.allAround ? Math.PI * 2 : Math.PI * 0.8);
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
     const x = this.v1.x * cos - this.v1.z * sin;
     const z = this.v1.x * sin + this.v1.z * cos;
-    const ringRadius = 4.5 + Math.random() * 2;
+    const ringRadius = seated ? 3.2 + Math.random() * 1.2 : 4.5 + Math.random() * 2;
     position.set(this.head.x + x * ringRadius, this.head.y + (Math.random() - 0.35) * 1.0, this.head.z + z * ringRadius);
     normal.set(-x, 0, -z);
   }
@@ -8265,7 +8282,7 @@ export class CombatSystem extends createSystem({
     if (damage > 0) this.haptics.pulse(this.world.renderer.xr.getSession(), Math.min(1, 0.6 + damage * 0.2), 200);
     if (counted) this.run.hit(damage);
     else this.run.damage(damage);
-    this.damageMaterial.opacity = 0.18;
+    this.damageMaterial.opacity = this.profile.settings.calm ? 0.07 : 0.18;
     this.damage.visible = true;
     this.sfx.hurt();
     // Low and to one side, so it never hides what hit you.
@@ -8322,6 +8339,54 @@ export class CombatSystem extends createSystem({
         b.object.position.z += nz * push * light * 2 * (a.kind === 'titan' ? 0.5 : 1);
       }
     }
+  }
+
+  /** Plays a sound so that it comes from `at` in the room. */
+  private sfxAt(at: Vector3, play: () => void): void {
+    this.sfx.spatial(at.x, at.y, at.z, play);
+  }
+
+  /** Seated play: by setting, or (AUTO) when the head sat below 1.3 m at the start of the session. */
+  private seatedNow(): boolean {
+    if (!this.world.renderer.xr.isPresenting) return false;
+    const mode = this.profile.settings.seated;
+    return mode === 'on' || (mode === 'auto' && this.autoSeated);
+  }
+
+  /** Averages head height for the first moments of a session to guess seated or standing. */
+  private sampleSeat(dt: number): void {
+    if (this.seatUntil <= 0 || !this.world.renderer.xr.isPresenting || dt <= 0) return;
+    this.world.camera.getWorldPosition(this.v4);
+    if (this.elapsed < this.seatUntil) {
+      if (this.v4.y > 0.4) {
+        this.seatSum += this.v4.y;
+        this.seatCount += 1;
+      }
+      return;
+    }
+    this.seatUntil = 0;
+    this.autoSeated = this.seatCount > 10 && this.seatSum / this.seatCount < 1.3;
+    if (this.autoSeated && this.profile.settings.seated === 'auto') {
+      this.v1.copy(this.v4).addScaledVector(this.forward, 1.2);
+      this.comic.pop('SEATED MODE', this.v1, this.accent, 0.5);
+    }
+  }
+
+  /** Where the player's head was when this enemy began its wind-up. */
+  private rememberHead(drone: Drone): void {
+    let at = this.windHead.get(drone);
+    if (at == null) {
+      at = new Float32Array(2);
+      this.windHead.set(drone, at);
+    }
+    at[0] = this.head.x;
+    at[1] = this.head.z;
+  }
+
+  /** Seated dodge: the head moved 15 cm or more since the wind-up began. */
+  private leaned(drone: Drone): boolean {
+    const at = this.windHead.get(drone);
+    return at != null && Math.hypot(this.head.x - at[0], this.head.z - at[1]) >= 0.15;
   }
 
   /** Advances the floor light, scorch marks and wall cracks. */
@@ -8577,7 +8642,8 @@ export class CombatSystem extends createSystem({
       if (drone.attackTimer <= 0) {
         drone.meleeStage = 1;
         drone.melee = 0;
-        this.sfx.creak();
+        this.rememberHead(drone);
+        this.sfxAt(drone.object.position, () => this.sfx.creak());
         this.spiderSense(drone.object.position);
         if (drone.creature) drone.creature.play('attack', drone.creature.duration('attack') / (windup + 0.35), true, 0.1);
       }
@@ -8586,7 +8652,13 @@ export class CombatSystem extends createSystem({
       drone.melee = 0;
       // The swing lands unless the player stepped out of reach.
       this.sa.set(this.head.x - drone.object.position.x, 0, this.head.z - drone.object.position.z);
-      if (this.sa.length() <= MELEE_RANGE + 0.45) {
+      if (this.seatedNow() && this.leaned(drone)) {
+        // Seated: leaning out of the way counts as stepping back.
+        this.sfx.crescent();
+        this.v4.copy(this.head).addScaledVector(this.forward, 0.9);
+        this.v4.y -= 0.12;
+        this.comic.pop('DODGED!', this.v4, GOLD, 0.34);
+      } else if (this.sa.length() <= MELEE_RANGE + 0.45) {
         if (this.shieldBlocks(drone.object.position)) {
           // Blocked: the attacker reels.
           drone.meleeStage = 3;
@@ -8798,7 +8870,7 @@ export class CombatSystem extends createSystem({
     } else {
       this.bleed(object.position, this.hitDir, big ? 30 : 18);
       this.flashes.spawn(object.position, ENEMY_COLOR[drone.kind], 0.1, big ? 1.4 : 0.7, 0.3);
-      this.sfx.explode(big);
+      this.sfxAt(object.position, () => this.sfx.explode(big));
     }
   }
 
@@ -9042,7 +9114,7 @@ export class CombatSystem extends createSystem({
       }
     }
     this.flashes.spawn(this.v4, ENEMY_COLOR[drone.kind], 0.05, 0.3, 0.15);
-    this.sfx.enemyShot();
+    this.sfxAt(this.v4, () => this.sfx.enemyShot());
     for (let i = 0; i < shots; i += 1) {
       const shot = this.drones.find((d) => d.state === 'off' && d.kind === 'orb');
       if (shot == null) return;

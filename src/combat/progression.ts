@@ -244,6 +244,10 @@ export interface Settings {
   handDebug: boolean;
   /** Developer readout of fps, draw calls and the quality tier. */
   perfHud: boolean;
+  /** Seated play: enemies come from the front arc, lean to dodge, no room-scale layout. AUTO picks by head height. */
+  seated: 'auto' | 'on' | 'off';
+  /** Reduce flashes: no slow-motion or hit-stop, much weaker lightning and damage flashes. */
+  calm: boolean;
 }
 
 export interface Profile {
@@ -280,7 +284,7 @@ export function defaultProfile(): Profile {
     loadout: {},
     finishes: [],
     finish: {},
-    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false, perfHud: false },
+    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false, perfHud: false, seated: 'auto', calm: false },
   };
 }
 
