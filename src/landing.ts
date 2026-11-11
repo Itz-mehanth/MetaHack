@@ -267,7 +267,7 @@ export function setupLanding(world: World): void {
   xr.addEventListener('sessionend', () => show(true));
   // Debug/recording deep links go straight into the game.
   const deep = new URLSearchParams(window.location.search);
-  if (deep.has('autostart') || deep.has('menu') || deep.has('movie')) show(false);
+  if (deep.has('autostart') || deep.has('menu') || deep.has('movie') || deep.has('chapter')) show(false);
 
   // Typewriter tagline (keeps the bold run intact while typing).
   const tag = $<HTMLParagraphElement>('tag');

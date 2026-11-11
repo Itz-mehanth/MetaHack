@@ -41,7 +41,7 @@ Each mission is fought by a squad of three: swap heroes on the fly by pinching a
 Enemies are nearly 40 rigged creatures and mechs that walk out of your real walls (found with plane
 detection), wind up telegraphed attacks, dodge, flinch, ragdoll and break into gibs. There are 30 missions across
 10 worlds, shielded multi-phase bosses, a guided prologue, an armory with weapons, upgrades and finishes, a
-galaxy-map campaign and a convergence finale where every hero joins the last strike. After the story, ENDLESS keeps going with escalating waves and a tougher boss every fifth wave, and a DAILY CHALLENGE rolls a new world and rule every UTC day, with a streak to keep. Every hero has a leaderboard (name entry works with bare hands). A 55-second cinematic opens the game around you, ending with the Unmaker's erasure reaching your actual room, and every story line and villain taunt is voiced.
+galaxy-map campaign and a convergence finale where every hero joins the last strike. After the story, ENDLESS keeps going with escalating waves and a tougher boss every fifth wave, and a DAILY CHALLENGE rolls a new world and rule every UTC day, with a streak to keep. Every hero has a leaderboard (name entry works with bare hands). A 55-second cinematic opens the game around you, ending with the Unmaker's erasure reaching your actual room. Every hero then has a story movie of their own: how their region fell to its boss, and the road of three trials (two lords, then the boss) you must fight to win the Anchor back. Every story line and villain taunt is voiced.
 
 ## How I built it
 SURGE is a WebXR app built with the Immersive Web SDK (IWSDK), TypeScript, Vite and Three.js. It opens from a

@@ -131,4 +131,6 @@ More heroes, more creatures, more worlds, new menus, new story. Depth over bread
 - Unique sound design for every weapon (`?sounds=1` to audition).
 - Opening movie (55 s, skippable) and voice-over for the movie, all story panels and villain taunts (Kokoro TTS, rendered offline).
 - Per-hero leaderboards with name entry; world board code ready, waiting for a database.
+- Fixed accidental hero swaps (RONIN's crossed blades triggered the fists gesture): tag in by pinching a portrait on the squad strip.
+- Hero story movies (how the region fell, the lords and the boss on the road ahead) plus a road recap before levels 2 and 3.
 - Still to do by ear on a Quest: movie pacing, voice levels and voices, weapon sounds, gaze menus, fps.

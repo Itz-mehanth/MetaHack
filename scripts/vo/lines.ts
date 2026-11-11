@@ -2,6 +2,7 @@ import { CHAPTERS } from '../../src/combat/story.js';
 import { PROLOGUE_ERASURE, SAGA_STORY } from '../../src/combat/saga.js';
 import { MOVIE_LINES } from '../../src/combat/cinema-script.js';
 import { HEROES } from '../../src/combat/heroes.js';
+import { chapterBeats, chapterRecap } from '../../src/combat/chapter-script.js';
 import { callId, erasureId, introId, outroId, sagaIntroId, sagaOutroId, tauntId } from '../../src/combat/voice.js';
 
 /**
@@ -37,4 +38,16 @@ for (const chapter of CHAPTERS) {
     level.outro.forEach((l, i) => LINES.push({ id: outroId(chapter.worldId, n + 1, i), who: who(l.speaker), text: l.text, priority: 4 }));
     level.taunts.forEach((t, i) => LINES.push({ id: tauntId(chapter.worldId, n + 1, i), who: chapter.villain.name, text: t, priority: 5 }));
   });
+}
+
+// The story movie that opens each hero's journey (its boss declaration reuses a level-3 line above).
+for (const hero of HEROES) {
+  for (const beat of chapterBeats(hero.id, hero.name)) {
+    if (beat.kind === 'declare') continue;
+    LINES.push({ id: beat.id, who: beat.voice, text: beat.text, priority: 0 });
+  }
+  for (const level of [2, 3]) {
+    const recap = chapterRecap(hero.id, level);
+    LINES.push({ id: recap.id, who: recap.voice, text: recap.text, priority: 0 });
+  }
 }

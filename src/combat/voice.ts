@@ -14,3 +14,6 @@ export const sagaIntroId = (script: SagaScript, index: number): string => `saga_
 export const sagaOutroId = (script: SagaScript, index: number): string => `saga_${script}_o${index}`;
 /** The prologue's erasure scene. */
 export const erasureId = (index: number): string => `saga_erasure_${index}`;
+
+/** Narration of a hero's story movie (n = 1 lore, 2 arrival, 3 fall, 4 road, 5 call). */
+export const chapterId = (hero: string, n: number): string => `ch_${hero}_${n}`;

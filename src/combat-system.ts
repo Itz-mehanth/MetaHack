@@ -78,6 +78,8 @@ import { PadInput } from './combat/pad.js';
 import { PinchEdge } from './combat/gaze.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
 import { Cinema, type CinemaHooks } from './combat/cinema.js';
+import { ChapterCinema } from './combat/chaptercinema.js';
+import { storySeen } from './combat/chapter-script.js';
 import { MOVIE_SEEN } from './combat/cinema-script.js';
 import { type BoardEntry, type BoardMode, recordScore, scoreLabel } from './combat/leaderboard.js';
 import { fetchBoard, postScore } from './combat/netboard.js';
@@ -878,12 +880,14 @@ export class CombatSystem extends createSystem({
   private readonly pinchEdges = [new PinchEdge(), new PinchEdge()];
   /** The opening movie (cinema.ts) and this system's side of it. */
   private readonly cinema = new Cinema();
+  /** The story movie that opens a hero's journey (chaptercinema.ts). */
+  private readonly chapterCinema = new ChapterCinema();
   private cinemaErase = 0;
   private movieOffered = false;
   private readonly moviePalms = [new Vector3(), new Vector3()];
   private readonly movieTracked = [false, false];
   /** Opened with a debug link: no automatic movie. */
-  private readonly deepLinked = ['autostart', 'menu', 'movie'].some((key) => new URLSearchParams(window.location.search).has(key));
+  private readonly deepLinked = ['autostart', 'menu', 'movie', 'chapter'].some((key) => new URLSearchParams(window.location.search).has(key));
   private readonly eyeOrigin = new Vector3();
   private readonly eyeDir = new Vector3();
   private eyeValid = false;
@@ -1063,6 +1067,7 @@ export class CombatSystem extends createSystem({
       story: () => this.startStage('arc', PROLOGUE),
       movie: () => this.playMovie(() => this.showMenu('howto')),
       board: (hero) => this.loadNetBoard(hero),
+      chapterMovie: (hero) => this.playChapterMovie(hero, () => this.showMenu('map')),
       finale: () => this.startStage('arc', FINALE),
       exit: () => {
         // Leave the headset session (MR or VR); on a screen, back to the home page.
@@ -1285,7 +1290,7 @@ export class CombatSystem extends createSystem({
       this.root.add(rock, marker);
       this.meteors.push({ rock, marker, markerMaterial, target: new Vector3(), t: 0, state: 'off' as const });
     }
-    this.root.add(this.gore.points, this.galaxy.group, this.transit.mesh, this.cinema.group);
+    this.root.add(this.gore.points, this.galaxy.group, this.transit.mesh, this.cinema.group, this.chapterCinema.group);
 
     const xr = this.world.renderer.xr;
     const onSessionStart = () => {
@@ -1313,8 +1318,9 @@ export class CombatSystem extends createSystem({
     const unlock = () => this.sfx.unlock();
     canvas.addEventListener('pointerdown', unlock);
     const onKey = (event: KeyboardEvent) => {
-      if (this.cinema.active && this.cinema.t > 1 && (event.key === 'Escape' || event.key === ' ' || event.key === 'Enter')) this.cinema.skip();
-      else if (this.panel.visible && this.menus.typeName(event.key)) {
+      if (this.movieActive) {
+        if (event.key === 'Escape' || event.key === ' ' || event.key === 'Enter') this.skipMovie(1);
+      } else if (this.panel.visible && this.menus.typeName(event.key)) {
         event.preventDefault();
         this.panel.setContent(this.menus.content());
       }
@@ -2088,13 +2094,23 @@ export class CombatSystem extends createSystem({
     // Leaderboard test hook: __surgeScore(hero, name, score) files a score on this device.
     (window as unknown as { __surgeScore: (hero: HeroId, name: string, score: number) => number }).__surgeScore = (hero, name, score) =>
       recordScore(this.profile.board, hero, { name, score, mode: 'endless', label: 'ENDLESS WAVE 7', at: Date.now() });
+    // ?seen=1 marks the opening movie and the prologue as seen (to test the flow after them).
+    if (new URLSearchParams(window.location.search).has('seen')) {
+      for (const id of [MOVIE_SEEN, PROLOGUE_DONE]) if (!hasUnlock(this.profile, id)) this.profile.unlocks.push(id);
+      this.menus.setProfile(this.profile);
+      if (this.panel.visible) this.panel.setContent(this.menus.content());
+    }
     // Opening movie: ?movie=1 plays it at once; __surgeMovie(t) jumps the clock (for screenshots).
     (window as unknown as { __surgeMovie: (t?: number) => number }).__surgeMovie = (t) => {
-      if (!this.cinema.active) this.playMovie(() => this.showMenu('main'));
-      if (t != null) this.cinema.seek(t);
-      return this.cinema.t;
+      if (!this.movieActive) this.playMovie(() => this.showMenu('main'));
+      const movie = this.chapterCinema.active ? this.chapterCinema : this.cinema;
+      if (t != null) movie.seek(t);
+      return movie.t;
     };
     if (new URLSearchParams(window.location.search).has('movie')) this.playMovie(() => this.showMenu('main'));
+    // ?chapter=<hero> plays that hero's story movie at once.
+    const chapterHero = HEROES.find((h) => h.id === new URLSearchParams(window.location.search).get('chapter'))?.id;
+    if (chapterHero) this.playChapterMovie(chapterHero, () => this.showMenu('map'), Math.min(3, Math.max(1, Number(new URLSearchParams(window.location.search).get('level')) || 1)));
     // Sound audition page (?sounds=1): plays one part of one weapon's sound design.
     (window as unknown as { __surgeSfx: (id: string, part: WeaponPart, power: number) => void }).__surgeSfx = (id, part, power) => {
       this.sfx.unlock();
@@ -2473,7 +2489,7 @@ export class CombatSystem extends createSystem({
       const distance = this.hands[i].tracked ? this.pinchPoint(i, this.gazePoint) : null;
       if (this.pinchEdges[i].update(distance, this.elapsed)) pinched = true;
     }
-    if (pinched && this.cinema.active && this.cinema.t > 1.5) this.cinema.skip();
+    if (pinched) this.skipMovie(1.5);
     const menu = this.panel.visible || this.galaxy.visible;
     const active = menu && (handA || handB) && !this.flat && !this.pad && this.tx == null;
     this.gazeArm = active ? this.gazeArm + dt : 0;
@@ -2512,7 +2528,7 @@ export class CombatSystem extends createSystem({
   private updatePad(): void {
     if (!this.pad) return;
     const pad = this.padInput;
-    if ((pad.pressed || pad.pausePressed) && this.cinema.active && this.cinema.t > 1.2) this.cinema.skip();
+    if (pad.pressed || pad.pausePressed) this.skipMovie(1.2);
     if (pad.pausePressed) this.wristPressed();
     // In menus (and while paused) a trigger press clicks what the ray points at.
     if (pad.pressed && !this.pilot.active) {
@@ -2650,10 +2666,7 @@ export class CombatSystem extends createSystem({
   /** A tap in the menus: a panel button, or a planet on the galaxy map. */
   private screenClick(): void {
     this.sfx.unlock();
-    if (this.cinema.active) {
-      if (this.cinema.t > 1) this.cinema.skip();
-      return;
-    }
+    if (this.skipMovie(1)) return;
     if (!this.ready) return;
     this.world.camera.getWorldPosition(this.head);
     this.screenAim(this.v3);
@@ -2932,9 +2945,42 @@ export class CombatSystem extends createSystem({
     intensity: (level) => this.music.setIntensity(level),
   };
 
+  private get movieActive(): boolean {
+    return this.cinema.active || this.chapterCinema.active;
+  }
+
+  /** True while a movie plays; once it has run `after` seconds a skip input ends it. */
+  private skipMovie(after: number): boolean {
+    const movie = this.cinema.active ? this.cinema : this.chapterCinema.active ? this.chapterCinema : null;
+    if (movie == null) return false;
+    if (movie.t > after) movie.skip();
+    return true;
+  }
+
+  /** Plays `hero`'s story movie (level 1: the whole story; level 2 or 3: the short road scene), then runs `done`. */
+  private playChapterMovie(hero: HeroId, done: () => void, level = 1): void {
+    if (this.movieActive) return;
+    this.sfx.unlock();
+    this.autoPrologueAt = -1;
+    const seen = storySeen(hero, level);
+    if (!hasUnlock(this.profile, seen)) {
+      this.profile.unlocks.push(seen);
+      saveProfile(this.profile);
+    }
+    this.panel.hide();
+    this.syncCarousel();
+    this.syncMap();
+    this.syncArmory();
+    this.syncGalaxy();
+    this.world.camera.getWorldPosition(this.head);
+    this.world.camera.getWorldDirection(this.forward);
+    this.music.play(chapterFor(hero).worldId);
+    this.chapterCinema.start(this.sfx, this.cinemaHooks, this.head, this.forward, this.flat, hero, level, done);
+  }
+
   /** Plays the opening movie around the player, then runs `done` (also when it is skipped). */
   private playMovie(done: () => void): void {
-    if (this.cinema.active) return;
+    if (this.movieActive) return;
     this.sfx.unlock();
     this.autoPrologueAt = -1;
     if (!hasUnlock(this.profile, MOVIE_SEEN)) {
@@ -2957,6 +3003,7 @@ export class CombatSystem extends createSystem({
   }
 
   private updateMovie(dt: number): void {
+    if (this.chapterCinema.active) this.chapterCinema.update(dt, this.head, Math.atan2(-this.forward.x, -this.forward.z));
     if (!this.cinema.active) return;
     for (let i = 0; i < 2; i += 1) {
       this.movieTracked[i] = this.hands[i].tracked;
@@ -2981,6 +3028,11 @@ export class CombatSystem extends createSystem({
   private startStage(hero: HeroId, stage: Stage): void {
     this.autoPrologueAt = -1;
     const saga = isSagaStage(stage);
+    if (!saga && !stage.endless && !this.deepLinked && stage.number >= 1 && stage.number <= 3 && !hasUnlock(this.profile, storySeen(hero, stage.number))) {
+      // The first time a level is started, its part of the hero's story plays first.
+      this.playChapterMovie(hero, () => this.startStage(hero, stage), stage.number);
+      return;
+    }
     if (saga) {
       this.script = stage.id === FINALE.id ? 'finale' : 'prologue';
       hero = this.script === 'finale' ? FINALE_PHASES[0].hero : PROLOGUE_HEROES[0];
@@ -6612,7 +6664,7 @@ export class CombatSystem extends createSystem({
     }
     if (this.script === 'prologue') this.updatePrologue(dt);
     else if (this.script === 'finale') this.updateFinale(dt, time);
-    else if (this.cinema.active) this.eraseTarget = this.cinemaErase;
+    else if (this.movieActive) this.eraseTarget = this.cinemaErase;
     else if (this.run.phase === 'title') this.eraseTarget = 0;
     else this.eraseTarget = this.isPassthrough() ? this.riftLevel * 0.3 : 1;
   }

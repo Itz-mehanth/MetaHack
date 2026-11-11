@@ -91,6 +91,8 @@ export interface MenuActions {
   scanRoom(): void;
   /** The leaderboard screen opened on `hero`: fetch the shared board for it. */
   board(hero: HeroId): void;
+  /** Plays the hero's story movie (the road to their boss). */
+  chapterMovie(hero: HeroId): void;
 }
 
 export interface ResultInfo {
@@ -490,6 +492,7 @@ export class GameMenus {
       },
       { id: 'start', x: 64, y: 790, w: 960, h: 150, label: boss ? 'FACE THE BOSS' : 'START MISSION', selected: true, color: accent, size: 56, icon: boss ? 'skull' : 'play' },
       { id: 'difficulty', x: 1056, y: 790, w: 480, h: 150, label: 'DIFFICULTY', sub: this.profile.settings.difficulty.toUpperCase(), color: accent },
+      { id: 'chapter-movie', x: 1056, y: 698, w: 480, h: 80, label: 'WATCH STORY', size: 32 },
     );
     return {
       title: chapter.region,
@@ -939,6 +942,9 @@ export class GameMenus {
         return;
       case 'movie':
         this.actions.movie();
+        return;
+      case 'chapter-movie':
+        this.actions.chapterMovie(this.hero);
         return;
       case 'board':
         this.boardHero = this.hero;
