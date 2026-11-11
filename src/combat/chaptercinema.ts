@@ -326,7 +326,7 @@ export class ChapterCinema {
     this.done = done;
     this.heroId = hero;
     this.t = 0;
-    this.hold = 3.2;
+    this.hold = 6;
     this.skipping = -1;
     this.planned = false;
     this.fired.clear();
@@ -403,8 +403,9 @@ export class ChapterCinema {
   private buildSkyline(world: string, seed: number): void {
     this.shape = SKYLINES[world] ?? SKYLINES['neon-grid'];
     this.skyline = this.shape.shape === 'cone' ? this.cones : this.boxes;
-    this.boxes.visible = this.shape.shape === 'box';
-    this.cones.visible = this.shape.shape === 'cone';
+    // Hidden until the first frame has laid the buildings out (they start as unit cubes around the viewer).
+    this.boxes.visible = false;
+    this.cones.visible = false;
     const random = seeded(seed);
     const range = (r: readonly [number, number]): number => r[0] + (r[1] - r[0]) * random();
     for (let i = 0; i < COUNT; i += 1) {
@@ -595,7 +596,7 @@ export class ChapterCinema {
     const sfx = this.sfx!;
     this.group.position.copy(head);
     if (this.hold > 0) {
-      // Wait (at most 3.2 s) for every line to be ready so the pacing can follow them.
+      // Wait (at most 6 s) for every line to be ready so the pacing can follow them.
       this.hold = this.beats.every((b) => sfx.voiceLength(b.id) > 0) ? 0 : this.hold - dt;
       if (this.hold <= 0 && !this.planned) this.plan();
     } else {
@@ -721,6 +722,7 @@ export class ChapterCinema {
   private updateSkyline(t: number, dt: number): void {
     const S = this.starts;
     const mesh = this.skyline;
+    mesh.visible = true;
     const accent = this.bossColorC;
     for (let i = 0; i < COUNT; i += 1) {
       const order = Math.abs(Math.atan2(Math.sin(this.ang[i]), Math.cos(this.ang[i]))) / Math.PI;
@@ -1004,7 +1006,7 @@ export class ChapterCinema {
     this.caption.set(text, color, alpha * fade);
     at(this.caption.sprite, -0.3);
     const hintAlpha = this.flat ? 0 : ramp(t, 2.5, 3.5) * (1 - ramp(t, this.end - 3, this.end - 2)) * 0.8 * fade;
-    this.hint.set('PINCH TO SKIP', '#E9FCFF', hintAlpha, true);
+    this.hint.set('HOLD A PINCH TO SKIP', '#E9FCFF', hintAlpha, true);
     at(this.hint.sprite, -0.52);
     void skipFade;
   }

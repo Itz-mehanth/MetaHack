@@ -75,6 +75,17 @@ export function isOpenPalm(hand: HandJoints): boolean {
   return e[0] > tuning.open && e[1] > tuning.open && e[2] > tuning.open;
 }
 
+/**
+ * The hand is not a fist: the middle, ring and pinky fingers are, on average,
+ * not curled into the palm (a loose pinch leaves them half-curled; a fist ratio is far lower). A closed fist also brings the thumb tip close to the index
+ * tip, so "thumb and index touching" only counts as a pinch (a menu click, a
+ * skip) when this holds.
+ */
+export function isPinchPose(hand: HandJoints): boolean {
+  const e = fingerExtension(hand);
+  return (e[1] + e[2] + e[3]) / 3 > tuning.fist - 0.3;
+}
+
 export function isFist(hand: HandJoints): boolean {
   const e = fingerExtension(hand);
   return e[0] < tuning.fist && e[1] < tuning.fist && e[2] < tuning.fist && e[3] < tuning.fist;

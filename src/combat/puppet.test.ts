@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type HandJoints, fingerExtension, isBlastPose, isFist, isOpenPalm, isSigilPose, isWebPose, palmNormal } from './gestures.js';
+import { type HandJoints, fingerExtension, isBlastPose, isFist, isOpenPalm, isPinchPose, isSigilPose, isWebPose, palmNormal } from './gestures.js';
 import { type HandShape, type Quat, type Vec, handFrame, handPoint, qrot, SHAPES, writeHand } from './puppet.js';
 
 function pose() {
@@ -77,6 +77,16 @@ describe('puppet hands', () => {
       expect(dist(closed.thumbTip, closed.tips[0])).toBeLessThan(0.03);
       const open = build(left, { curl: [0.35, 0.55, 0.6, 0.65], thumb: 0, pinch: 0 }, FRAMES[0]).j;
       expect(dist(open.thumbTip, open.tips[0])).toBeGreaterThan(0.065);
+    });
+
+    it(`${side}: only a pinch with the other fingers loose counts as a pinch pose, never a fist`, () => {
+      for (const frame of FRAMES) {
+        expect(isPinchPose(build(left, SHAPES.pinch, frame).j)).toBe(true);
+        expect(isPinchPose(build(left, SHAPES.open, frame).j)).toBe(true);
+        expect(isPinchPose(build(left, SHAPES.fist, frame).j)).toBe(false);
+        // A tight fist closes the thumb over the fingers.
+        expect(isPinchPose(build(left, { curl: [1, 1, 1, 1], thumb: 1, pinch: 1 }, frame).j)).toBe(false);
+      }
     });
 
     it(`${side}: bones point from each joint toward the next`, () => {

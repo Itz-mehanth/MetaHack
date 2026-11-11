@@ -1,6 +1,7 @@
 import {
   AdditiveBlending,
   AssetManager,
+  BackSide,
   BoxGeometry,
   CanvasTexture,
   Color,
@@ -22,6 +23,7 @@ import {
   PlaneGeometry,
   Quaternion,
   RingGeometry,
+  SphereGeometry,
   TorusGeometry,
   type Sprite,
   Vector3,
@@ -69,7 +71,7 @@ import {
 } from './combat/saga.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
-import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isSigilPose, isWebPose, setSensitivity, tuning } from './combat/gestures.js';
+import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isPinchPose, isSigilPose, isWebPose, setSensitivity, tuning } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
@@ -861,6 +863,11 @@ export class CombatSystem extends createSystem({
   /** One pinch detector per hand for tagging a hero in from the strip, and where the pinch is. */
   private readonly swapPinch = [new PinchEdge(), new PinchEdge()];
   private readonly swapPoint = new Vector3();
+  /** Seconds a pinch has been held while a movie plays. */
+  private skipHold = 0;
+  /** A black sphere that fades away as a session starts, hiding the first frames' settling. */
+  private veil!: Mesh<SphereGeometry, MeshBasicMaterial>;
+  private veilT = 9;
   private swapCooldown = 0;
   private tagBuff = 0;
   private squadHintUntil = 0;
@@ -1290,7 +1297,11 @@ export class CombatSystem extends createSystem({
       this.root.add(rock, marker);
       this.meteors.push({ rock, marker, markerMaterial, target: new Vector3(), t: 0, state: 'off' as const });
     }
-    this.root.add(this.gore.points, this.galaxy.group, this.transit.mesh, this.cinema.group, this.chapterCinema.group);
+    this.veil = new Mesh(new SphereGeometry(2, 16, 12), new MeshBasicMaterial({ color: '#000000', side: BackSide, transparent: true, opacity: 1, depthTest: false, depthWrite: false, toneMapped: false }));
+    this.veil.frustumCulled = false;
+    this.veil.renderOrder = 200;
+    this.veil.visible = false;
+    this.root.add(this.gore.points, this.galaxy.group, this.transit.mesh, this.cinema.group, this.chapterCinema.group, this.veil);
 
     const xr = this.world.renderer.xr;
     const onSessionStart = () => {
@@ -1303,6 +1314,8 @@ export class CombatSystem extends createSystem({
       this.autoSeated = false;
       this.requestFrameRate(xr.getSession());
       this.sfx.unlock();
+      this.veilT = 0;
+      this.veil.visible = true;
       this.hudPlaced = false;
       if (this.panel.visible) this.replaceMenuAt = this.elapsed + 0.6;
       this.music.play(this.run.phase === 'title' ? 'menu' : this.run.stage.world.id);
@@ -2296,6 +2309,7 @@ export class CombatSystem extends createSystem({
     this.coach.update(realDt, this.head, this.forward);
     this.erasure.update(realDt, time, this.head, this.eraseTarget, this.veilTarget);
     this.updateMovie(realDt);
+    this.updateVeil(realDt);
     if (this.quality.auras) this.updateAuras(realDt, time);
     this.updateSorcerer(realDt, time);
     // The suit: forearm sleeves and the chest emblem, while a stage runs.
@@ -2485,11 +2499,16 @@ export class CombatSystem extends createSystem({
     const handB = this.hands[1].tracked;
     // Pinches are tracked all the time so one already held when a menu opens is not a click.
     let pinched = false;
+    let holding = false;
     for (let i = 0; i < 2; i += 1) {
-      const distance = this.hands[i].tracked ? this.pinchPoint(i, this.gazePoint) : null;
+      // A closed fist also brings the thumb and index tips together: it must not count as a pinch.
+      const distance = this.hands[i].tracked && isPinchPose(this.hands[i].joints) ? this.pinchPoint(i, this.gazePoint) : null;
       if (this.pinchEdges[i].update(distance, this.elapsed)) pinched = true;
+      if (this.pinchEdges[i].held) holding = true;
     }
-    if (pinched) this.skipMovie(1.5);
+    // A movie is skipped by holding a pinch for a moment, never by a passing hand shape.
+    this.skipHold = holding && this.movieActive ? this.skipHold + dt : 0;
+    if (this.skipHold > 0.6) this.skipMovie(1.5);
     const menu = this.panel.visible || this.galaxy.visible;
     const active = menu && (handA || handB) && !this.flat && !this.pad && this.tx == null;
     this.gazeArm = active ? this.gazeArm + dt : 0;
@@ -2666,7 +2685,8 @@ export class CombatSystem extends createSystem({
   /** A tap in the menus: a panel button, or a planet on the galaxy map. */
   private screenClick(): void {
     this.sfx.unlock();
-    if (this.skipMovie(1)) return;
+    // A tap during a movie does nothing (a stray touch must not cut it short): use SKIP, Esc, Space or Enter.
+    if (this.movieActive) return;
     if (!this.ready) return;
     this.world.camera.getWorldPosition(this.head);
     this.screenAim(this.v3);
@@ -3000,6 +3020,15 @@ export class CombatSystem extends createSystem({
       this.cinemaErase = 0;
       done();
     });
+  }
+
+  /** The session-start fade: black for a moment, then clear. */
+  private updateVeil(dt: number): void {
+    if (!this.veil.visible) return;
+    this.veilT += dt;
+    this.veil.position.copy(this.head);
+    this.veil.material.opacity = Math.min(1, Math.max(0, 1 - (this.veilT - 0.35) / 0.8));
+    if (this.veilT > 1.3) this.veil.visible = false;
   }
 
   private updateMovie(dt: number): void {

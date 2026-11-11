@@ -238,8 +238,32 @@ export function setupLanding(world: World): void {
   };
   const xr = world.renderer.xr;
 
-  vr.addEventListener('click', () => world.launchXR({ sessionMode: SessionMode.ImmersiveVR }));
-  mr.addEventListener('click', () => world.launchXR({ sessionMode: SessionMode.ImmersiveAR }));
+  /**
+   * Starts a session. A headset shows no console, so if the browser refuses (or
+   * nothing happens) the reason is written on the page.
+   */
+  const launch = (mode: SessionMode): void => {
+    const label = mode === SessionMode.ImmersiveVR ? 'VR' : 'MR';
+    note.textContent = `Starting ${label}...`;
+    const system = navigator.xr as unknown as { requestSession: (mode: string, init?: unknown) => Promise<unknown> } | undefined;
+    const original = system?.requestSession;
+    if (system != null && original != null) {
+      system.requestSession = (requested, init) =>
+        original.call(system, requested, init).catch((error: { name?: string; message?: string }) => {
+          note.textContent = `Could not start ${label}: ${error?.name ?? 'error'}${error?.message ? ` - ${error.message}` : ''}`;
+          throw error;
+        });
+    }
+    // Full VR has no room to scan: ask for hands and nothing else.
+    if (mode === SessionMode.ImmersiveVR) world.launchXR({ sessionMode: mode, features: { planeDetection: false, meshDetection: false, anchors: false, hitTest: false } });
+    else world.launchXR({ sessionMode: mode });
+    window.setTimeout(() => {
+      if (system != null && original != null) system.requestSession = original;
+      if (!world.session && !xr.isPresenting && note.textContent?.startsWith('Starting')) note.textContent = `${label} did not start. Try again, or reload the page.`;
+    }, 6000);
+  };
+  vr.addEventListener('click', () => launch(SessionMode.ImmersiveVR));
+  mr.addEventListener('click', () => launch(SessionMode.ImmersiveAR));
   play.addEventListener('click', () => {
     shell.unlockAudio?.();
     requestMotion();

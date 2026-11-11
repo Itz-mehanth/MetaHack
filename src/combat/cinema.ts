@@ -792,7 +792,7 @@ export class Cinema {
     this.caption.set(text, color, alpha * skipFade);
     at(this.caption.sprite, -0.3);
     const hintAlpha = this.flat ? 0 : ramp(t, 2.5, 3.5) * (1 - ramp(t, MOVIE_SECONDS - 3, MOVIE_SECONDS - 2)) * 0.8 * skipFade;
-    this.hint.set('PINCH TO SKIP', '#E9FCFF', hintAlpha, true);
+    this.hint.set('HOLD A PINCH TO SKIP', '#E9FCFF', hintAlpha, true);
     at(this.hint.sprite, -0.52);
     void head;
   }
