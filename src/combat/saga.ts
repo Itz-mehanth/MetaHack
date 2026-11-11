@@ -3,7 +3,7 @@ import { hasUnlock, type Profile, type Stage, type World, WORLDS } from './progr
 import type { LevelStory, Line } from './story.js';
 
 /**
- * The overarching saga: OBLIVAX, the Unmaker, has pulled the nine Anchors
+ * The overarching saga: OBLIVAX, the Unmaker, has pulled the ten Anchors
  * that hold reality in place; Warlord VEX is his herald. A guided prologue
  * (three lent heroes, then a fight you cannot win) opens the game, every
  * chapter boss returns one Anchor, and with enough Anchors the finale,
@@ -125,8 +125,8 @@ export const SAGA_STORY: Readonly<Record<'prologue' | 'finale', LevelStory>> = {
 /** Played when OBLIVAX stops the prologue fight and erases the room. */
 export const PROLOGUE_ERASURE: readonly Line[] = [
   { speaker: 'oblivax', text: 'Brave. Pointless. Watch your world come undone.' },
-  { speaker: 'echo', text: 'He is erasing the room around you! He has pulled the nine Anchors that hold reality together.' },
-  { speaker: 'vex', text: 'The Legion holds every Anchor now, master. The heroes are scattered across nine regions.' },
+  { speaker: 'echo', text: 'He is erasing the room around you! He has pulled the ten Anchors that hold reality together.' },
+  { speaker: 'vex', text: 'The Legion holds every Anchor now, master. The heroes are scattered across ten regions.' },
   { speaker: 'echo', text: 'Then we take them back, one region at a time. Win back three Anchors and we can face him together.' },
 ];
 

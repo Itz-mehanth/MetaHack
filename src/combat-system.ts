@@ -77,6 +77,9 @@ import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
 import { PinchEdge } from './combat/gaze.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
+import { Cinema, type CinemaHooks } from './combat/cinema.js';
+import { MOVIE_SEEN } from './combat/cinema-script.js';
+import { callId, erasureId, introId, outroId, sagaIntroId, sagaOutroId, tauntId } from './combat/voice.js';
 import { buildSquad, nextInSquad, SWAP_COOLDOWN, SwapGesture, TAG_BUFF_SECONDS, TAG_DAMAGE } from './combat/squad.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
 import { SquadBar } from './combat/squadbar.js';
@@ -716,6 +719,13 @@ export class CombatSystem extends createSystem({
     shown: number;
     glitch: number;
     blink: number;
+    /** Voice-over file id of each line (null: silent). */
+    voice: readonly (string | null)[];
+    /** The line's voice still to start (waits for its download), and how long we have waited. */
+    pending: string | null;
+    wait: number;
+    /** Typewriter speed, characters a second (follows the voice once it is known). */
+    speed: number;
   } | null = null;
   private pendingReward: Parameters<GameMenus['showResults']>[0] | null = null;
   private comic!: Onomatopoeia;
@@ -862,6 +872,14 @@ export class CombatSystem extends createSystem({
   /** Gaze and pinch menus: the reticle, the eye ray (when the headset has one) and each hand's pinch. */
   private gazeReticle!: Mesh;
   private readonly pinchEdges = [new PinchEdge(), new PinchEdge()];
+  /** The opening movie (cinema.ts) and this system's side of it. */
+  private readonly cinema = new Cinema();
+  private cinemaErase = 0;
+  private movieOffered = false;
+  private readonly moviePalms = [new Vector3(), new Vector3()];
+  private readonly movieTracked = [false, false];
+  /** Opened with a debug link: no automatic movie. */
+  private readonly deepLinked = ['autostart', 'menu', 'movie'].some((key) => new URLSearchParams(window.location.search).has(key));
   private readonly eyeOrigin = new Vector3();
   private readonly eyeDir = new Vector3();
   private eyeValid = false;
@@ -1039,6 +1057,7 @@ export class CombatSystem extends createSystem({
       txSkip: () => this.endTransmission(),
       endless: (hero, daily) => this.startEndless(hero, daily),
       story: () => this.startStage('arc', PROLOGUE),
+      movie: () => this.playMovie(() => this.showMenu('howto')),
       finale: () => this.startStage('arc', FINALE),
       exit: () => {
         // Leave the headset session (MR or VR); on a screen, back to the home page.
@@ -1261,7 +1280,7 @@ export class CombatSystem extends createSystem({
       this.root.add(rock, marker);
       this.meteors.push({ rock, marker, markerMaterial, target: new Vector3(), t: 0, state: 'off' as const });
     }
-    this.root.add(this.gore.points, this.galaxy.group, this.transit.mesh);
+    this.root.add(this.gore.points, this.galaxy.group, this.transit.mesh, this.cinema.group);
 
     const xr = this.world.renderer.xr;
     const onSessionStart = () => {
@@ -1288,9 +1307,14 @@ export class CombatSystem extends createSystem({
     shell.unlockAudio = () => this.sfx.unlock();
     const unlock = () => this.sfx.unlock();
     canvas.addEventListener('pointerdown', unlock);
+    const onKey = (event: KeyboardEvent) => {
+      if (this.cinema.active && this.cinema.t > 1 && (event.key === 'Escape' || event.key === ' ' || event.key === 'Enter')) this.cinema.skip();
+    };
+    window.addEventListener('keydown', onKey);
     this.cleanupFuncs.push(
       () => xr.removeEventListener('sessionstart', onSessionStart),
       () => canvas.removeEventListener('pointerdown', unlock),
+      () => window.removeEventListener('keydown', onKey),
       () => this.screen.dispose(),
     );
 
@@ -2052,6 +2076,13 @@ export class CombatSystem extends createSystem({
       }
     };
     (window as unknown as { __surgeHurt: (n: number) => void }).__surgeHurt = (n: number) => this.run.damage(n);
+    // Opening movie: ?movie=1 plays it at once; __surgeMovie(t) jumps the clock (for screenshots).
+    (window as unknown as { __surgeMovie: (t?: number) => number }).__surgeMovie = (t) => {
+      if (!this.cinema.active) this.playMovie(() => this.showMenu('main'));
+      if (t != null) this.cinema.seek(t);
+      return this.cinema.t;
+    };
+    if (new URLSearchParams(window.location.search).has('movie')) this.playMovie(() => this.showMenu('main'));
     // Sound audition page (?sounds=1): plays one part of one weapon's sound design.
     (window as unknown as { __surgeSfx: (id: string, part: WeaponPart, power: number) => void }).__surgeSfx = (id, part, power) => {
       this.sfx.unlock();
@@ -2231,6 +2262,7 @@ export class CombatSystem extends createSystem({
     if (!this.paused) this.updateTwist(dt, time);
     this.coach.update(realDt, this.head, this.forward);
     this.erasure.update(realDt, time, this.head, this.eraseTarget, this.veilTarget);
+    this.updateMovie(realDt);
     if (this.quality.auras) this.updateAuras(realDt, time);
     this.updateSorcerer(realDt, time);
     // The suit: forearm sleeves and the chest emblem, while a stage runs.
@@ -2424,6 +2456,7 @@ export class CombatSystem extends createSystem({
       const distance = this.hands[i].tracked ? this.pinchPoint(i, this.gazePoint) : null;
       if (this.pinchEdges[i].update(distance, this.elapsed)) pinched = true;
     }
+    if (pinched && this.cinema.active && this.cinema.t > 1.5) this.cinema.skip();
     const menu = this.panel.visible || this.galaxy.visible;
     const active = menu && (handA || handB) && !this.flat && !this.pad && this.tx == null;
     this.gazeArm = active ? this.gazeArm + dt : 0;
@@ -2462,6 +2495,7 @@ export class CombatSystem extends createSystem({
   private updatePad(): void {
     if (!this.pad) return;
     const pad = this.padInput;
+    if ((pad.pressed || pad.pausePressed) && this.cinema.active && this.cinema.t > 1.2) this.cinema.skip();
     if (pad.pausePressed) this.wristPressed();
     // In menus (and while paused) a trigger press clicks what the ray points at.
     if (pad.pressed && !this.pilot.active) {
@@ -2588,12 +2622,21 @@ export class CombatSystem extends createSystem({
       intent.special = false;
       this.screen.setSwap(false);
     }
+    if (page && this.ready && !this.movieOffered && !this.attract && !this.deepLinked && this.run.phase === 'title' && this.tx == null && !hasUnlock(this.profile, MOVIE_SEEN) && !hasUnlock(this.profile, PROLOGUE_DONE)) {
+      // A first visit on a screen: the opening movie before the menus.
+      this.movieOffered = true;
+      this.playMovie(() => this.showMenu('main'));
+    }
     if (page && this.screen.clicked && !playing) this.screenClick();
   }
 
   /** A tap in the menus: a panel button, or a planet on the galaxy map. */
   private screenClick(): void {
     this.sfx.unlock();
+    if (this.cinema.active) {
+      if (this.cinema.t > 1) this.cinema.skip();
+      return;
+    }
     if (!this.ready) return;
     this.world.camera.getWorldPosition(this.head);
     this.screenAim(this.v3);
@@ -2864,6 +2907,47 @@ export class CombatSystem extends createSystem({
     return upgradeLevel(this.profile, id);
   }
 
+  private readonly cinemaHooks: CinemaHooks = {
+    erase: (level) => {
+      this.cinemaErase = level;
+    },
+    rumble: (strength) => this.haptics.pulse(this.world.renderer.xr.getSession(), strength, 220),
+    intensity: (level) => this.music.setIntensity(level),
+  };
+
+  /** Plays the opening movie around the player, then runs `done` (also when it is skipped). */
+  private playMovie(done: () => void): void {
+    if (this.cinema.active) return;
+    this.sfx.unlock();
+    this.autoPrologueAt = -1;
+    if (!hasUnlock(this.profile, MOVIE_SEEN)) {
+      this.profile.unlocks.push(MOVIE_SEEN);
+      saveProfile(this.profile);
+    }
+    this.panel.hide();
+    this.syncCarousel();
+    this.syncMap();
+    this.syncArmory();
+    this.syncGalaxy();
+    this.erasure.setLook(WORLD_LOOKS.oblivion);
+    this.world.camera.getWorldPosition(this.head);
+    this.world.camera.getWorldDirection(this.forward);
+    this.music.play('oblivion');
+    this.cinema.start(this.sfx, this.cinemaHooks, this.head, this.forward, this.flat, () => {
+      this.cinemaErase = 0;
+      done();
+    });
+  }
+
+  private updateMovie(dt: number): void {
+    if (!this.cinema.active) return;
+    for (let i = 0; i < 2; i += 1) {
+      this.movieTracked[i] = this.hands[i].tracked;
+      if (this.movieTracked[i]) this.moviePalms[i].copy(this.hands[i].gauntlet.palmPoint);
+    }
+    this.cinema.update(dt, this.head, this.moviePalms, this.movieTracked, Math.atan2(-this.forward.x, -this.forward.z));
+  }
+
   /** Starts an endless run in the hero's home world, or today's daily challenge. */
   private startEndless(hero: HeroId, daily: boolean): void {
     const day = dayKey(new Date());
@@ -2902,7 +2986,14 @@ export class CombatSystem extends createSystem({
       const ready = this.prepareCreatures(stage.world.id);
       this.travel(stage, () => void ready.then(() => this.launchStage(hero, stage)));
     };
-    if (intro.length > 0) this.beginTransmission(intro, go);
+    const ids: (string | null)[] = [];
+    if (saga) intro.forEach((_, i) => ids.push(sagaIntroId(this.script === 'finale' ? 'finale' : 'prologue', i)));
+    else if (!stage.endless) {
+      // ECHO's call for a chapter's first level comes before the level's own lines.
+      const extra = intro.length - (this.story?.intro.length ?? 0);
+      intro.forEach((_, i) => ids.push(i < extra ? callId(hero) : introId(stage.world.id, stage.number, i - extra)));
+    }
+    if (intro.length > 0) this.beginTransmission(intro, go, ids);
     else go();
   }
 
@@ -2953,6 +3044,7 @@ export class CombatSystem extends createSystem({
     });
     this.lastPhase = 'intro';
     this.sfx.wave();
+    if (this.story && !stage.endless && !isSagaStage(stage)) for (let i = 0; i < this.story.taunts.length; i += 1) void this.sfx.loadVoice(tauntId(stage.world.id, stage.number, i));
     this.buffRapid = 0;
     this.buffPower = 0;
     this.overdrive = 0;
@@ -3219,12 +3311,13 @@ export class CombatSystem extends createSystem({
   // ---------------------------------------------------------------- story
 
   /** Shows `lines` as a skippable transmission, then calls `done`. */
-  private beginTransmission(lines: readonly Line[], done: () => void): void {
+  private beginTransmission(lines: readonly Line[], done: () => void, voice: readonly (string | null)[] = []): void {
     if (lines.length === 0) {
       done();
       return;
     }
-    this.tx = { lines, index: -1, timer: 0, done, full: '', typed: 0, shown: -1, glitch: 0, blink: 0 };
+    this.tx = { lines, index: -1, timer: 0, done, full: '', typed: 0, shown: -1, glitch: 0, blink: 0, voice, pending: null, wait: 0, speed: 32 };
+    for (const id of voice) if (id) void this.sfx.loadVoice(id);
     this.panel.hide();
     this.advanceTransmission();
   }
@@ -3232,6 +3325,7 @@ export class CombatSystem extends createSystem({
   private advanceTransmission(): void {
     const tx = this.tx;
     if (tx == null) return;
+    this.sfx.stopVoice();
     tx.index += 1;
     if (tx.index >= tx.lines.length) {
       this.endTransmission();
@@ -3253,6 +3347,9 @@ export class CombatSystem extends createSystem({
     tx.shown = -1;
     tx.glitch = 1;
     tx.timer = 1.4 + tx.full.length * 0.035;
+    tx.pending = tx.voice[tx.index] ?? null;
+    tx.wait = 0;
+    tx.speed = 32;
     this.menus.transmission = { speaker: line.speaker, name, title, color, text: '', index: tx.index, total: tx.lines.length, glitch: 1 };
     this.sfx.radio();
     if (this.menus.screen === 'transmission' && this.panel.visible) this.panel.setContent(this.menus.content());
@@ -3265,6 +3362,7 @@ export class CombatSystem extends createSystem({
    * panel on screen. With no transmission running, recovers the menus.
    */
   private endTransmission(): void {
+    this.sfx.stopVoice();
     const tx = this.tx;
     this.tx = null;
     this.panel.hide();
@@ -3329,10 +3427,20 @@ export class CombatSystem extends createSystem({
     if (this.paused) return;
     const tx = this.tx;
     tx.glitch = Math.max(0, tx.glitch - dt * 2.5);
+    // The voice starts as soon as its file is decoded (a second at most); the text then keeps pace with it.
+    if (tx.pending != null) {
+      tx.wait += dt;
+      const length = this.sfx.speak(tx.pending);
+      if (length > 0) {
+        tx.pending = null;
+        tx.speed = Math.min(40, Math.max(12, tx.full.length / Math.max(1.5, length * 0.8)));
+        tx.timer = Math.max(tx.timer, length - tx.full.length / tx.speed - 0.15);
+      } else if (tx.wait > 1.2) tx.pending = null;
+    }
     if (tx.typed < tx.full.length) {
       // Typewriter: about 32 characters a second, with soft key clicks.
       const before = Math.floor(tx.typed);
-      tx.typed = Math.min(tx.full.length, tx.typed + dt * 32);
+      tx.typed = Math.min(tx.full.length, tx.typed + dt * tx.speed);
       const after = Math.floor(tx.typed);
       if (after - tx.shown >= 2 || after >= tx.full.length) {
         tx.shown = after;
@@ -3360,6 +3468,14 @@ export class CombatSystem extends createSystem({
     this.tauntWave = run.wave;
     const taunts = this.story.taunts;
     this.taunt = taunts[(run.wave - 1) % taunts.length];
+    this.speakTaunt((run.wave - 1) % taunts.length);
+  }
+
+  /** The villain's shout `index` of this level, spoken (campaign levels only). */
+  private speakTaunt(index: number): void {
+    const stage = this.run.stage;
+    if (this.story == null || stage.endless || isSagaStage(stage)) return;
+    this.sfx.speak(tauntId(stage.world.id, stage.number, index));
   }
 
   /** Shows the hero carousel only on the hero screen, in sync with its focus. */
@@ -3610,7 +3726,7 @@ export class CombatSystem extends createSystem({
       if (run.stage.number === 3 && chapter && hasUnlock(this.profile, PROLOGUE_DONE)) {
         outro = [...outro, anchorLine(chapter.region, anchorsRecovered(this.profile).length)];
       }
-      this.beginTransmission(outro, () => this.presentResults(info));
+      this.beginTransmission(outro, () => this.presentResults(info), outro.map((_, i) => (i < this.story!.outro.length ? outroId(run.stage.world.id, run.stage.number, i) : null)));
       return;
     }
     this.presentResults(info);
@@ -6409,7 +6525,12 @@ export class CombatSystem extends createSystem({
   private updateScript(dt: number, time: number): void {
     if (this.autoPrologueAt > 0 && this.elapsed > this.autoPrologueAt) {
       this.autoPrologueAt = -1;
-      if (this.run.phase === 'title' && this.tx == null && !hasUnlock(this.profile, PROLOGUE_DONE)) this.startStage('arc', PROLOGUE);
+      if (this.run.phase === 'title' && this.tx == null && !hasUnlock(this.profile, PROLOGUE_DONE)) {
+        // First time in: the opening movie, then the guided prologue.
+        const prologue = () => this.startStage('arc', PROLOGUE);
+        if (hasUnlock(this.profile, MOVIE_SEEN)) prologue();
+        else this.playMovie(prologue);
+      }
     }
     const running = this.run.phase !== 'title' && !this.panel.visible && !this.paused;
     if (!running) {
@@ -6441,6 +6562,7 @@ export class CombatSystem extends createSystem({
     }
     if (this.script === 'prologue') this.updatePrologue(dt);
     else if (this.script === 'finale') this.updateFinale(dt, time);
+    else if (this.cinema.active) this.eraseTarget = this.cinemaErase;
     else if (this.run.phase === 'title') this.eraseTarget = 0;
     else this.eraseTarget = this.isPassthrough() ? this.riftLevel * 0.3 : 1;
   }
@@ -6480,7 +6602,7 @@ export class CombatSystem extends createSystem({
       this.erasing += dt;
       if (this.erasing > 3) {
         this.erasing = -10;
-        this.beginTransmission(PROLOGUE_ERASURE, () => this.finishPrologue());
+        this.beginTransmission(PROLOGUE_ERASURE, () => this.finishPrologue(), PROLOGUE_ERASURE.map((_, i) => erasureId(i)));
       }
     }
   }
@@ -6642,7 +6764,7 @@ export class CombatSystem extends createSystem({
       this.endScript();
       this.presentResults(info);
     };
-    if (won && this.story) this.beginTransmission(this.story.outro, done);
+    if (won && this.story) this.beginTransmission(this.story.outro, done, this.story.outro.map((_, i) => sagaOutroId('finale', i)));
     else done();
   }
 
@@ -7887,6 +8009,7 @@ export class CombatSystem extends createSystem({
       const taunts = this.story?.taunts ?? [];
       const taunt = taunts[(phase - 1) % Math.max(1, taunts.length)] ?? 'ENOUGH!';
       this.taunt = taunt;
+      if (taunts.length > 0) this.speakTaunt((phase - 1) % taunts.length);
       this.comic.pop('RAAAGH!', this.v2.copy(object.position).setY(object.position.y + 0.9), ENEMY_COLOR.boss, 0.8);
       boss.creature?.play('attack', 0.7, true, 0.1);
       this.flashes.spawn(object.position, ENEMY_COLOR.boss, 0.5, 2.5, 0.6);

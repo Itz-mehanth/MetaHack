@@ -1,5 +1,8 @@
 import { playWeapon, type WeaponPart } from './weaponsfx.js';
 
+/** Voice-over level relative to effects (the voice bus skips the 0.5 master trim). */
+const VOICE_GAIN = 1.5;
+
 /**
  * Web Audio sound design, synthesised live so no audio assets download.
  * Every effect is layered: a transient (noise click or crack), a body (a
@@ -17,6 +20,11 @@ export class Sfx {
   private sfxVolume = 0.8;
   private musicVolume = 0.6;
   private readonly listeners: Array<(ctx: AudioContext) => void> = [];
+  /** Voice-over bus, decoded lines and the line speaking now. */
+  private voiceOut: GainNode | null = null;
+  private readonly voiceLoads = new Map<string, Promise<AudioBuffer | null>>();
+  private readonly voiceBuffers = new Map<string, AudioBuffer>();
+  private voiceSource: AudioBufferSourceNode | null = null;
   /** While set, effects play from this positional node instead of straight to the master bus. */
   private bus: AudioNode | null = null;
   private readonly panners: PannerNode[] = [];
@@ -32,6 +40,9 @@ export class Sfx {
       limiter.threshold.value = -10;
       limiter.ratio.value = 8;
       limiter.connect(ctx.destination);
+      this.voiceOut = ctx.createGain();
+      this.voiceOut.gain.value = VOICE_GAIN * this.sfxVolume;
+      this.voiceOut.connect(limiter);
       this.master = ctx.createGain();
       this.master.gain.value = 0.5 * this.sfxVolume;
       this.master.connect(limiter);
@@ -75,6 +86,87 @@ export class Sfx {
     this.musicVolume = music;
     if (this.master) this.master.gain.value = 0.5 * sfx;
     if (this.musicOut) this.musicOut.gain.value = 0.35 * music;
+    if (this.voiceOut) this.voiceOut.gain.value = VOICE_GAIN * sfx;
+  }
+
+  // ---------------------------------------------------------------- voice-over
+
+  /**
+   * Starts fetching and decoding voice line `id` (public/vo/<id>.mp3). Safe to
+   * call early and often: it waits for the audio context, caches, and resolves
+   * null if the file is missing (the game then simply stays silent for it).
+   */
+  loadVoice(id: string): Promise<AudioBuffer | null> {
+    let pending = this.voiceLoads.get(id);
+    if (pending != null) return pending;
+    pending = new Promise<AudioBuffer | null>((resolve) => {
+      this.onReady((ctx) => {
+        fetch(`${import.meta.env.BASE_URL}vo/${id}.mp3`)
+          .then((response) => (response.ok ? response.arrayBuffer() : null))
+          .then((data) => (data == null ? null : ctx.decodeAudioData(data)))
+          .then((buffer) => {
+            if (buffer != null) this.voiceBuffers.set(id, buffer);
+            resolve(buffer);
+          })
+          .catch(() => resolve(null));
+      });
+    });
+    this.voiceLoads.set(id, pending);
+    return pending;
+  }
+
+  /** Seconds of voice line `id` once decoded, else 0. */
+  voiceLength(id: string): number {
+    return this.voiceBuffers.get(id)?.duration ?? 0;
+  }
+
+  /**
+   * Plays voice line `id` if it is decoded (starting the load otherwise) and
+   * returns its length in seconds, or 0 if it cannot play yet. The music dips
+   * under the voice. Only one line speaks at a time: a new one cuts the old.
+   */
+  speak(id: string, delay = 0): number {
+    const ctx = this.ctx;
+    const buffer = this.voiceBuffers.get(id);
+    if (ctx == null || this.voiceOut == null || buffer == null) {
+      void this.loadVoice(id);
+      return 0;
+    }
+    this.stopVoice();
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(this.voiceOut);
+    const t = ctx.currentTime + delay;
+    source.start(t);
+    this.voiceSource = source;
+    this.duck(true, t);
+    source.onended = () => {
+      if (this.voiceSource === source) {
+        this.voiceSource = null;
+        this.duck(false, ctx.currentTime);
+      }
+    };
+    return buffer.duration;
+  }
+
+  stopVoice(): void {
+    const source = this.voiceSource;
+    this.voiceSource = null;
+    if (source == null) return;
+    source.onended = null;
+    try {
+      source.stop();
+    } catch {
+      // already ended
+    }
+    this.duck(false, this.ctx?.currentTime ?? 0);
+  }
+
+  /** Dips the music while someone speaks. */
+  private duck(on: boolean, at: number): void {
+    if (this.musicOut == null) return;
+    this.musicOut.gain.cancelScheduledValues(at);
+    this.musicOut.gain.setTargetAtTime((on ? 0.5 : 1) * 0.35 * this.musicVolume, at, on ? 0.12 : 0.4);
   }
 
   // ---------------------------------------------------------------- space
@@ -359,6 +451,52 @@ export class Sfx {
     this.tone('sawtooth', 80, 400, 3.9, 0.04);
     this.thump(0.7, 1.2, 120, 4.05);
     this.noiseSweep('lowpass', 3000, 80, 1.4, 0.6, 4.05, 0.6);
+  }
+
+  // ---------------------------------------------------------------- cinema
+
+  /** A huge, slow impact: a sub drop, a rumble and a long metal tail. */
+  boom(size = 1): void {
+    this.thump(0.9 * size, 1.6, 90);
+    this.thump(0.5 * size, 0.7, 150, 0.02);
+    this.noiseSweep('lowpass', 1800, 40, 2.2, 0.55 * size, 0, 0.7);
+    this.metal(70, 2.4, 0.07 * size, 0.8);
+  }
+
+  /** A tension riser: a noise sweep and a climbing saw that build for `seconds`. */
+  riser(seconds: number): void {
+    this.noiseSweep('bandpass', 150, 5000, seconds, 0.35, 0, 0.4, 2.5, seconds * 0.9);
+    this.tone('sawtooth', 55, 440, seconds, 0.08, 0, 0.4);
+    this.hum('square', 110, 880, seconds, 0.04, 9, 0.6, 0, 0.2, seconds * 0.8);
+  }
+
+  /** A low dread drone that swells in. */
+  drone(seconds: number, base = 55): void {
+    this.hum('sawtooth', base, base * 0.98, seconds, 0.12, 0.35, 0.5, 0, 0.8, seconds * 0.4);
+    this.tone('sine', base * 2, base * 2, seconds, 0.05, 0, 0.5);
+  }
+
+  /** The title hit: a boom, a dark brass chord and a bright shimmer. */
+  stinger(): void {
+    this.boom(1.3);
+    for (const f of [196, 247, 294, 392]) this.tone('sawtooth', f, f * 1.01, 2.2, 0.07, 0.02, 0.8);
+    for (const f of [784, 1175, 1568]) this.metal(f, 1.6, 0.03, 0.7);
+    this.noiseSweep('highpass', 2500, 9000, 1.2, 0.3, 0, 0.6, 0.8, 0.05);
+  }
+
+  /** A world cracking: sharp glassy snaps and a falling shatter. */
+  glass(): void {
+    this.noiseSweep('highpass', 6000, 2000, 0.25, 0.5, 0, 0.5);
+    for (let i = 0; i < 9; i += 1) this.metal(1800 + Math.random() * 3000, 0.25, 0.025, 0.5);
+    for (let i = 0; i < 7; i += 1) this.noiseSweep('highpass', 5000, 2500, 0.04, 0.2, 0.05 + Math.random() * 0.6, 0.3);
+    this.thump(0.5, 0.5, 100, 0.03);
+  }
+
+  /** Something enormous passing overhead. */
+  passby(seconds: number): void {
+    this.noiseSweep('lowpass', 300, 1400, seconds * 0.5, 0.35, 0, 0.5, 0.8, seconds * 0.4);
+    this.noiseSweep('lowpass', 1400, 120, seconds * 0.5, 0.35, seconds * 0.5, 0.5);
+    this.hum('sawtooth', 48, 40, seconds, 0.14, 11, 0.4, 0, 0.6, seconds * 0.4);
   }
 
   // ---------------------------------------------------------------- weapons

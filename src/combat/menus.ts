@@ -80,6 +80,8 @@ export interface MenuActions {
   endless(hero: HeroId, daily: boolean): void;
   /** Starts the prologue. */
   story(): void;
+  /** Plays the opening movie. */
+  movie(): void;
   /** Starts the finale, CONVERGENCE. */
   finale(): void;
   /** Leaves the headset session (or returns to the home page on a screen). */
@@ -672,6 +674,7 @@ export class GameMenus {
         BACK,
         { id: 'howto-text', kind: 'text', x: 80, y: 250, w: 1440, h: 500, label: lines, size: 34 },
         { id: 'story', x: 1036, y: 150, w: 180, h: 70, label: 'PROLOGUE', size: 26 },
+        { id: 'movie', x: 1236, y: 150, w: 300, h: 70, label: 'WATCH INTRO', size: 26 },
         {
           id: 'howto-more',
           kind: 'text',
@@ -805,6 +808,9 @@ export class GameMenus {
         return;
       case 'howto':
         this.open('howto');
+        return;
+      case 'movie':
+        this.actions.movie();
         return;
       case 'endless':
       case 'daily':

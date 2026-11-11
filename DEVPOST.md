@@ -19,7 +19,7 @@ Your bare hands become ten heroes. In mixed reality, OBLIVAX is unmaking your re
 ## Inspiration
 Hand tracking is the one input everybody already owns, yet most hand games feel like tech demos. I wanted the
 opposite: a full action game where your hands *are* the superpower, and the room around you is the battlefield.
-So I built a saga: OBLIVAX, the Unmaker, has pulled the eight Anchors that hold reality together, and he starts
+So I built a saga: OBLIVAX, the Unmaker, has pulled the ten Anchors that hold reality together, and he starts
 by erasing your actual room. Every hero you play fights to put it back.
 
 ## What it does

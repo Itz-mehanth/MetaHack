@@ -24,3 +24,7 @@ downsized); no other changes.
 
 The heroes, story, aliens, weapons, music and sound effects are original and
 generated in code for this project.
+
+Voice-over (public/vo/*.mp3): original dialogue spoken by Kokoro-82M, an open text-to-speech
+model (Apache License 2.0, https://huggingface.co/hexgrad/Kokoro-82M), run locally and
+processed with FFmpeg for each character. No recordings of real people.
