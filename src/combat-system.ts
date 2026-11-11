@@ -82,7 +82,7 @@ import { MOVIE_SEEN } from './combat/cinema-script.js';
 import { type BoardEntry, type BoardMode, recordScore, scoreLabel } from './combat/leaderboard.js';
 import { fetchBoard, postScore } from './combat/netboard.js';
 import { callId, erasureId, introId, outroId, sagaIntroId, sagaOutroId, tauntId } from './combat/voice.js';
-import { buildSquad, nextInSquad, SWAP_COOLDOWN, SwapGesture, TAG_BUFF_SECONDS, TAG_DAMAGE } from './combat/squad.js';
+import { buildSquad, nextInSquad, SWAP_COOLDOWN, TAG_BUFF_SECONDS, TAG_DAMAGE } from './combat/squad.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
 import { SquadBar } from './combat/squadbar.js';
 import { BlobShadows } from './combat/shadows.js';
@@ -176,7 +176,7 @@ const TIP_SECONDS = 3.4;
 const MELEE_RANGE = 1.05;
 
 /** How to swap heroes, by input kind. */
-const SWAP_TIP: Tip = { gesture: 'fist', title: 'TAG IN', sub: 'Touch your fists together, then pull them apart to swap to the next hero.' };
+const SWAP_TIP: Tip = { gesture: 'pinch', title: 'TAG IN', sub: 'Pinch a hero portrait on the strip below your view to swap to that hero.' };
 const SWAP_TIP_PAD: Tip = { gesture: 'trigger', title: 'TAG IN', sub: 'Press the thumbstick to swap to the next hero.' };
 const SWAP_TIP_FLAT: Tip = { gesture: 'fist', title: 'TAG IN', sub: 'Press Q or the TAG IN button to swap to the next hero.' };
 
@@ -856,7 +856,9 @@ export class CombatSystem extends createSystem({
   /** Tag team: the mission's squad, the strip showing it, and the swap state. */
   private squad: HeroId[] = [];
   private squadBar!: SquadBar;
-  private readonly swapGesture = new SwapGesture();
+  /** One pinch detector per hand for tagging a hero in from the strip, and where the pinch is. */
+  private readonly swapPinch = [new PinchEdge(), new PinchEdge()];
+  private readonly swapPoint = new Vector3();
   private swapCooldown = 0;
   private tagBuff = 0;
   private squadHintUntil = 0;
@@ -8675,13 +8677,12 @@ export class CombatSystem extends createSystem({
     this.swapCooldown = 0;
     this.tagBuff = 0;
     this.squadHintUntil = this.elapsed + 16;
-    this.swapGesture.update(0, false, 1);
     if (this.squad.length > 1) this.teach([...this.tipQueue, this.pad ? SWAP_TIP_PAD : this.flat ? SWAP_TIP_FLAT : SWAP_TIP]);
     this.syncSquadBar();
   }
 
   private swapHint(): string {
-    return this.pad ? 'THUMBSTICK = TAG IN' : this.flat ? 'Q = TAG IN' : 'FISTS TOGETHER, THEN APART = TAG IN';
+    return this.pad ? 'THUMBSTICK = TAG IN' : this.flat ? 'Q = TAG IN' : 'PINCH A PORTRAIT = TAG IN';
   }
 
   private syncSquadBar(): void {
@@ -8705,18 +8706,27 @@ export class CombatSystem extends createSystem({
       this.syncSquadBar();
     }
     const live = this.powersLive && this.run.phase === 'fighting' && this.script == null && !this.attract;
-    let swap = false;
-    const left = this.hands[0];
-    const right = this.hands[1];
-    if (this.flat) swap = this.screen.takeSwap();
-    else if (this.pad) swap = this.padInput.swapPressed;
-    else swap = this.swapGesture.update(dt, live && left.tracked && right.tracked && isFist(left.joints) && isFist(right.joints), left.gauntlet.palmPoint.distanceTo(right.gauntlet.palmPoint));
-    if (swap && live && this.swapCooldown <= 0) this.tagIn();
+    let target: HeroId | null = null;
+    if (this.flat) {
+      if (this.screen.takeSwap()) target = nextInSquad(this.squad, this.hero);
+    } else if (this.pad) {
+      if (this.padInput.swapPressed) target = nextInSquad(this.squad, this.hero);
+    } else {
+      // Hands: pinch a portrait on the strip to tag that hero in. (A gesture made of fists would
+      // also fire whenever RONIN crosses his blades or TALON crosses his claws.)
+      for (let i = 0; i < 2; i += 1) {
+        const distance = live && this.hands[i].tracked ? this.pinchPoint(i, this.swapPoint) : null;
+        if (!this.swapPinch[i].update(distance, this.elapsed)) continue;
+        const chip = this.squadBar.pickChip(this.swapPoint, 0.07);
+        if (chip >= 0 && this.squad[chip] !== this.hero) target = this.squad[chip];
+      }
+    }
+    if (target != null && live && this.swapCooldown <= 0) this.tagIn(target);
   }
 
   /** Swaps to the next hero in the squad with a shock ring and a few seconds of extra damage. */
-  private tagIn(): void {
-    const next = nextInSquad(this.squad, this.hero);
+  private tagIn(target?: HeroId): void {
+    const next = target ?? nextInSquad(this.squad, this.hero);
     if (next === this.hero) return;
     for (let i = 0; i < 2; i += 1) if (this.hands[i].held) this.releaseHeld(i, false);
     this.swapFx(next);

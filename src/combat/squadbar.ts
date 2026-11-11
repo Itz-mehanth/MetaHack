@@ -1,8 +1,17 @@
-import { CanvasTexture, type Camera, Mesh, MeshBasicMaterial, PlaneGeometry, SRGBColorSpace } from '@iwsdk/core';
+import { CanvasTexture, type Camera, Mesh, MeshBasicMaterial, PlaneGeometry, SRGBColorSpace, Vector3 } from '@iwsdk/core';
 import { drawIcon, iconsReady } from './icons.js';
 
 const W = 512;
 const H = 160;
+
+const PLANE_W = 0.46;
+const PLANE_H = 0.144;
+
+/** Centre of portrait `index` of `count` on the strip, in metres from the strip's middle. */
+export function chipLocal(index: number, count: number): { x: number; y: number } {
+  const px = W / 2 + (index - (count - 1) / 2) * 140;
+  return { x: ((px - W / 2) / W) * PLANE_W, y: (0.5 - 58 / H) * PLANE_H };
+}
 
 export interface SquadChip {
   id: string;
@@ -36,7 +45,7 @@ export class SquadBar {
     this.texture = new CanvasTexture(this.canvas);
     this.texture.colorSpace = SRGBColorSpace;
     this.material = new MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
-    this.mesh = new Mesh(new PlaneGeometry(0.46, 0.144), this.material);
+    this.mesh = new Mesh(new PlaneGeometry(PLANE_W, PLANE_H), this.material);
     this.mesh.name = 'SquadBar';
     this.mesh.position.set(0, -0.34, -0.85);
     this.mesh.renderOrder = 36;
@@ -59,6 +68,25 @@ export class SquadBar {
 
   hide(): void {
     this.mesh.visible = false;
+  }
+
+  private readonly pick = new Vector3();
+
+  /** The portrait within `radius` metres of the world point (a pinching hand), or -1. */
+  pickChip(point: Vector3, radius: number): number {
+    if (!this.mesh.visible) return -1;
+    this.mesh.updateWorldMatrix(true, false);
+    let best = -1;
+    let nearest = radius;
+    for (let i = 0; i < this.chips.length; i += 1) {
+      const at = chipLocal(i, this.chips.length);
+      const d = this.mesh.localToWorld(this.pick.set(at.x, at.y, 0)).distanceTo(point);
+      if (d < nearest) {
+        nearest = d;
+        best = i;
+      }
+    }
+    return best;
   }
 
   /** A swap just landed: pulse the bar. */

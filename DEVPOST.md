@@ -37,7 +37,7 @@ lives in a different hand pose:
 - **VANGUARD** wears an energy shield on the off hand and throws it to ricochet
 - **VESPER**, a sorcerer, casts spells with seven distinct hand gestures
 
-Each mission is fought by a squad of three: swap heroes on the fly by touching your fists together and pulling them apart for a TAG-IN strike and a burst of extra damage. Any hero can also reach out, close a fist on a creature's head, arm or leg, then lift, slam, disarm or trip it.
+Each mission is fought by a squad of three: swap heroes on the fly by pinching a portrait for a TAG-IN strike and a burst of extra damage. Any hero can also reach out, close a fist on a creature's head, arm or leg, then lift, slam, disarm or trip it.
 Enemies are nearly 40 rigged creatures and mechs that walk out of your real walls (found with plane
 detection), wind up telegraphed attacks, dodge, flinch, ragdoll and break into gibs. There are 30 missions across
 10 worlds, shielded multi-phase bosses, a guided prologue, an armory with weapons, upgrades and finishes, a
