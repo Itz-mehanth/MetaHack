@@ -41,14 +41,15 @@ Each mission is fought by a squad of three: swap heroes on the fly by touching y
 Enemies are nearly 40 rigged creatures and mechs that walk out of your real walls (found with plane
 detection), wind up telegraphed attacks, dodge, flinch, ragdoll and break into gibs. There are 30 missions across
 10 worlds, shielded multi-phase bosses, a guided prologue, an armory with weapons, upgrades and finishes, a
-galaxy-map campaign and a convergence finale where every hero joins the last strike. After the story, ENDLESS keeps going with escalating waves and a tougher boss every fifth wave, and a DAILY CHALLENGE rolls a new world and rule every UTC day, with a streak to keep.
+galaxy-map campaign and a convergence finale where every hero joins the last strike. After the story, ENDLESS keeps going with escalating waves and a tougher boss every fifth wave, and a DAILY CHALLENGE rolls a new world and rule every UTC day, with a streak to keep. Every hero has a leaderboard (name entry works with bare hands). A 55-second cinematic opens the game around you, ending with the Unmaker's erasure reaching your actual room, and every story line and villain taunt is voiced.
 
 ## How I built it
 SURGE is a WebXR app built with the Immersive Web SDK (IWSDK), TypeScript, Vite and Three.js. It opens from a
 link on Quest with no install. Hand poses are classified from the 25 WebXR hand joints (fist, open palm,
 pinch, web pose, sigil pose) with tunable thresholds. Plane detection gives the app your walls, floor and
 tables: enemies emerge from real walls, props and a ragdoll solver collide with the room, and a border shows
-where the scanned room ends. All music and sound effects are synthesised in code; heroes, story and VFX are
+where the scanned room ends. All music and sound effects are synthesised in code (each of the 40+ weapons has its own sound design); the voice-over is
+original dialogue rendered offline with an open-source text-to-speech model and per-character effects; heroes, story and VFX are
 original. Creatures come from CC0 packs (credited). Game rules are pure TypeScript with 80+ unit tests, and
 the whole game also runs on phones and desktops through a "puppet hand" layer that feeds the same gesture code.
 
@@ -62,7 +63,7 @@ Ten heroes that feel different in the hand, a story that uses the player's real 
 fully playable end to end without ever touching a controller.
 
 ## What's next
-Tuning gaze-and-pinch on real Meta VR Glasses hardware (menus already use it), a global leaderboard for the daily challenge, and co-op for friends on phones.
+Tuning gaze-and-pinch on real Meta VR Glasses hardware (menus already use it), a shared world leaderboard (the code is in; it needs a database connected), and co-op for friends on phones.
 ```
 
 ### Built with (25 max, 19 used)

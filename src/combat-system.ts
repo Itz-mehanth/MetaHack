@@ -79,6 +79,8 @@ import { PinchEdge } from './combat/gaze.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
 import { Cinema, type CinemaHooks } from './combat/cinema.js';
 import { MOVIE_SEEN } from './combat/cinema-script.js';
+import { type BoardEntry, type BoardMode, recordScore, scoreLabel } from './combat/leaderboard.js';
+import { fetchBoard, postScore } from './combat/netboard.js';
 import { callId, erasureId, introId, outroId, sagaIntroId, sagaOutroId, tauntId } from './combat/voice.js';
 import { buildSquad, nextInSquad, SWAP_COOLDOWN, SwapGesture, TAG_BUFF_SECONDS, TAG_DAMAGE } from './combat/squad.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
@@ -1058,6 +1060,7 @@ export class CombatSystem extends createSystem({
       endless: (hero, daily) => this.startEndless(hero, daily),
       story: () => this.startStage('arc', PROLOGUE),
       movie: () => this.playMovie(() => this.showMenu('howto')),
+      board: (hero) => this.loadNetBoard(hero),
       finale: () => this.startStage('arc', FINALE),
       exit: () => {
         // Leave the headset session (MR or VR); on a screen, back to the home page.
@@ -1309,6 +1312,10 @@ export class CombatSystem extends createSystem({
     canvas.addEventListener('pointerdown', unlock);
     const onKey = (event: KeyboardEvent) => {
       if (this.cinema.active && this.cinema.t > 1 && (event.key === 'Escape' || event.key === ' ' || event.key === 'Enter')) this.cinema.skip();
+      else if (this.panel.visible && this.menus.typeName(event.key)) {
+        event.preventDefault();
+        this.panel.setContent(this.menus.content());
+      }
     };
     window.addEventListener('keydown', onKey);
     this.cleanupFuncs.push(
@@ -2076,6 +2083,9 @@ export class CombatSystem extends createSystem({
       }
     };
     (window as unknown as { __surgeHurt: (n: number) => void }).__surgeHurt = (n: number) => this.run.damage(n);
+    // Leaderboard test hook: __surgeScore(hero, name, score) files a score on this device.
+    (window as unknown as { __surgeScore: (hero: HeroId, name: string, score: number) => number }).__surgeScore = (hero, name, score) =>
+      recordScore(this.profile.board, hero, { name, score, mode: 'endless', label: 'ENDLESS WAVE 7', at: Date.now() });
     // Opening movie: ?movie=1 plays it at once; __surgeMovie(t) jumps the clock (for screenshots).
     (window as unknown as { __surgeMovie: (t?: number) => number }).__surgeMovie = (t) => {
       if (!this.cinema.active) this.playMovie(() => this.showMenu('main'));
@@ -2090,10 +2100,15 @@ export class CombatSystem extends createSystem({
     };
     const params = new URLSearchParams(window.location.search);
     const screen = params.get('menu');
-    if (screen === 'main' || screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings' || screen === 'galaxy') {
+    if (screen === 'main' || screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings' || screen === 'galaxy' || screen === 'board' || screen === 'name') {
       const hero = HEROES.find((h) => h.id === params.get('hero'))?.id;
       if (hero) this.menus.hero = hero;
       if (screen === 'garage') this.menus.handle({ id: 'garage', point: this.v1.set(0, 0, 0) });
+      if (screen === 'board') {
+        this.menus.boardHero = this.menus.hero;
+        this.loadNetBoard(this.menus.hero);
+      }
+      if (screen === 'name') this.menus.beginName(() => this.showMenu('board'));
       this.showMenu(screen);
       return;
     }
@@ -3752,7 +3767,40 @@ export class CombatSystem extends createSystem({
     });
   }
 
+  private nameAsked = false;
+
+  /** Asks the online board for `hero`'s top scores and shows them when they arrive. */
+  private loadNetBoard(hero: HeroId): void {
+    this.menus.boardNet = { hero, state: 'loading', entries: [] };
+    void fetchBoard(hero).then((value) => {
+      this.menus.setNetBoard(hero, value);
+      if (this.menus.screen === 'board' && this.panel.visible) this.panel.setContent(this.menus.content());
+    });
+  }
+
+  /** Files a finished run on its hero's board; returns the place it earned (0: missed the top ten). */
+  private recordBoard(info: Parameters<GameMenus['showResults']>[0]): number {
+    const hero = this.menus.hero;
+    const mode: BoardMode = info.endless ? info.endless.mode : 'campaign';
+    const entry: BoardEntry = { name: this.profile.name || 'PLAYER', score: Math.floor(info.score), mode, label: scoreLabel(mode, info.endless?.waves ?? 0, info.stage.number), at: Date.now() };
+    const rank = recordScore(this.profile.board, hero, entry);
+    saveProfile(this.profile);
+    // The world board keeps one score per name, so only a new personal best is sent.
+    if (rank === 1) void postScore(hero, entry);
+    return rank;
+  }
+
   private presentResults(info: Parameters<GameMenus['showResults']>[0]): void {
+    if (info.score > 0 && !isSagaStage(info.stage)) {
+      // A first score needs a name: type it on the keyboard, then see the results.
+      if (this.profile.name === '' && !this.nameAsked) {
+        this.nameAsked = true;
+        this.menus.beginName(() => this.presentResults(info));
+        this.showMenu('name');
+        return;
+      }
+      info.rank = this.recordBoard(info);
+    }
     if (info.reward.coins > 0) this.sfx.coin();
     if (info.reward.unlocked) this.sfx.victory();
     this.menus.showResults(info);

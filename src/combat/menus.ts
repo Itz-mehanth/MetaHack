@@ -25,9 +25,10 @@ import { chapterFor, type Speaker } from './story.js';
 import { ANCHORS_TO_FINALE, anchorsRecovered, finaleUnlocked, PROLOGUE_DONE } from './saga.js';
 import { TWIST_INFO, twistFor } from './twists.js';
 import { dailyBestToday, dailyChallenge, dayKey, liveStreak } from './endless.js';
+import { type BoardEntry, cleanName, entriesFor, KEY_ROWS, typeKey } from './leaderboard.js';
 import { buyFinish, buyWeapon, equippedWeapon, FINISHES, finishFor, ownsFinish, ownsWeapon, weaponById, weaponsFor, weaponUnlocked } from './arsenal.js';
 
-export type Screen = 'main' | 'galaxy' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results';
+export type Screen = 'main' | 'galaxy' | 'heroes' | 'map' | 'transmission' | 'garage' | 'settings' | 'howto' | 'pause' | 'results' | 'board' | 'name';
 
 /** What the transmission screen shows: one line of dialogue. */
 export interface TransmissionView {
@@ -88,6 +89,8 @@ export interface MenuActions {
   exit(): void;
   /** Asks the headset to scan the room (walls and furniture). */
   scanRoom(): void;
+  /** The leaderboard screen opened on `hero`: fetch the shared board for it. */
+  board(hero: HeroId): void;
 }
 
 export interface ResultInfo {
@@ -101,6 +104,15 @@ export interface ResultInfo {
   hostages: number;
   /** Set for an endless or daily run. */
   endless?: { mode: 'endless' | 'daily'; waves: number; best: number; streak: number; bestStreak: number };
+  /** Place earned on the hero's leaderboard (1 to 10), 0 if the score missed it. */
+  rank?: number;
+}
+
+/** What the shared (online) board holds for a hero. */
+export interface NetView {
+  hero: HeroId;
+  state: 'loading' | 'off' | 'ready';
+  entries: readonly BoardEntry[];
 }
 
 const BACK: Widget = { id: 'back', x: 1236, y: 150, w: 300, h: 70, label: 'BACK', size: 32 };
@@ -144,6 +156,13 @@ export class GameMenus {
   private confirmReset = false;
   private settingsReturn: Screen = 'main';
   private result: ResultInfo | null = null;
+  /** Leaderboard screen: whose board, which board, and what the online board returned. */
+  boardHero: HeroId = 'arc';
+  private boardScope: 'global' | 'local' = 'global';
+  boardNet: NetView | null = null;
+  /** Name keyboard: the name being typed and what to do when it is done. */
+  private nameDraft = '';
+  private nameThen: (() => void) | null = null;
 
   constructor(
     private profile: Profile,
@@ -214,6 +233,10 @@ export class GameMenus {
         return this.pauseScreen(accent);
       case 'results':
         return this.resultsScreen(accent);
+      case 'board':
+        return this.boardScreen(accent);
+      case 'name':
+        return this.nameScreen(accent);
     }
   }
 
@@ -266,6 +289,7 @@ export class GameMenus {
         { id: 'endless', x: 936, y: 630, w: 280, h: 150, label: 'ENDLESS', sub: this.profile.arcade.endlessBest > 0 ? `Best wave ${this.profile.arcade.endlessBest}` : 'A boss every 5 waves', icon: 'skull', size: 40 },
         { id: 'daily', x: 1232, y: 630, w: 304, h: 150, label: 'DAILY', sub: this.dailySub(), icon: 'timer', color: '#FFD23F', size: 40 },
         { id: 'exit', x: 1236, y: 150, w: 300, h: 70, label: this.flat ? 'HOME' : 'EXIT', sub: this.flat ? undefined : 'Back to the site', size: 32, color: '#FF3B5C' },
+        { id: 'board', x: 920, y: 150, w: 300, h: 70, label: 'LEADERBOARD', size: 26 },
         begun
           ? {
               id: 'finale',
@@ -730,7 +754,7 @@ export class GameMenus {
           h: 300,
           align: 'center',
           size: 38,
-          label: `Score ${r.score.toLocaleString('en-US')}   |   Kills ${r.kills}   |   Best combo x${r.bestCombo}\n${r.hostages > 0 ? `Hostages saved ${r.saved}/${r.hostages}   |   ` : ''}+${r.reward.coins} coins${r.reward.newBest ? '   |   NEW BEST!' : ''}${unlockedLine}`,
+          label: `Score ${r.score.toLocaleString('en-US')}   |   Kills ${r.kills}   |   Best combo x${r.bestCombo}\n${r.hostages > 0 ? `Hostages saved ${r.saved}/${r.hostages}   |   ` : ''}+${r.reward.coins} coins${r.reward.newBest ? '   |   NEW BEST!' : ''}${unlockedLine}${this.rankLine(r)}`,
         },
         { id: 'next', x: 64, y: 780, w: 470, h: 140, label: 'NEXT MISSION', disabled: !canNext, selected: canNext, color: accent, icon: 'play' },
         { id: 'retry', x: 565, y: 780, w: 470, h: 140, label: 'RETRY', icon: 'timer' },
@@ -747,6 +771,8 @@ export class GameMenus {
       `+${r.reward.coins} coins${r.reward.newBest ? `   |   NEW ${daily ? "TODAY'S " : ''}BEST!` : `   |   ${daily ? "Today's best" : 'Best'} ${e.best}`}`,
     ];
     if (daily && e.streak > 0) lines.push(`${e.streak} day streak${e.bestStreak > e.streak ? `   |   best ${e.bestStreak}` : ''}   |   Come back tomorrow for a new world`);
+    const placed = this.rankLine(r).trim();
+    if (placed) lines.push(placed);
     return {
       title: r.won ? 'LEGENDARY' : 'RUN OVER',
       subtitle: `${daily ? 'DAILY CHALLENGE' : 'ENDLESS'} - ${r.stage.world.name}`,
@@ -760,6 +786,108 @@ export class GameMenus {
         { id: 'back', x: 836, y: 780, w: 700, h: 140, label: 'MAIN MENU', icon: 'map' },
       ],
     };
+  }
+
+  // ---------------------------------------------------------------- leaderboard
+
+  /** " | LEADERBOARD #3" for a score that made the hero's board. */
+  private rankLine(r: ResultInfo): string {
+    return r.rank != null && r.rank > 0 ? `\nLEADERBOARD #${r.rank}   |   ${this.profile.name || 'PLAYER'}` : '';
+  }
+
+  /** Prepares the name keyboard; `then` runs when the player is done (or cancels). */
+  beginName(then: () => void): void {
+    this.nameDraft = this.profile.name;
+    this.nameThen = then;
+  }
+
+  /**
+   * A key from a real keyboard (screens): returns true if the name screen used it,
+   * so the caller redraws.
+   */
+  typeName(key: string): boolean {
+    if (this.screen !== 'name') return false;
+    if (key === 'Enter') this.finishName();
+    else if (key === 'Backspace') this.nameDraft = typeKey(this.nameDraft, 'DEL');
+    else if (key === ' ') this.nameDraft = typeKey(this.nameDraft, 'SPACE');
+    else if (key.length === 1) this.nameDraft = typeKey(this.nameDraft, key.toUpperCase());
+    else return false;
+    return true;
+  }
+
+  /** Saves the typed name (PLAYER if left empty) and carries on. */
+  private finishName(): void {
+    this.profile.name = cleanName(this.nameDraft) || 'PLAYER';
+    this.actions.changed();
+    const then = this.nameThen;
+    this.nameThen = null;
+    if (then) then();
+    else this.open('board');
+  }
+
+  /** The online board's answer for `hero` (null: unreachable). Ignored if the player has moved on. */
+  setNetBoard(hero: HeroId, value: { enabled: boolean; entries: readonly BoardEntry[] } | null): void {
+    if (hero !== this.boardHero) return;
+    this.boardNet = { hero, state: value != null && value.enabled ? 'ready' : 'off', entries: value?.entries ?? [] };
+  }
+
+  private boardScreen(accent: string): PanelContent {
+    const hero = HEROES.find((h) => h.id === this.boardHero) ?? HEROES[0];
+    const net = this.boardNet != null && this.boardNet.hero === hero.id ? this.boardNet : null;
+    const online = net?.state === 'ready';
+    const world = this.boardScope === 'global' && online;
+    const list = world ? net!.entries : entriesFor(this.profile.board, hero.id);
+    const note = net == null || net.state === 'loading' ? 'Loading the world board...' : net.state === 'off' ? 'The world board is offline: showing this device.' : '';
+    const widgets: Widget[] = [
+      BACK,
+      { id: 'board-prev', x: 64, y: 232, w: 200, h: 80, label: 'PREV', size: 32 },
+      { id: 'board-hero', kind: 'text', x: 280, y: 226, w: 1040, h: 92, label: hero.name, size: 64, align: 'center', color: hero.color },
+      { id: 'board-next', x: 1336, y: 232, w: 200, h: 80, label: 'NEXT', size: 32 },
+    ];
+    if (list.length === 0) {
+      widgets.push({ id: 'board-empty', kind: 'text', x: 80, y: 400, w: 1440, h: 300, align: 'center', size: 40, color: 'rgba(233,252,255,0.8)', label: `No scores yet for ${hero.name}.\nFinish a mission, an endless run or the daily to take #1.` });
+    }
+    list.slice(0, 10).forEach((e, i) => {
+      const mine = e.name === this.profile.name && this.profile.name !== '';
+      widgets.push({
+        id: `board-row:${i}`,
+        kind: 'text',
+        x: 80,
+        y: 326 + i * 52,
+        w: 1440,
+        h: 50,
+        size: 32,
+        align: 'left',
+        color: i === 0 ? '#FFD23F' : mine ? accent : '#FFFFFF',
+        label: `${String(i + 1).padStart(2, ' ')}.   ${e.name}   ${e.label}`,
+        sub: e.score.toLocaleString('en-US'),
+      });
+    });
+    widgets.push(
+      { id: 'board-scope', x: 64, y: 880, w: 700, h: 90, label: world ? 'SHOWING: WORLD BOARD' : 'SHOWING: THIS DEVICE', sub: online ? 'Tap to switch' : undefined, disabled: !online, size: 32 },
+      { id: 'board-name', x: 800, y: 880, w: 736, h: 90, label: `NAME: ${this.profile.name || 'TAP TO SET'}`, size: 34, color: accent },
+    );
+    return { title: 'LEADERBOARD', subtitle: note || (world ? 'Best score per name, from every player' : 'Your best runs on this device'), coins: this.profile.coins, accent, widgets };
+  }
+
+  private nameScreen(accent: string): PanelContent {
+    const widgets: Widget[] = [
+      { id: 'name-cancel', x: 1236, y: 150, w: 300, h: 70, label: 'CANCEL', size: 32 },
+      { id: 'name-draft', kind: 'text', x: 80, y: 235, w: 1440, h: 130, label: `${this.nameDraft}_`, size: 96, align: 'center', color: '#FFD23F' },
+    ];
+    const W = 136;
+    const GAP = 12;
+    const X0 = 66;
+    const Y0 = 392;
+    const H = 108;
+    KEY_ROWS.forEach((row, r) => row.forEach((k, c) => widgets.push({ id: `key:${k}`, x: X0 + c * (W + GAP), y: Y0 + r * (H + GAP), w: W, h: H, label: k, size: 56 })));
+    const y = Y0 + 3 * (H + GAP);
+    widgets.push(
+      { id: 'key:SPACE', x: X0 + 6 * (W + GAP), y, w: W, h: H, label: 'SPACE', size: 28 },
+      { id: 'key:DEL', x: X0 + 7 * (W + GAP), y, w: W, h: H, label: 'DEL', size: 36, color: '#FF3B5C' },
+      { id: 'key:DONE', x: X0 + 8 * (W + GAP), y, w: 2 * W + GAP, h: H, label: 'DONE', size: 52, selected: true, color: accent },
+    );
+    return { title: 'YOUR NAME', subtitle: this.flat ? 'Tap the keys or type, then DONE' : 'Poke the keys, then DONE', coins: this.profile.coins, accent, widgets };
   }
 
   // ---------------------------------------------------------------- events
@@ -811,6 +939,34 @@ export class GameMenus {
         return;
       case 'movie':
         this.actions.movie();
+        return;
+      case 'board':
+        this.boardHero = this.hero;
+        this.boardScope = 'global';
+        this.open('board');
+        this.actions.board(this.boardHero);
+        return;
+      case 'board-prev':
+      case 'board-next': {
+        const i = PLAYABLE.indexOf(this.boardHero);
+        this.boardHero = PLAYABLE[(i + (kind === 'board-next' ? 1 : PLAYABLE.length - 1)) % PLAYABLE.length];
+        this.actions.board(this.boardHero);
+        return;
+      }
+      case 'board-scope':
+        this.boardScope = this.boardScope === 'global' ? 'local' : 'global';
+        return;
+      case 'board-name':
+        this.beginName(() => this.open('board'));
+        this.open('name');
+        return;
+      case 'key':
+        if (arg === 'DONE') this.finishName();
+        else this.nameDraft = typeKey(this.nameDraft, arg);
+        return;
+      case 'name-cancel':
+        this.nameDraft = this.profile.name;
+        this.finishName();
         return;
       case 'endless':
       case 'daily':

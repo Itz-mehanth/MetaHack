@@ -1,4 +1,5 @@
 import type { HeroId } from './heroes.js';
+import { type Board, cleanName, normalizeBoard } from './leaderboard.js';
 import type { EnemyKind, WaveDef } from './missions.js';
 import { chapterFor, levelStory } from './story.js';
 import type { TwistId } from './twists.js';
@@ -294,6 +295,9 @@ export interface Profile {
   finishes: string[];
   finish: Partial<Record<HeroId, string>>;
   arcade: Arcade;
+  /** The name scores are posted under, and each hero's best runs on this device. */
+  name: string;
+  board: Board;
   settings: Settings;
 }
 
@@ -312,6 +316,8 @@ export function defaultProfile(): Profile {
     finishes: [],
     finish: {},
     arcade: { endlessBest: 0, endlessScore: 0, endlessRuns: 0, dailyDay: '', dailyBest: 0, dailyScore: 0, streak: 0, streakDay: '', bestStreak: 0 },
+    name: '',
+    board: {},
     settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false, perfHud: false, seated: 'auto', calm: false },
   };
 }
@@ -335,6 +341,8 @@ export function normalizeProfile(raw: unknown): Profile {
     finishes: Array.isArray(r.finishes) ? [...r.finishes] : [],
     finish: { ...(r.finish ?? {}) },
     arcade: { ...base.arcade, ...(r.arcade ?? {}) },
+    name: cleanName(typeof r.name === 'string' ? r.name : ''),
+    board: normalizeBoard(r.board),
     settings: { ...base.settings, ...(r.settings ?? {}) },
   };
 }

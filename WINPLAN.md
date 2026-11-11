@@ -83,7 +83,7 @@ B. **THE ROOM FIGHTS BACK** (the MR showpiece): meshDetection is already on. Use
    Reality-integrity meter: the Unmaker erases the room, your kills restore it.
 C. **Spatial audio**: HRTF PannerNode pool (16) for enemy growls, wind-ups, shots and deaths; listener
    follows the head. Cheap and a big realism win in MR.
-D. **[DONE 2026-11-10, local only] SURGE endless + DAILY CHALLENGE**: escalating waves, a boss every 5, seeded by UTC date, streak,
+D. **[DONE 2026-11-10; per-hero leaderboards with name entry done 2026-11-11, world board needs the Vercel KV store connected] SURGE endless + DAILY CHALLENGE**: escalating waves, a boss every 5, seeded by UTC date, streak,
    local bests. Optional global leaderboard (Vercel function + free Upstash/KV, ~half a day, needs the
    owner to create the store). Pure wave generator gets unit tests.
 E. **AI Director** (invisible): reads accuracy, damage taken and kill speed to adapt pacing; same signals
@@ -125,3 +125,10 @@ More heroes, more creatures, more worlds, new menus, new story. Depth over bread
 | Gestures fail for other players | Calibration + controller-as-hand + play-tests |
 | 14 days, one dev, slow 7.7 GB machine | Tiers and cut line above; push after every working step |
 | Name clash with "Surge" on the store | Decide in Phase 0 |
+
+## Done 2026-11-11 (user requests)
+- Landing: ENTER MR is the entry; full VR is a small secondary button, and the main one only on headsets without passthrough.
+- Unique sound design for every weapon (`?sounds=1` to audition).
+- Opening movie (55 s, skippable) and voice-over for the movie, all story panels and villain taunts (Kokoro TTS, rendered offline).
+- Per-hero leaderboards with name entry; world board code ready, waiting for a database.
+- Still to do by ear on a Quest: movie pacing, voice levels and voices, weapon sounds, gaze menus, fps.
