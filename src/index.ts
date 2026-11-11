@@ -14,6 +14,7 @@ World.create(
   const touch = window.matchMedia?.('(pointer: coarse)').matches ?? false;
   world.renderer.setPixelRatio(Math.min(window.devicePixelRatio, touch ? 1.5 : 2));
   setupLanding(world);
+  if (new URLSearchParams(window.location.search).has('sounds')) void import('./soundtest.js').then((m) => m.mountSoundTest());
   // If the browser drops the graphics context (rare, but it happens on headsets), say so instead of showing a frozen page.
   world.renderer.domElement.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();

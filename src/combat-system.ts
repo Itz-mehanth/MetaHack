@@ -76,6 +76,7 @@ import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
 import { PinchEdge } from './combat/gaze.js';
+import type { WeaponPart } from './combat/weaponsfx.js';
 import { buildSquad, nextInSquad, SWAP_COOLDOWN, SwapGesture, TAG_BUFF_SECONDS, TAG_DAMAGE } from './combat/squad.js';
 import { PerfHud, type PerfReadout } from './combat/perfhud.js';
 import { SquadBar } from './combat/squadbar.js';
@@ -2051,6 +2052,11 @@ export class CombatSystem extends createSystem({
       }
     };
     (window as unknown as { __surgeHurt: (n: number) => void }).__surgeHurt = (n: number) => this.run.damage(n);
+    // Sound audition page (?sounds=1): plays one part of one weapon's sound design.
+    (window as unknown as { __surgeSfx: (id: string, part: WeaponPart, power: number) => void }).__surgeSfx = (id, part, power) => {
+      this.sfx.unlock();
+      this.sfx.weapon(id, part, power);
+    };
     const params = new URLSearchParams(window.location.search);
     const screen = params.get('menu');
     if (screen === 'main' || screen === 'garage' || screen === 'heroes' || screen === 'map' || screen === 'settings' || screen === 'galaxy') {
@@ -3780,7 +3786,7 @@ export class CombatSystem extends createSystem({
         this.shootDart(this.rc, this.rd, power * 0.7);
       }
     }
-    this.sfx.blast();
+    this.sfx.weapon(this.weaponDef.id);
   }
 
   private shootDart(origin: Vector3, direction: Vector3, power: number): void {
@@ -4426,7 +4432,7 @@ export class CombatSystem extends createSystem({
     // Back-blast out of the rear of the tube.
     this.v2.copy(this.v3).addScaledVector(this.v4, -0.55);
     this.particles.burst(this.v2, DUST, 36, 2.5, 0.6, this.v1);
-    this.sfx.launch();
+    this.sfx.weapon('havoc-launcher');
     this.hitStop = Math.max(this.hitStop, 0.02);
   }
 
@@ -4458,9 +4464,8 @@ export class CombatSystem extends createSystem({
     this.gunKick = type === 'havoc-shotgun' ? 2.2 : type === 'havoc-pistol' ? 1 : 0.35;
     this.flashes.spawn(this.v3, this.weaponColor, 0.05, type === 'havoc-shotgun' ? 0.6 : 0.3, 0.12);
     this.particles.burst(this.v3, this.weaponColor, type === 'havoc-shotgun' ? 20 : 6, 1.2, 0.15, this.v2);
-    if (type === 'havoc-shotgun') this.sfx.shotgun();
-    else if (type === 'havoc-pistol') this.sfx.blast();
-    else if ((this.gunShots += 1) % 2 === 0) this.sfx.rattle();
+    // The minigun and SMG are sounded every other shot: the ear hears a stream, the mixer stays light.
+    if (type === 'havoc-shotgun' || type === 'havoc-pistol' || (this.gunShots += 1) % 2 === 0) this.sfx.weapon(type);
   }
 
   private updateBow(dt: number): void {
@@ -4577,7 +4582,7 @@ export class CombatSystem extends createSystem({
       bolt.object.visible = true;
     }
     this.flashes.spawn(this.bow.riser, this.accent, 0.05, fullDraw ? 0.5 : 0.25, 0.2);
-    this.sfx.twang(power);
+    this.sfx.weapon(this.weaponDef.id, 'fire', power);
   }
 
   // ---------------------------------------------------------------- WEAVER
@@ -4753,7 +4758,7 @@ export class CombatSystem extends createSystem({
     hand.webTime = 0;
     hand.webCooldown = WEB_COOLDOWN * (this.buffRapid > 0 ? 0.5 : 1);
     this.flashes.spawn(this.v3, WHITE, 0.04, 0.25, 0.1);
-    this.sfx.thwip();
+    this.sfx.weapon(this.weaponDef.id);
   }
 
   /** Rips a webbed enemy apart; the blast hurts enemies around it. */
@@ -4993,7 +4998,7 @@ export class CombatSystem extends createSystem({
         if (!this.segmentHits(this.hammerHeadPrev, this.hammerHeadPos, drone.object.position, radius)) continue;
         drone.hammerHitAt = this.elapsed;
         this.v1.copy(drone.object.position);
-        this.sfx.thunderHit();
+        this.sfx.weapon(this.weaponDef.id, 'hit');
         this.flashes.spawn(this.v1, WHITE, 0.1, 0.7, 0.2);
         const hammerType = this.weaponDef.id;
         if (hammerType === 'tempest-inferno') drone.burn = Math.max(drone.burn, 4);
@@ -5169,7 +5174,7 @@ export class CombatSystem extends createSystem({
     this.hammerVelocity.setLength(boosted);
     this.hammerState = 'flying';
     this.hammerTime = 0;
-    this.sfx.crescent();
+    this.sfx.weapon(this.weaponDef.id);
     this.flashes.spawn(this.hammer!.position, VIOLET, 0.1, 0.5, 0.2);
   }
 
@@ -5284,7 +5289,7 @@ export class CombatSystem extends createSystem({
       claws.lengthScale = (1 + 0.12 * this.level('talon-reach')) * (this.weaponDef.id === 'talon-phase' ? 1.35 : 1);
       claws.update(hand.pose, out, dt, this.elapsed);
       hand.slashCooldown -= dt;
-      if (out && !wasOut && claws.extension > 0.5) this.sfx.shing();
+      if (out && !wasOut && claws.extension > 0.5) this.sfx.weapon(this.weaponDef.id, 'draw');
       if (claws.extension < 0.8 || dt <= 0) {
         hand.hasClawPrev = false;
         continue;
@@ -5305,7 +5310,7 @@ export class CombatSystem extends createSystem({
         if (drone.state === 'off' || drone.state === 'emerging' || this.elapsed - drone.bladeHitAt < clawGap) continue;
         if (!this.bladeHits(drone, claws.base, claws.tip, hand.clawPrev)) continue;
         drone.bladeHitAt = this.elapsed;
-        this.sfx.slash();
+        this.sfx.weapon(this.weaponDef.id, 'hit');
         this.v4.subVectors(claws.tip, hand.clawPrev);
         this.v2.crossVectors(this.v4, claws.direction);
         this.markHit('slice', this.hitPoint, this.v4, this.v2);
@@ -6093,7 +6098,7 @@ export class CombatSystem extends createSystem({
       this.markHit('blast', best.object.position, dir, undefined, 0.3);
       this.damageDrone(best, 0.4 * (1 + 0.2 * this.level('arc-power')));
       this.flashes.spawn(this.v3, this.weaponColor, 0.05, 0.25, 0.1);
-      this.sfx.laser();
+      this.sfx.weapon('arc-beam');
     }
   }
 
@@ -6117,7 +6122,7 @@ export class CombatSystem extends createSystem({
       }
     }
     this.flashes.spawn(palm, ORANGE, 0.05, 0.4, 0.2);
-    this.sfx.crescent();
+    this.sfx.weapon('arc-rockets');
   }
 
   /** An explosion: flash, fire and smoke, damage in `radius`. */
@@ -6820,7 +6825,7 @@ export class CombatSystem extends createSystem({
       }
     }
     this.shieldVel.copy(this.v1).multiplyScalar(Math.min(18, Math.max(11, speed * 4)));
-    this.sfx.crescent();
+    this.sfx.weapon(this.weaponDef.id);
   }
 
   private nearestEnemy(from: Vector3, skip: Drone | null, range: number): Drone | null {
@@ -6910,7 +6915,7 @@ export class CombatSystem extends createSystem({
       if (hand.tracked) this.gripPoint(i, this.swordGrip);
       sword.update(hand.pose, this.swordGrip, lit, dt, time);
       if (lit && !was && sword.extension > 0.5) {
-        this.sfx.shing();
+        this.sfx.weapon(this.weaponDef.id, 'draw');
         this.particles.burst(sword.base, this.accent, 16, 1.2, 0.25, this.v2);
       }
       if (sword.extension < 0.9 || dt <= 0) {
@@ -6942,7 +6947,7 @@ export class CombatSystem extends createSystem({
           this.hitStop = Math.max(this.hitStop, 0.05);
           continue;
         }
-        this.sfx.slash();
+        this.sfx.weapon(this.weaponDef.id, 'hit');
         this.particles.burst(this.hitPoint, WHITE, 18, 2.5, 0.25, this.v2);
         this.v4.subVectors(sword.tip, hand.prevTip);
         // The cut: a bright straight streak through the wound.
@@ -6959,7 +6964,7 @@ export class CombatSystem extends createSystem({
       // A whoosh as the blade picks up speed.
       if (sword.speed > 3 && this.swishArmed[i]) {
         this.swishArmed[i] = false;
-        this.sfx.swish();
+        this.sfx.weapon(this.weaponDef.id, 'swing');
       } else if (sword.speed < 1.8) this.swishArmed[i] = true;
       // Weapon tier (and the flame blade): flames lick up the blade.
       const flame = this.weaponDef.id === 'ronin-flame';
@@ -7631,7 +7636,7 @@ export class CombatSystem extends createSystem({
     bolt.object.position.copy(origin);
     if (quiet) return bolt;
     this.flashes.spawn(origin, this.accent, 0.05, 0.25, 0.15);
-    this.sfx.blast();
+    this.sfx.weapon(this.weaponDef.id);
     return bolt;
   }
 

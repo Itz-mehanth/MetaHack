@@ -1,3 +1,5 @@
+import { playWeapon, type WeaponPart } from './weaponsfx.js';
+
 /**
  * Web Audio sound design, synthesised live so no audio assets download.
  * Every effect is layered: a transient (noise click or crack), a body (a
@@ -146,7 +148,7 @@ export class Sfx {
   }
 
   /** A pitched sweep from `from` to `to` Hz. */
-  private tone(type: OscillatorType, from: number, to: number, duration: number, gain: number, delay = 0, reverb = 0): void {
+  tone(type: OscillatorType, from: number, to: number, duration: number, gain: number, delay = 0, reverb = 0): void {
     if (this.ctx == null || this.master == null) return;
     const t = this.ctx.currentTime + delay;
     const osc = this.ctx.createOscillator();
@@ -163,7 +165,7 @@ export class Sfx {
   }
 
   /** Filtered noise: cutoff from `from` to `to` Hz over `duration`. */
-  private noiseSweep(type: BiquadFilterType, from: number, to: number, duration: number, gain: number, delay = 0, reverb = 0, q = 0.8, attack = 0): void {
+  noiseSweep(type: BiquadFilterType, from: number, to: number, duration: number, gain: number, delay = 0, reverb = 0, q = 0.8, attack = 0): void {
     if (this.ctx == null || this.master == null || this.noise == null) return;
     const t = this.ctx.currentTime + delay;
     const src = this.ctx.createBufferSource();
@@ -187,15 +189,100 @@ export class Sfx {
   }
 
   /** Inharmonic partials of struck metal. */
-  private metal(base: number, duration: number, gain: number, reverb = 0.3): void {
+  metal(base: number, duration: number, gain: number, reverb = 0.3): void {
     for (const [ratio, level] of [[1, 1], [2.76, 0.6], [5.4, 0.35], [8.93, 0.2]] as const) {
       this.tone('sine', base * ratio, base * ratio * 0.995, duration * (1.2 - ratio * 0.08), gain * level, 0, reverb);
     }
   }
 
   /** A deep sub-bass thump for weight. */
-  private thump(gain: number, length = 0.35, from = 110, delay = 0): void {
+  thump(gain: number, length = 0.35, from = 110, delay = 0): void {
     this.tone('sine', from, 35, length, gain, delay);
+  }
+
+  /**
+   * A frequency-modulated tone: a sine carrier whose pitch is bent by a second
+   * oscillator at `ratio` times its frequency. The modulation starts at `depth`
+   * Hz and dies away, so it rings bright and settles: bells, zaps, runes.
+   */
+  fm(carrier: number, ratio: number, depth: number, to: number, duration: number, gain: number, delay = 0, reverb = 0): void {
+    if (this.ctx == null || this.master == null) return;
+    const t = this.ctx.currentTime + delay;
+    const osc = this.ctx.createOscillator();
+    const mod = this.ctx.createOscillator();
+    const modGain = this.ctx.createGain();
+    const amp = this.ctx.createGain();
+    osc.frequency.setValueAtTime(carrier, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, to), t + duration);
+    mod.frequency.setValueAtTime(carrier * ratio, t);
+    mod.frequency.exponentialRampToValueAtTime(Math.max(20, to * ratio), t + duration);
+    modGain.gain.setValueAtTime(Math.max(1, depth), t);
+    modGain.gain.exponentialRampToValueAtTime(1, t + duration);
+    mod.connect(modGain).connect(osc.frequency);
+    amp.gain.setValueAtTime(gain, t);
+    amp.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.connect(amp);
+    this.out(amp, reverb);
+    osc.start(t);
+    mod.start(t);
+    osc.stop(t + duration + 0.02);
+    mod.stop(t + duration + 0.02);
+  }
+
+  private readonly curves = new Map<number, Float32Array<ArrayBuffer>>();
+
+  /** A tone pushed through a waveshaper: `drive` (2 to 12) is how hard it is clipped. */
+  grit(type: OscillatorType, from: number, to: number, duration: number, gain: number, drive: number, delay = 0, reverb = 0): void {
+    if (this.ctx == null || this.master == null) return;
+    let curve = this.curves.get(drive);
+    if (curve == null) {
+      curve = new Float32Array(256);
+      for (let i = 0; i < 256; i += 1) curve[i] = Math.tanh((i / 127.5 - 1) * drive);
+      this.curves.set(drive, curve);
+    }
+    const t = this.ctx.currentTime + delay;
+    const osc = this.ctx.createOscillator();
+    const shaper = this.ctx.createWaveShaper();
+    const amp = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(from, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, to), t + duration);
+    shaper.curve = curve;
+    amp.gain.setValueAtTime(gain, t);
+    amp.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.connect(shaper).connect(amp);
+    this.out(amp, reverb);
+    osc.start(t);
+    osc.stop(t + duration + 0.02);
+  }
+
+  /** A tone with a tremolo (volume wobble at `rate` Hz): beams, charging, shields. */
+  hum(type: OscillatorType, from: number, to: number, duration: number, gain: number, rate: number, depth: number, delay = 0, reverb = 0, attack = 0): void {
+    if (this.ctx == null || this.master == null) return;
+    const t = this.ctx.currentTime + delay;
+    const osc = this.ctx.createOscillator();
+    const wobble = this.ctx.createGain();
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    const amp = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(from, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, to), t + duration);
+    wobble.gain.value = 1 - depth * 0.5;
+    lfo.frequency.value = rate;
+    lfoGain.gain.value = depth * 0.5;
+    lfo.connect(lfoGain).connect(wobble.gain);
+    if (attack > 0) {
+      amp.gain.setValueAtTime(0.001, t);
+      amp.gain.exponentialRampToValueAtTime(gain, t + attack);
+    } else amp.gain.setValueAtTime(gain, t);
+    amp.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.connect(wobble).connect(amp);
+    this.out(amp, reverb);
+    osc.start(t);
+    lfo.start(t);
+    osc.stop(t + duration + 0.02);
+    lfo.stop(t + duration + 0.02);
   }
 
   // ---------------------------------------------------------------- UI and flow
@@ -275,6 +362,11 @@ export class Sfx {
   }
 
   // ---------------------------------------------------------------- weapons
+
+  /** The sound design of one weapon (see weaponsfx.ts): `part` is fire, draw, swing or hit. */
+  weapon(id: string, part: WeaponPart = 'fire', power = 1): void {
+    playWeapon(this, id, part, power);
+  }
 
   /** Palm blast: a sharp zap with a crack and a thump. */
   blast(): void {

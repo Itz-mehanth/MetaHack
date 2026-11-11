@@ -165,7 +165,7 @@ const HTML = () => `
     <p class="tag" id="tag"><span class="caret"></span></p>
     <div class="buttons">
       <button class="mr" id="enter-mr">ENTER MR<small>Meta Quest 3 &middot; your room</small></button>
-      <button class="vr" id="enter-vr">ENTER VR<small>Any headset</small></button>
+      <button class="vr" id="enter-vr">ENTER VR<small>Full sky, no passthrough</small></button>
       <button class="play" id="play-2d">PLAY NOW<small id="play-sub">Touch, mouse or keys</small></button>
     </div>
     <div class="row2">
@@ -338,7 +338,7 @@ export function setupLanding(world: World): void {
     note.textContent = 'Best in a Meta Quest 3: hand tracking + mixed reality.';
   };
   if (nav == null) {
-    vr.disabled = true;
+    vr.style.display = 'none';
     mr.disabled = true;
     preferScreen();
     return;
@@ -349,9 +349,24 @@ export function setupLanding(world: World): void {
   ]).then(([vrOk, arOk]) => {
     vr.disabled = !vrOk;
     mr.disabled = !arOk;
-    if (arOk) mr.classList.add('primary');
-    else if (vrOk) vr.classList.add('primary');
-    else preferScreen();
-    if (vrOk && !arOk) note.textContent = 'MR needs a passthrough headset such as Quest 3.';
+    if (arOk) {
+      // Mixed reality is the game. Full VR (no passthrough) stays as a small
+      // secondary choice for players who want the whole sky.
+      mr.classList.add('primary');
+      if (vrOk) {
+        vr.className = 'ghost';
+        vr.innerHTML = '&#x1F576; FULL VR &middot; NO PASSTHROUGH';
+        landing.querySelector('.row2')!.prepend(vr);
+      } else vr.style.display = 'none';
+    } else if (vrOk) {
+      // A headset without passthrough: VR is the way in.
+      vr.classList.add('primary');
+      vr.innerHTML = 'ENTER VR<small>The full sky, no room needed</small>';
+      mr.style.display = 'none';
+      note.textContent = 'MR needs a passthrough headset such as Quest 3.';
+    } else {
+      vr.style.display = 'none';
+      preferScreen();
+    }
   });
 }
