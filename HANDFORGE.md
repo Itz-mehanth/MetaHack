@@ -150,7 +150,7 @@ throughout (no Marvel or other third-party names/designs).
   over it), a relaxed hand rests at 1.4-1.65 (right on the old fist line, so a
   fist now also needs the four fingers to average under line minus 0.25), and a
   deliberate pinch bottoms out at 3 cm between the thumb and index tips (a tight
-  fist reads 1 cm), so a pinch registers under 4 cm and lets go past 4.7 cm (a wider gap latched a loose hand as "still pinching").
+  fist reads 1 cm), so a pinch counts at once under 3 cm, or under 3.7 cm once it has stayed closed for 0.07 s (a line at 4 cm clicked while the fingers were still closing, gaze.ts PinchEdge), and lets go past 4.5 cm (a wider gap latched a loose hand as "still pinching").
   A pinch with the palm facing you also opens the Meta system menu, which blurs the
   app: the frame loop and all sound freeze (sfx.hold) and carry on when it closes.
 - Audio: cinematic synthesised score (music.ts: drums, sub bass, strings,
