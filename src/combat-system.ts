@@ -78,6 +78,8 @@ import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
 import { PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
+import { ShieldGauge } from './combat/shieldgauge.js';
+import { Vitals } from './combat/vitals.js';
 import { menuStillFacing } from './combat/menuaim.js';
 import { skipHiddenBranches } from './combat/sceneperf.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
@@ -864,6 +866,11 @@ export class CombatSystem extends createSystem({
   /** Tag team: the mission's squad, the strip showing it, and the swap state. */
   private squad: HeroId[] = [];
   private squadBar!: SquadBar;
+  /** The shield gauge at the bottom of the view and the state behind it (hits, warnings, heartbeat). */
+  private shieldGauge!: ShieldGauge;
+  private readonly vitals = new Vitals();
+  /** How far the music is muffled now (0 clear .. 1), so the filter is only touched on a change. */
+  private muffled = 0;
   /** One pinch detector per hand for tagging a hero in from the strip, and where the pinch is. */
   private readonly swapPinch = [new PinchEdge(), new PinchEdge()];
   private readonly swapPoint = new Vector3();
@@ -991,6 +998,7 @@ export class CombatSystem extends createSystem({
     this.ground = new Ground(this.root);
     this.perfHud = new PerfHud(this.world.camera);
     this.squadBar = new SquadBar(this.world.camera);
+    this.shieldGauge = new ShieldGauge(this.world.camera);
     {
       const rayGeometry = new BoxGeometry(0.004, 0.004, 1);
       rayGeometry.translate(0, 0, -0.5);
@@ -2474,7 +2482,7 @@ export class CombatSystem extends createSystem({
       this.damageMaterial.opacity = Math.max(0, this.damageMaterial.opacity - realDt * 1.2);
       this.damage.visible = this.damageMaterial.opacity > 0;
     }
-    this.blood.update(realDt, this.run.phase === 'fighting' && this.run.health <= 1 ? 1 : this.run.phase === 'fighting' && this.run.health <= 2 ? 0.4 : 0);
+    this.updateVitals(realDt);
     this.transit.update(realDt, this.head);
     // The score follows the action: calm in menus, full in combat, huge at bosses.
     const run = this.run;
@@ -2482,6 +2490,38 @@ export class CombatSystem extends createSystem({
     for (const d of this.drones) if ((d.kind === 'boss' || d.champion !== '') && d.state !== 'off') bossFight = true;
     this.music.setIntensity(run.phase === 'title' || this.panel.visible ? 0 : bossFight ? 2 : 1);
     this.updateHud(realDt);
+  }
+
+  /**
+   * The shield as the player feels it: the gauge at the bottom of the view; a
+   * crack, a swell and a glass-break sound on every loss; a rising run of bells
+   * on a restore; an alarm and a pop-up when it first runs low and on the last
+   * cell; then a heartbeat, red pulsing screen edges and muffled music until it
+   * recovers.
+   */
+  private updateVitals(dt: number): void {
+    const run = this.run;
+    const live = run.phase !== 'title' && !(run.phase === 'intro' && run.wave === 0);
+    const armed = run.phase === 'fighting' && !this.paused && !this.attract;
+    const v = this.vitals.update(dt, run.health, run.maxHealth, live, armed);
+    if (v.lost > 0) this.sfx.shieldBreak(run.health);
+    if (v.gained > 0) this.sfx.shieldUp();
+    if (v.enteredLow || v.enteredCritical) {
+      const critical = v.enteredCritical;
+      this.sfx.shieldAlarm(critical);
+      this.v1.copy(this.head).addScaledVector(this.forward, 1.3);
+      this.v1.y -= 0.15;
+      this.comic.pop(critical ? 'LAST SHIELD!' : 'SHIELD LOW!', this.v1, new Color(critical ? '#FF3B5C' : '#FFB020'), critical ? 0.95 : 0.8);
+    }
+    if (v.beat) this.sfx.heartbeat(this.vitals.level === 'critical' ? 1 : 0.65);
+    const muffle = armed ? (this.vitals.level === 'critical' ? 0.8 : this.vitals.level === 'low' ? 0.4 : 0) : 0;
+    if (muffle !== this.muffled) {
+      this.muffled = muffle;
+      this.sfx.muffle(muffle);
+    }
+    this.blood.update(dt, armed ? this.vitals.danger : 0);
+    const show = !this.attract && run.phase !== 'title' && !(this.panel.visible && !this.paused) && !this.movieActive;
+    this.shieldGauge.update(this.vitals, show, dt, this.profile.settings.calm);
   }
 
   /** True in an MR session, where the real room replaces the arena. */
@@ -8799,7 +8839,7 @@ export class CombatSystem extends createSystem({
     if (damage > 0) this.haptics.pulse(this.world.renderer.xr.getSession(), Math.min(1, 0.6 + damage * 0.2), 200);
     if (counted) this.run.hit(damage);
     else this.run.damage(damage);
-    this.damageMaterial.opacity = this.profile.settings.calm ? 0.07 : 0.18;
+    this.damageMaterial.opacity = this.profile.settings.calm ? 0.07 : 0.3;
     this.damage.visible = true;
     this.sfx.hurt();
     // Low and to one side, so it never hides what hit you.

@@ -2,6 +2,9 @@ import { playWeapon, type WeaponPart } from './weaponsfx.js';
 
 /** Voice-over level relative to effects (the voice bus skips the 0.5 master trim). */
 const VOICE_GAIN = 1.5;
+/** Cutoff (Hz) of the music's low-pass when open, and when fully muffled. */
+const MUSIC_OPEN_HZ = 22000;
+const MUSIC_MUFFLED_HZ = 650;
 
 /**
  * Web Audio sound design, synthesised live so no audio assets download.
@@ -17,6 +20,7 @@ export class Sfx {
   private noise: AudioBuffer | null = null;
   /** Music bus, created with the context; see Music. */
   musicOut: GainNode | null = null;
+  private musicTone: BiquadFilterNode | null = null;
   private sfxVolume = 0.8;
   private musicVolume = 0.6;
   private readonly listeners: Array<(ctx: AudioContext) => void> = [];
@@ -48,7 +52,12 @@ export class Sfx {
       this.master.connect(limiter);
       this.musicOut = ctx.createGain();
       this.musicOut.gain.value = 0.35 * this.musicVolume;
-      this.musicOut.connect(limiter);
+      // The music passes a low-pass that stays wide open until the shield runs low (see muffle).
+      this.musicTone = ctx.createBiquadFilter();
+      this.musicTone.type = 'lowpass';
+      this.musicTone.Q.value = 0.5;
+      this.musicTone.frequency.value = MUSIC_OPEN_HZ;
+      this.musicOut.connect(this.musicTone).connect(limiter);
       const length = ctx.sampleRate;
       this.noise = ctx.createBuffer(1, length, ctx.sampleRate);
       const data = this.noise.getChannelData(0);
@@ -656,6 +665,50 @@ export class Sfx {
     this.thump(0.6, 0.3, 90);
     // A body blow you can feel in the headset's speakers.
     this.thump(0.9, 0.4, 55);
+  }
+
+  /**
+   * A shield cell breaks, on top of hurt(): cracking glass and a falling chime,
+   * lower and heavier the fewer cells are left (`left`).
+   */
+  shieldBreak(left: number): void {
+    const weak = left <= 2 ? 1 : 0;
+    this.noiseSweep('highpass', 7000, 2500, 0.22, 0.4, 0, 0.3, 1);
+    for (let i = 0; i < 4; i += 1) this.noiseSweep('highpass', 6000, 3000, 0.03, 0.18, 0.02 + Math.random() * 0.14);
+    this.fm(1480 - weak * 420, 2.4, 600, 520, 0.5, 0.12, 0, 0.5);
+    this.tone('sawtooth', 300 - weak * 110, 60, 0.35, 0.14);
+  }
+
+  /** Low shield: a heart beating, lub-dub. `strength` 0..1. */
+  heartbeat(strength = 1): void {
+    this.thump(0.55 * strength, 0.18, 80);
+    this.thump(0.38 * strength, 0.16, 66, 0.17);
+  }
+
+  /** The shield has just run low: a two-note alarm, three notes and higher on the last cell. */
+  shieldAlarm(critical: boolean): void {
+    const high = critical ? 1040 : 880;
+    const low = critical ? 780 : 660;
+    for (let i = 0; i < (critical ? 3 : 2); i += 1) {
+      this.tone('square', high, high, 0.09, 0.06, i * 0.2);
+      this.tone('square', low, low, 0.09, 0.06, i * 0.2 + 0.1);
+    }
+    // A thin ringing in the ears on the last cell.
+    if (critical) this.tone('sine', 5200, 4800, 1.4, 0.025, 0.05);
+  }
+
+  /** Shield restored: a rising run of bells. */
+  shieldUp(): void {
+    [523, 659, 784, 1046].forEach((hz, i) => this.fm(hz, 2, 200, hz, 0.45, 0.07, i * 0.07, 0.4));
+    this.noiseSweep('bandpass', 1500, 5000, 0.35, 0.08, 0, 0.3, 2, 0.1);
+  }
+
+  /** Dulls the music as the shield runs low: 0 clear, 1 muffled as if under water. Eases over a moment. */
+  muffle(amount: number): void {
+    if (this.musicTone == null || this.ctx == null) return;
+    const a = Math.min(1, Math.max(0, amount));
+    const hz = MUSIC_OPEN_HZ * Math.pow(MUSIC_MUFFLED_HZ / MUSIC_OPEN_HZ, a);
+    this.musicTone.frequency.setTargetAtTime(hz, this.ctx.currentTime, 0.3);
   }
 
   portal(): void {
