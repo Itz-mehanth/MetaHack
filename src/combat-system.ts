@@ -117,6 +117,8 @@ import { shell } from './shell.js';
 import {
   DIFFICULTY,
   ENEMY_COINS,
+  enemyToughness,
+  missionsCleared,
   equippedColor,
   hasUnlock,
   isStageUnlocked,
@@ -2089,6 +2091,7 @@ export class CombatSystem extends createSystem({
       panel: this.panel.visible,
       live: this.powersLive,
       enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}${d.species ? `/${d.species}` : ''}:${d.state}`),
+      enemyHp: this.drones.filter((d) => d.state !== 'off').map((d) => Math.round(d.hp * 10) / 10),
       kills: this.run.kills,
       hands: this.hands.map((h) => h.tracked),
       debug: {
@@ -6320,12 +6323,24 @@ export class CombatSystem extends createSystem({
     this.comic.pop('WARNING!', this.v1, MAGENTA, 1.0);
   }
 
+  /**
+   * How many times the health ordinary enemies have right now: 1 in the scripted
+   * prologue and finale, otherwise it follows the missions the player has cleared
+   * (or the wave, in endless and daily runs), and the difficulty setting.
+   */
+  private toughness(): number {
+    if (this.script != null) return 1;
+    const stage = this.run.stage;
+    const progress = stage.endless ? 4 + this.run.wave * 0.5 : missionsCleared(this.profile);
+    return enemyToughness(progress, this.profile.settings.difficulty);
+  }
+
   /** The wave's last enemy: a size bigger, twice as tough, and it brings a power-up. */
   private makeElite(drone: Drone): void {
     const def = ENEMIES[drone.kind];
     drone.elite = true;
     drone.size = 1.25;
-    drone.hp = def.hp * 2.2;
+    drone.hp = def.hp * 2.2 * this.toughness();
     drone.maxHp = drone.hp;
     if (def.ground) drone.spawn.y = this.chestOf(drone) * drone.size;
     this.flashes.spawn(drone.spawn, GOLD, 0.3, 2, 0.6);
@@ -6355,7 +6370,7 @@ export class CombatSystem extends createSystem({
     const def = ENEMIES[drone.kind];
     drone.size = drone.kind === 'titan' ? 1.25 : 1.5;
     drone.champion = this.run.stage.endless ? championName(this.run.stage.world.id, this.run.wave) : (CHAMPIONS[this.run.stage.id] ?? 'CHAMPION');
-    drone.maxHp = def.hp * 6 + 8;
+    drone.maxHp = (def.hp * 6 + 8) * Math.sqrt(this.toughness());
     drone.hp = drone.maxHp;
     drone.spawn.y = this.chestOf(drone) * drone.size;
     drone.portal.scale.setScalar(0.01);
@@ -8190,7 +8205,9 @@ export class CombatSystem extends createSystem({
     }
     drone.creature?.reset();
     drone.elite = false;
-    drone.hp = ENEMIES[kind].hp;
+    // Tougher as the campaign goes on (see enemyToughness), so the upgrades are needed. Bosses and pods keep their own numbers.
+    drone.hp = ENEMIES[kind].hp * (ENEMIES[kind].ground != null || kind === 'flyer' ? this.toughness() : 1);
+    drone.maxHp = drone.hp;
     drone.state = 'emerging';
     drone.t = 0;
     drone.speed = speed;

@@ -4,10 +4,12 @@ import {
   buySkin,
   buyUpgrade,
   defaultProfile,
+  enemyToughness,
   equippedColor,
   isStageUnlocked,
   maxHealth,
   MAX_UPGRADE,
+  missionsCleared,
   nextUpgradeCost,
   normalizeProfile,
   recordResult,
@@ -105,6 +107,36 @@ describe('economy', () => {
     p.upgrades.shield = 2;
     p.settings.difficulty = 'hard';
     expect(maxHealth(p)).toBe(5);
+  });
+});
+
+describe('enemy toughness', () => {
+  it('leaves the first missions alone, then rises with every mission cleared', () => {
+    expect(enemyToughness(0, 'normal')).toBe(1);
+    expect(enemyToughness(2, 'normal')).toBe(1);
+    let last = 1;
+    for (let n = 3; n <= 24; n += 1) {
+      const now = enemyToughness(n, 'normal');
+      expect(now).toBeGreaterThan(last);
+      last = now;
+    }
+    // About three times the health at the end of the campaign.
+    expect(enemyToughness(24, 'normal')).toBeGreaterThan(2.7);
+    expect(enemyToughness(24, 'normal')).toBeLessThan(3.2);
+  });
+
+  it('is softer on easy and harder on hard', () => {
+    expect(enemyToughness(10, 'easy')).toBeLessThan(enemyToughness(10, 'normal'));
+    expect(enemyToughness(10, 'hard')).toBeGreaterThan(enemyToughness(10, 'normal'));
+  });
+
+  it('counts the missions a profile has cleared', () => {
+    const p = defaultProfile();
+    expect(missionsCleared(p)).toBe(0);
+    recordResult(p, STAGES[0], { won: true, health: 5, maxHealth: 5, killCoins: 0 });
+    recordResult(p, STAGES[1], { won: true, health: 5, maxHealth: 5, killCoins: 0 });
+    recordResult(p, STAGES[2], { won: false, health: 0, maxHealth: 5, killCoins: 0 });
+    expect(missionsCleared(p)).toBe(2);
   });
 });
 

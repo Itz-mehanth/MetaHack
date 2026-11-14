@@ -113,11 +113,34 @@ export function stageById(id: string): Stage | undefined {
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
-export const DIFFICULTY: Readonly<Record<Difficulty, { speed: number; health: number; coins: number }>> = {
-  easy: { speed: 0.8, health: 7, coins: 0.75 },
-  normal: { speed: 1, health: 5, coins: 1 },
-  hard: { speed: 1.25, health: 3, coins: 1.5 },
+export const DIFFICULTY: Readonly<Record<Difficulty, { speed: number; health: number; coins: number; toughness: number }>> = {
+  easy: { speed: 0.8, health: 7, coins: 0.75, toughness: 0.85 },
+  normal: { speed: 1, health: 5, coins: 1, toughness: 1 },
+  hard: { speed: 1.25, health: 3, coins: 1.5, toughness: 1.4 },
 };
+
+/** Missions cleared before enemies start getting tougher, and how much tougher per mission after that. */
+export const TOUGHNESS_FREE_MISSIONS = 2;
+export const TOUGHNESS_PER_MISSION = 0.09;
+
+/**
+ * How many times more health ordinary enemies have, given how far the player has
+ * got (`progress`: missions cleared, 0 to 24; in endless runs the wave stands in
+ * for it). Enemy health used to be one flat number for all 24 missions, so a
+ * grunt died to one hit on the last level and weapon and hero upgrades were never
+ * needed. Now the first two missions play as they always did, then each cleared
+ * mission adds 9% (about 2.9x by the end on NORMAL), so the upgrades have to keep up.
+ */
+export function enemyToughness(progress: number, difficulty: Difficulty): number {
+  return (1 + TOUGHNESS_PER_MISSION * Math.max(0, progress - TOUGHNESS_FREE_MISSIONS)) * DIFFICULTY[difficulty].toughness;
+}
+
+/** Missions the player has cleared at least once. */
+export function missionsCleared(profile: Profile): number {
+  let cleared = 0;
+  for (const stars of Object.values(profile.stars)) if (stars > 0) cleared += 1;
+  return cleared;
+}
 
 // ---------------------------------------------------------------- economy
 
