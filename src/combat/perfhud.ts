@@ -7,6 +7,8 @@ export interface PerfReadout {
   /** The game's own frame code, average and p95 (ms). */
   cpuMs: number;
   cpuP95Ms: number;
+  /** The last movie skip or frame error, if any. */
+  note: string;
   slowPct: number;
   tier: number;
   locked: boolean;
@@ -20,7 +22,7 @@ export interface PerfReadout {
 }
 
 const W = 384;
-const H = 224;
+const H = 256;
 
 /**
  * A small developer readout of frame rate, frame time, draw calls, triangles
@@ -44,7 +46,7 @@ export class PerfHud {
     this.texture = new CanvasTexture(this.canvas);
     this.texture.colorSpace = SRGBColorSpace;
     this.mesh = new Mesh(
-      new PlaneGeometry(0.3, 0.175),
+      new PlaneGeometry(0.3, 0.2),
       new MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }),
     );
     this.mesh.name = 'PerfHud';
@@ -81,6 +83,7 @@ export class PerfHud {
       `geo ${r.geometries}  tex ${r.textures}  foes ${r.enemies}`,
       r.mode,
     ];
+    if (r.note !== '') lines.push(r.note);
     if (presenting) {
       const c = this.ctx;
       c.clearRect(0, 0, W, H);
