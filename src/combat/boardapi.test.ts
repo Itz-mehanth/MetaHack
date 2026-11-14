@@ -119,5 +119,8 @@ describe('connection', () => {
     expect(redisFrom({ KV_REST_API_URL: 'https://x.upstash.io' })).toBeNull();
     expect(redisFrom({ KV_REST_API_URL: 'https://x.upstash.io', KV_REST_API_TOKEN: 't' })).not.toBeNull();
     expect(redisFrom({ UPSTASH_REDIS_REST_URL: 'https://x.upstash.io', UPSTASH_REDIS_REST_TOKEN: 't' })).not.toBeNull();
+    // Redis Cloud and other plain Redis hosts give one address instead (no connection is made until the first call).
+    expect(redisFrom({ REDIS_URL: 'redis://default:pw@host.example:6379' })).not.toBeNull();
+    expect(redisFrom({ REDIS_URL: '' })).toBeNull();
   });
 });

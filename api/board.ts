@@ -4,12 +4,16 @@
  *   GET  /api/board?hero=arc  ->  { enabled, entries: [{ name, score, mode, label, at }] }   (top 10)
  *   POST /api/board           ->  { ok, rank }   body: { hero, name, score, mode, label }
  *
- * Scores live in a Redis sorted set per hero (one best score per name) on a
- * Vercel KV / Upstash Redis database, reached over its REST interface with
- * plain fetch, so there is nothing to install. With no database connected
- * (the KV_REST_API_URL / KV_REST_API_TOKEN variables are missing) every call
- * answers `enabled: false` and the game keeps its boards on the player's
- * device only. Self-contained on purpose: Vercel builds this file alone.
+ * Scores live in a Redis sorted set per hero (one best score per name). Any of
+ * these databases will do:
+ *   - Vercel KV / Upstash over its REST interface (KV_REST_API_URL and
+ *     KV_REST_API_TOKEN, or UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN),
+ *     reached with plain fetch;
+ *   - any Redis over TCP, such as Redis Cloud (REDIS_URL, a redis:// or rediss://
+ *     address with the password in it), reached with the `redis` package.
+ * With no database connected every call answers `enabled: false` and the game
+ * keeps its boards on the player's device only. Self-contained on purpose:
+ * Vercel builds this file alone.
  *
  * Anyone can post a score, so it is arcade-grade: names are letters and
  * digits only (with a short block list), scores are capped, one post per few
@@ -133,11 +137,71 @@ export async function submitScore(exec: Exec, ip: string, s: Submission, now: nu
   return { status: 200, body: { ok: true, improved, rank: typeof rank === 'number' ? rank + 1 : null } };
 }
 
-/** A Redis REST client from the environment, or null when no database is connected. */
+interface TcpClient {
+  sendCommand(args: string[]): Promise<unknown>;
+  close(): Promise<unknown>;
+}
+
+/** One connection per warm function instance, reused by every request. */
+let shared: { url: string; ready: Promise<TcpClient> } | null = null;
+
+function connect(url: string): Promise<TcpClient> {
+  return (async () => {
+    const { createClient } = await import('redis');
+    const client = createClient({ url, socket: { connectTimeout: 4000, reconnectStrategy: false } });
+    // A dropped connection is replaced by the next request; it must not crash the function.
+    client.on('error', () => {
+      shared = null;
+    });
+    await client.connect();
+    return client as unknown as TcpClient;
+  })();
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('redis timeout')), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** Redis over TCP (Redis Cloud and most hosts give a redis:// address, not a REST one). */
+function tcpExec(url: string): Exec {
+  return async (commands) => {
+    if (shared == null || shared.url !== url) {
+      const ready = connect(url);
+      const mine = { url, ready };
+      shared = mine;
+      ready.catch(() => {
+        if (shared === mine) shared = null;
+      });
+    }
+    const client = await withTimeout(shared.ready, 5000);
+    return withTimeout(Promise.all(commands.map((command) => client.sendCommand(command.map(String)))), 5000);
+  };
+}
+
+/** Drops the shared TCP connection (tests and scripts; a serverless instance just freezes). */
+export async function closeRedis(): Promise<void> {
+  const current = shared;
+  shared = null;
+  if (current != null) await (await current.ready.catch(() => null))?.close();
+}
+
+/** A Redis client from the environment, or null when no database is connected. */
 export function redisFrom(env: Record<string, string | undefined>): Exec | null {
   const url = env.KV_REST_API_URL ?? env.UPSTASH_REDIS_REST_URL;
   const token = env.KV_REST_API_TOKEN ?? env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
+  if (!url || !token) return env.REDIS_URL ? tcpExec(env.REDIS_URL) : null;
   return async (commands) => {
     const response = await fetch(`${url.replace(/\/$/, '')}/pipeline`, {
       method: 'POST',
