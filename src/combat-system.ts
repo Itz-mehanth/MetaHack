@@ -78,6 +78,7 @@ import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
 import { PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
+import { menuStillFacing } from './combat/menuaim.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
 import { Cinema, type CinemaHooks } from './combat/cinema.js';
 import { ChapterCinema } from './combat/chaptercinema.js';
@@ -807,6 +808,8 @@ export class CombatSystem extends createSystem({
   private powersLive = false;
   /** Elapsed time at which to re-place the menu once XR head tracking settles. */
   private replaceMenuAt = -1;
+  /** The way the open menu faces, fixed when it opens (see anchorMenu). */
+  private readonly menuDir = new Vector3(0, 0, -1);
 
   private head = new Vector3();
   private headTriple: Triple = [0, 0, 0];
@@ -1334,7 +1337,7 @@ export class CombatSystem extends createSystem({
     canvas.addEventListener('pointerdown', unlock);
     const onKey = (event: KeyboardEvent) => {
       if (this.movieActive) {
-        if (event.key === 'Escape' || event.key === ' ' || event.key === 'Enter') this.skipMovie(1);
+        if (event.key === 'Escape' || event.key === ' ' || event.key === 'Enter') this.skipMovie(1, 'key');
       } else if (this.panel.visible && this.menus.typeName(event.key)) {
         event.preventDefault();
         this.panel.setContent(this.menus.content());
@@ -2165,6 +2168,7 @@ export class CombatSystem extends createSystem({
     } catch (error) {
       if (time - this.lastErrorAt > 2) {
         this.lastErrorAt = time;
+        this.lastNote = `error: ${(error instanceof Error ? error.message : String(error)).slice(0, 60)}`;
         console.error('[Combat] frame error', error);
       }
     }
@@ -2175,6 +2179,8 @@ export class CombatSystem extends createSystem({
   private readonly cpuStats = new FrameStats();
 
   private lastErrorAt = -10;
+  /** The last movie skip or frame error, shown on the PERF HUD. */
+  private lastNote = '';
 
   /** Asks the headset for a steady 72 Hz: cheaper than 90 and above the 60 fps bar. */
   private requestFrameRate(session: XRSession | null | undefined): void {
@@ -2221,6 +2227,7 @@ export class CombatSystem extends createSystem({
       p95Ms: stats.p95Ms(),
       cpuMs: this.cpuStats.avgMs(),
       cpuP95Ms: this.cpuStats.p95Ms(),
+      note: this.lastNote,
       slowPct: stats.slowShare() * 100,
       tier: this.governor.tier,
       locked: this.governor.locked,
@@ -2298,7 +2305,10 @@ export class CombatSystem extends createSystem({
     }
     if (this.replaceMenuAt > 0 && time > this.replaceMenuAt) {
       this.replaceMenuAt = -1;
-      if (this.panel.visible) this.panel.place(this.head, this.forward);
+      if (this.panel.visible) {
+        this.menuDir.copy(this.forward);
+        this.panel.place(this.head, this.menuDir);
+      }
     }
     this.updateGaze(realDt);
     const event = this.panel.update(realDt, this.tips);
@@ -2522,7 +2532,7 @@ export class CombatSystem extends createSystem({
       if (distance != null && distance < SKIP_PINCH) firm = true;
     }
     // A movie is skipped by a firm pinch held for most of a second that begins during it, never by a passing hand shape.
-    if (this.skipPinch.update(this.movieActive, firm, dt)) this.skipMovie(1.5);
+    if (this.skipPinch.update(this.movieActive, firm, dt)) this.skipMovie(1.5, 'pinch');
     const menu = this.panel.visible || this.galaxy.visible;
     const active = menu && (handA || handB) && !this.flat && !this.pad && this.tx == null;
     this.gazeArm = active ? this.gazeArm + dt : 0;
@@ -2561,7 +2571,7 @@ export class CombatSystem extends createSystem({
   private updatePad(): void {
     if (!this.pad) return;
     const pad = this.padInput;
-    if (pad.pressed || pad.pausePressed) this.skipMovie(1.2);
+    if (pad.pressed || pad.pausePressed) this.skipMovie(1.2, 'controller');
     if (pad.pausePressed) this.wristPressed();
     // In menus (and while paused) a trigger press clicks what the ray points at.
     if (pad.pressed && !this.pilot.active) {
@@ -2983,11 +2993,17 @@ export class CombatSystem extends createSystem({
     return this.cinema.active || this.chapterCinema.active;
   }
 
-  /** True while a movie plays; once it has run `after` seconds a skip input ends it. */
-  private skipMovie(after: number): boolean {
+  /**
+   * True while a movie plays; once it has run `after` seconds a skip input ends it.
+   * `why` names the input, shown on the PERF HUD so a movie that ends early can be explained from a recording.
+   */
+  private skipMovie(after: number, why: string): boolean {
     const movie = this.cinema.active ? this.cinema : this.chapterCinema.active ? this.chapterCinema : null;
     if (movie == null) return false;
-    if (movie.t > after) movie.skip();
+    if (movie.t > after) {
+      this.lastNote = `skip: ${why} at ${movie.t.toFixed(1)}s`;
+      movie.skip();
+    }
     return true;
   }
 
@@ -3313,6 +3329,7 @@ export class CombatSystem extends createSystem({
   private showMenu(screen: Parameters<GameMenus['open']>[0]): void {
     this.world.camera.getWorldPosition(this.head);
     this.world.camera.getWorldDirection(this.forward);
+    this.anchorMenu();
     this.menus.open(screen);
     this.panel.setContent(this.menus.content());
     this.placePanel();
@@ -3330,16 +3347,27 @@ export class CombatSystem extends createSystem({
     if (this.flat) {
       // Flat screen: the panel and any 3D content fit one view (see frameMenu).
       const screen = this.menus.screen;
-      if (screen === 'heroes' || screen === 'garage') this.panel.place(this.head, this.forward, 0.62, 0.42);
-      else if (screen === 'galaxy') this.panel.place(this.head, this.forward, 1.0, -0.1);
-      else this.panel.place(this.head, this.forward, 0.62, 0.02);
+      if (screen === 'heroes' || screen === 'garage') this.panel.place(this.head, this.menuDir, 0.62, 0.42);
+      else if (screen === 'galaxy') this.panel.place(this.head, this.menuDir, 1.0, -0.1);
+      else this.panel.place(this.head, this.menuDir, 0.62, 0.02);
       return;
     }
-    if (this.menus.screen === 'heroes') this.panel.place(this.head, this.forward, 0.42, 0.58);
-    else if (this.menus.screen === 'map') this.panel.place(this.head, this.forward, 0.55, 0.02);
-    else if (this.menus.screen === 'garage') this.panel.place(this.head, this.forward, 0.42, 0.58);
-    else if (this.menus.screen === 'galaxy') this.panel.place(this.head, this.forward, 0.8, -0.06);
-    else this.panel.place(this.head, this.forward);
+    if (this.menus.screen === 'heroes') this.panel.place(this.head, this.menuDir, 0.42, 0.58);
+    else if (this.menus.screen === 'map') this.panel.place(this.head, this.menuDir, 0.55, 0.02);
+    else if (this.menus.screen === 'garage') this.panel.place(this.head, this.menuDir, 0.42, 0.58);
+    else if (this.menus.screen === 'galaxy') this.panel.place(this.head, this.menuDir, 0.8, -0.06);
+    else this.panel.place(this.head, this.menuDir);
+  }
+
+  /**
+   * Fixes which way the menu faces. A menu that is already up keeps its direction
+   * through every selection, so pressing a button you are looking at the edge of
+   * no longer swings the panel (and its 3D props) toward your gaze; it is only
+   * brought round again when you have turned well away from it, and a menu that
+   * opens fresh faces you. Screens (flat) re-frame the view themselves.
+   */
+  private anchorMenu(): void {
+    if (this.flat || !this.panel.visible || !menuStillFacing(this.menuDir, this.forward)) this.menuDir.copy(this.forward);
   }
 
   /** Shows the war map only on the map screen, reflecting progress. */
@@ -3359,7 +3387,7 @@ export class CombatSystem extends createSystem({
       this.holomap.setNode(i, !unlocked ? 'locked' : stars > 0 ? 'cleared' : 'open', stars, `${i + 1}. ${chapter.levels[i].location}`);
     });
     this.holomap.selected = this.menus.mapLevel;
-    if (!this.holomap.visible) this.holomap.show(this.head, this.forward);
+    if (!this.holomap.visible) this.holomap.show(this.head, this.menuDir);
   }
 
   /** Poking a node on the war map selects that level. */
@@ -3379,7 +3407,7 @@ export class CombatSystem extends createSystem({
     });
     this.galaxy.build(nodes, finaleUnlocked(p), anchorsRecovered(p).length);
     this.galaxy.selected = this.menus.galaxyIndex;
-    if (!this.galaxy.visible) this.galaxy.show(this.head, this.forward, this.flat ? 0.55 : 0.35, this.flat ? 0.62 : 0.62, this.flat ? 1.05 : 1.0, this.flat ? -0.75 : 0);
+    if (!this.galaxy.visible) this.galaxy.show(this.head, this.menuDir, this.flat ? 0.55 : 0.35, this.flat ? 0.62 : 0.62, this.flat ? 1.05 : 1.0, this.flat ? -0.75 : 0);
   }
 
   /** Poking a planet picks that hero's front; the core starts the finale. */
@@ -3669,7 +3697,7 @@ export class CombatSystem extends createSystem({
     const finish = finishFor(this.profile, hero);
     if (model) applyFinish(model, finish, '');
     if (model) this.armory.setWeapon(`${id}:${finish.id}`, model, finish.energy ?? def?.color ?? equippedColor(this.profile, hero), weaponTier(this.profile, hero));
-    if (!this.armory.visible) this.armory.show(this.head, this.forward);
+    if (!this.armory.visible) this.armory.show(this.head, this.menuDir);
   }
 
   /** Weapon tier visuals in a mission: auras on held weapons, sparks on hands. */
@@ -3683,7 +3711,7 @@ export class CombatSystem extends createSystem({
     const on = this.panel.visible && this.menus.screen === 'heroes';
     if (on && !this.carousel.visible) {
       this.carousel.setFocus(this.menus.heroFocus);
-      this.carousel.show(this.head, this.forward);
+      this.carousel.show(this.head, this.menuDir);
     } else if (!on && this.carousel.visible) this.carousel.hide();
     if (!on) return;
     this.carousel.setFocus(this.menus.heroFocus);
@@ -3777,7 +3805,10 @@ export class CombatSystem extends createSystem({
       this.syncGalaxy();
       return;
     }
-    if (this.menus.screen !== before) this.placePanel();
+    if (this.menus.screen !== before) {
+      this.anchorMenu();
+      this.placePanel();
+    }
     this.panel.setContent(this.menus.content());
     this.syncCarousel();
     this.syncMap();
@@ -3904,7 +3935,8 @@ export class CombatSystem extends createSystem({
     this.panel.setContent(this.menus.content());
     this.world.camera.getWorldPosition(this.head);
     this.world.camera.getWorldDirection(this.forward);
-    this.panel.place(this.head, this.forward);
+    this.anchorMenu();
+    this.panel.place(this.head, this.menuDir);
     this.panel.show();
     this.music.play('menu');
   }
