@@ -71,6 +71,17 @@ export class Sfx {
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
+  /**
+   * The headset's system menu is up (the app is blurred): freeze every sound's
+   * clock so a voice line does not play on behind a frozen movie, and carry on
+   * from the same moment when the player comes back.
+   */
+  hold(on: boolean): void {
+    if (!this.ctx) return;
+    if (on) void this.ctx.suspend();
+    else void this.ctx.resume();
+  }
+
   /** Runs `listener` once the audio context exists (immediately if it does). */
   onReady(listener: (ctx: AudioContext) => void): void {
     if (this.ctx) listener(this.ctx);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type HandJoints, fingerExtension, isBlastPose, isFist, isOpenPalm, isPinchPose, isSigilPose, isWebPose, palmNormal } from './gestures.js';
+import { type HandJoints, fingerExtension, isBlastPose, isFist, isFistRatios, isOpenPalm, isPinchPose, isSigilPose, isWebPose, palmNormal } from './gestures.js';
 import { type HandShape, type Quat, type Vec, handFrame, handPoint, qrot, SHAPES, writeHand } from './puppet.js';
 
 function pose() {
@@ -117,5 +117,23 @@ describe('puppet hands', () => {
     expect(isBlastPose(out, 'right', head)).toBe(true);
     const back = build(false, SHAPES.open, [[0, 1, 0], [0, 0, 1]], [0.2, 1.4, -0.42]).j;
     expect(isBlastPose(back, 'right', head)).toBe(false);
+  });
+});
+
+describe('fist ratios (measured on a Quest 3)', () => {
+  it('real fists count, a relaxed hand resting on the line does not', () => {
+    // From the HAND DEBUG recording: fists, including the thumb-over-index one.
+    expect(isFistRatios([0.82, 0.72, 0.68, 0.71])).toBe(true);
+    expect(isFistRatios([1.3, 0.88, 0.83, 0.94])).toBe(true);
+    expect(isFistRatios([0.73, 0.64, 0.57, 0.63])).toBe(true);
+    // Relaxed hands: every finger a hair under 1.4 must not read as a fist.
+    expect(isFistRatios([1.39, 1.38, 1.36, 1.37])).toBe(false);
+    expect(isFistRatios([1.3, 1.3, 1.3, 1.3])).toBe(false);
+    expect(isFistRatios([1.48, 1.46, 1.39, 1.43])).toBe(false);
+  });
+
+  it('the line follows the sensitivity setting', () => {
+    expect(isFistRatios([1.2, 1.2, 1.2, 1.2], 1.5)).toBe(true);
+    expect(isFistRatios([1.2, 1.2, 1.2, 1.2], 1.32)).toBe(false);
   });
 });

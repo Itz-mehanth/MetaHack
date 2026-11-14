@@ -86,9 +86,18 @@ export function isPinchPose(hand: HandJoints): boolean {
   return (e[1] + e[2] + e[3]) / 3 > tuning.fist - 0.3;
 }
 
+/**
+ * Finger ratios of a fist: every finger under the line, and the four together
+ * well under it. A relaxed hand rests at 1.4 to 1.55 on every finger (measured
+ * on a Quest 3), right on the line, while a real fist averages 0.75 to 1.0, so
+ * the average keeps a loose hand from igniting blades.
+ */
+export function isFistRatios(e: ArrayLike<number>, fist: number = tuning.fist): boolean {
+  return e[0] < fist && e[1] < fist && e[2] < fist && e[3] < fist && (e[0] + e[1] + e[2] + e[3]) / 4 < fist - 0.25;
+}
+
 export function isFist(hand: HandJoints): boolean {
-  const e = fingerExtension(hand);
-  return e[0] < tuning.fist && e[1] < tuning.fist && e[2] < tuning.fist && e[3] < tuning.fist;
+  return isFistRatios(fingerExtension(hand));
 }
 
 /**

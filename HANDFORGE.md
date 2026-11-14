@@ -144,7 +144,15 @@ throughout (no Marvel or other third-party names/designs).
 - Tuning on device: Settings > GESTURES (NORMAL / VERY SENSITIVE / STRICT:
   fist and open-palm ratios, swing/throw speed multiplier, gestures.ts
   `tuning`), Settings > HAND DEBUG (finger ratios I/M/R/P, detected gesture,
-  palm speed and pinch distance floating over each wrist).
+  palm speed and pinch distance floating over each wrist; it also names SIGIL).
+  Measured on a Quest 3 from a HAND DEBUG recording (2026-11-14): open palm reads
+  1.8-2.0 on every finger, a real fist 0.6-0.95 (1.3 on the index with the thumb
+  over it), a relaxed hand rests at 1.4-1.65 (right on the old fist line, so a
+  fist now also needs the four fingers to average under line minus 0.25), and a
+  deliberate pinch bottoms out at 3 cm between the thumb and index tips (a tight
+  fist reads 1 cm), so a pinch registers under 4 cm and lets go past 5.8 cm.
+  A pinch with the palm facing you also opens the Meta system menu, which blurs the
+  app: the frame loop and all sound freeze (sfx.hold) and carry on when it closes.
 - Audio: cinematic synthesised score (music.ts: drums, sub bass, strings,
   brass, choir, bells, per-track lead melody, reverb + echo, 16-bar songs,
   intensity 0 calm / 1 combat / 2 boss) and layered SFX with a hall reverb.

@@ -5,10 +5,15 @@
  * from the combat system; this file is only the pinch click, kept pure.
  */
 
-/** Thumb and index tips closer than this (metres) count as a pinch. */
-export const PINCH_ON = 0.024;
+/**
+ * Thumb and index tips closer than this (metres) count as a pinch. Measured on a
+ * Quest 3: a deliberate pinch bottoms out at about 3 cm between the two tip
+ * joints (a tight fist reads 1 cm, a relaxed hand 5 cm or more), so the line
+ * sits at 4 cm.
+ */
+export const PINCH_ON = 0.04;
 /** ...and the pinch is released once they pass this. */
-export const PINCH_OFF = 0.05;
+export const PINCH_OFF = 0.058;
 /** Minimum seconds between two clicks from one hand. */
 export const CLICK_GAP = 0.4;
 

@@ -77,7 +77,7 @@ import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
-import { PinchEdge } from './combat/gaze.js';
+import { PINCH_ON, PinchEdge } from './combat/gaze.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
 import { Cinema, type CinemaHooks } from './combat/cinema.js';
 import { ChapterCinema } from './combat/chaptercinema.js';
@@ -154,7 +154,7 @@ const HAMMER_RETURN_SPEED = 13;
 const HAMMER_HEAD_RADIUS = 0.14;
 const HAMMER_FLIGHT = 2.6;
 const RECALL_DELAY = 0.45;
-const PINCH_DISTANCE = 0.03;
+const PINCH_DISTANCE = 0.034;
 
 type HammerState = 'floating' | 'gripped' | 'docked' | 'flying' | 'returning';
 type WebState = 'idle' | 'flying' | 'tethered' | 'retracting';
@@ -865,6 +865,8 @@ export class CombatSystem extends createSystem({
   private readonly swapPoint = new Vector3();
   /** Seconds a pinch has been held while a movie plays. */
   private skipHold = 0;
+  /** The headset's system menu was up on the last frame. */
+  private wasBlurred = false;
   /** A black sphere that fades away as a session starts, hiding the first frames' settling. */
   private veil!: Mesh<SphereGeometry, MeshBasicMaterial>;
   private veilT = 9;
@@ -2234,7 +2236,13 @@ export class CombatSystem extends createSystem({
       if (this.arena.visible) this.arena.position.set(this.world.camera.getWorldPosition(this.v1).x, 0, this.v1.z);
       this.ground.syncDisc(this.arena.position.x, this.arena.position.z, this.arena.visible && this.quality.ground);
     }
-    if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) return;
+    // The Meta system menu (a pinch with the palm facing you opens it) blurs the app: freeze sound with the frame.
+    const blurred = this.world.visibilityState.peek() === VisibilityState.VisibleBlurred;
+    if (blurred !== this.wasBlurred) {
+      this.wasBlurred = blurred;
+      this.sfx.hold(blurred);
+    }
+    if (blurred) return;
     const realDt = Math.min(delta, this.maxDt);
     this.elapsed = time;
     this.frameDt = realDt;
@@ -5694,11 +5702,13 @@ export class CombatSystem extends createSystem({
         ? 'FIST'
         : isWebPose(hand.joints)
           ? 'WEB'
-          : isOpenPalm(hand.joints)
-            ? 'OPEN'
-            : pinch < PINCH_DISTANCE * 1.4
-              ? 'PINCH'
-              : '-';
+          : isSigilPose(hand.joints)
+            ? 'SIGIL'
+            : isOpenPalm(hand.joints)
+              ? 'OPEN'
+              : pinch < PINCH_ON
+                ? 'PINCH'
+                : '-';
       const c = hand.debugCanvas.getContext('2d')!;
       c.clearRect(0, 0, 256, 128);
       c.fillStyle = 'rgba(8, 8, 20, 0.85)';

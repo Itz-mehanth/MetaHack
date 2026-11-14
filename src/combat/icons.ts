@@ -51,6 +51,7 @@ export const iconsReady: Promise<void> = Promise.all(
   ICON_NAMES.map(
     (name) =>
       new Promise<void>((resolve) => {
+        if (typeof Image === 'undefined') return resolve(); // no DOM (unit tests)
         const image = new Image();
         image.onload = () => {
           images.set(name, image);
