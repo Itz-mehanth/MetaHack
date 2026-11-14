@@ -1023,6 +1023,11 @@ export class CombatSystem extends createSystem({
       } catch {
         this.perfParam = params.get('perf') === '1' ? true : null;
       }
+      // Frame-rate experiments on a headset: ?idle=1 runs none of the game (only the frame counter), so the
+      // headset's and the renderer's own cost shows; ?off=ground,particles,ink,auras turns those parts off.
+      this.idle = params.get('idle') === '1';
+      for (const name of (params.get('off') ?? '').split(',')) if (name.trim() !== '') this.off.add(name.trim().toLowerCase());
+      if (this.off.size > 0) this.applyQuality(this.governor.tier);
       const forced = Number(params.get('q'));
       if (params.has('q') && Number.isFinite(forced)) {
         this.governor.tier = Math.max(0, Math.min(3, Math.round(forced)));
@@ -2162,6 +2167,10 @@ export class CombatSystem extends createSystem({
 
   update(delta: number, time: number): void {
     // One bad frame must never freeze the game: log (throttled) and carry on.
+    if (this.idle) {
+      this.updatePerf(delta, Math.min(delta, 0.05));
+      return;
+    }
     const started = performance.now();
     try {
       this.frame(delta, time);
@@ -2181,6 +2190,10 @@ export class CombatSystem extends createSystem({
   private lastErrorAt = -10;
   /** The last movie skip or frame error, shown on the PERF HUD. */
   private lastNote = '';
+  /** ?idle=1: none of the game runs (frame-rate experiment). */
+  private idle = false;
+  /** ?off=...: parts turned off by hand (ground, particles, ink, auras) to find what costs frame time. */
+  private readonly off = new Set<string>();
 
   /** Asks the headset for a steady 72 Hz: cheaper than 90 and above the 60 fps bar. */
   private requestFrameRate(session: XRSession | null | undefined): void {
@@ -2208,7 +2221,11 @@ export class CombatSystem extends createSystem({
   }
 
   private applyQuality(tier: number): void {
-    const plan = planFor(tier);
+    const plan = { ...planFor(tier) };
+    if (this.off.has('ground')) plan.ground = false;
+    if (this.off.has('auras')) plan.auras = false;
+    if (this.off.has('ink')) plan.ink = false;
+    if (this.off.has('particles')) plan.particles = 0;
     this.quality = plan;
     CreatureModel.ink = plan.ink;
     this.particles.density = plan.particles;
