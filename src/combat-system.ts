@@ -77,7 +77,7 @@ import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
-import { PINCH_ON, PinchEdge } from './combat/gaze.js';
+import { PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
 import { Cinema, type CinemaHooks } from './combat/cinema.js';
 import { ChapterCinema } from './combat/chaptercinema.js';
@@ -863,8 +863,8 @@ export class CombatSystem extends createSystem({
   /** One pinch detector per hand for tagging a hero in from the strip, and where the pinch is. */
   private readonly swapPinch = [new PinchEdge(), new PinchEdge()];
   private readonly swapPoint = new Vector3();
-  /** Seconds a pinch has been held while a movie plays. */
-  private skipHold = 0;
+  /** Skips a movie with a firm pinch that begins during it (see SkipPinch). */
+  private readonly skipPinch = new SkipPinch();
   /** The headset's system menu was up on the last frame. */
   private wasBlurred = false;
   /** A black sphere that fades away as a session starts, hiding the first frames' settling. */
@@ -2159,6 +2159,7 @@ export class CombatSystem extends createSystem({
 
   update(delta: number, time: number): void {
     // One bad frame must never freeze the game: log (throttled) and carry on.
+    const started = performance.now();
     try {
       this.frame(delta, time);
     } catch (error) {
@@ -2167,7 +2168,11 @@ export class CombatSystem extends createSystem({
         console.error('[Combat] frame error', error);
       }
     }
+    this.cpuStats.push(performance.now() - started);
   }
+
+  /** Milliseconds the game's own frame code takes (the rest of a frame is the engine, the GPU and waiting). */
+  private readonly cpuStats = new FrameStats();
 
   private lastErrorAt = -10;
 
@@ -2214,6 +2219,8 @@ export class CombatSystem extends createSystem({
       fps: stats.fps(),
       avgMs: stats.avgMs(),
       p95Ms: stats.p95Ms(),
+      cpuMs: this.cpuStats.avgMs(),
+      cpuP95Ms: this.cpuStats.p95Ms(),
       slowPct: stats.slowShare() * 100,
       tier: this.governor.tier,
       locked: this.governor.locked,
@@ -2507,16 +2514,15 @@ export class CombatSystem extends createSystem({
     const handB = this.hands[1].tracked;
     // Pinches are tracked all the time so one already held when a menu opens is not a click.
     let pinched = false;
-    let holding = false;
+    let firm = false;
     for (let i = 0; i < 2; i += 1) {
       // A closed fist also brings the thumb and index tips together: it must not count as a pinch.
       const distance = this.hands[i].tracked && isPinchPose(this.hands[i].joints) ? this.pinchPoint(i, this.gazePoint) : null;
       if (this.pinchEdges[i].update(distance, this.elapsed)) pinched = true;
-      if (this.pinchEdges[i].held) holding = true;
+      if (distance != null && distance < SKIP_PINCH) firm = true;
     }
-    // A movie is skipped by holding a pinch for a moment, never by a passing hand shape.
-    this.skipHold = holding && this.movieActive ? this.skipHold + dt : 0;
-    if (this.skipHold > 0.6) this.skipMovie(1.5);
+    // A movie is skipped by a firm pinch held for most of a second that begins during it, never by a passing hand shape.
+    if (this.skipPinch.update(this.movieActive, firm, dt)) this.skipMovie(1.5);
     const menu = this.panel.visible || this.galaxy.visible;
     const active = menu && (handA || handB) && !this.flat && !this.pad && this.tx == null;
     this.gazeArm = active ? this.gazeArm + dt : 0;

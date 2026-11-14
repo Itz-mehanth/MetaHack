@@ -13,9 +13,47 @@
  */
 export const PINCH_ON = 0.04;
 /** ...and the pinch is released once they pass this. */
-export const PINCH_OFF = 0.058;
+export const PINCH_OFF = 0.047;
 /** Minimum seconds between two clicks from one hand. */
 export const CLICK_GAP = 0.4;
+
+/** A firm pinch (metres) held to skip a movie: tighter than a menu click, which a loosely held hand can make. */
+export const SKIP_PINCH = 0.036;
+/** Seconds the hand must have been open during the movie before a pinch can skip it. */
+export const SKIP_ARM = 0.4;
+/** Seconds the firm pinch must then be held. */
+export const SKIP_HOLD = 0.8;
+
+/**
+ * Skipping a movie with a pinch. The pinch that pressed START STORY (or a hand
+ * resting close to a pinch) must never count, so a skip needs a firm pinch that
+ * begins after the hand has been open for a moment while the movie plays, and
+ * is then held.
+ */
+export class SkipPinch {
+  private armed = false;
+  private open = 0;
+  private hold = 0;
+
+  /** `playing`: a movie is on. `firm`: a hand is pinching firmly now. True on the frame the skip fires. */
+  update(playing: boolean, firm: boolean, dt: number): boolean {
+    if (!playing) {
+      this.armed = false;
+      this.open = 0;
+      this.hold = 0;
+      return false;
+    }
+    if (!firm) {
+      this.open += dt;
+      if (this.open > SKIP_ARM) this.armed = true;
+      this.hold = 0;
+      return false;
+    }
+    this.open = 0;
+    this.hold = this.armed ? this.hold + dt : 0;
+    return this.hold > SKIP_HOLD;
+  }
+}
 
 export class PinchEdge {
   private down = false;

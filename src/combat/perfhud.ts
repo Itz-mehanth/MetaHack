@@ -4,6 +4,9 @@ export interface PerfReadout {
   fps: number;
   avgMs: number;
   p95Ms: number;
+  /** The game's own frame code, average and p95 (ms). */
+  cpuMs: number;
+  cpuP95Ms: number;
   slowPct: number;
   tier: number;
   locked: boolean;
@@ -17,7 +20,7 @@ export interface PerfReadout {
 }
 
 const W = 384;
-const H = 192;
+const H = 224;
 
 /**
  * A small developer readout of frame rate, frame time, draw calls, triangles
@@ -41,7 +44,7 @@ export class PerfHud {
     this.texture = new CanvasTexture(this.canvas);
     this.texture.colorSpace = SRGBColorSpace;
     this.mesh = new Mesh(
-      new PlaneGeometry(0.3, 0.15),
+      new PlaneGeometry(0.3, 0.175),
       new MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }),
     );
     this.mesh.name = 'PerfHud';
@@ -72,6 +75,7 @@ export class PerfHud {
     const good = r.fps >= 60;
     const lines = [
       `${r.fps.toFixed(0)} fps  ${r.avgMs.toFixed(1)} ms  p95 ${r.p95Ms.toFixed(1)}`,
+      `game js ${r.cpuMs.toFixed(1)} ms  p95 ${r.cpuP95Ms.toFixed(1)}`,
       `slow ${r.slowPct.toFixed(0)}%  tier ${r.tier}${r.locked ? ' (locked)' : ''}`,
       `calls ${r.calls}  tris ${(r.triangles / 1000).toFixed(0)}k`,
       `geo ${r.geometries}  tex ${r.textures}  foes ${r.enemies}`,

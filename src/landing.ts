@@ -254,8 +254,14 @@ export function setupLanding(world: World): void {
           throw error;
         });
     }
+    // Frame-rate experiments on a headset (read the PERF HUD, ?perf=1): ?scale=0.75 renders fewer pixels,
+    // ?lean=1 starts MR without the room-mesh, hit-test and anchor features the game never uses.
+    const params = new URLSearchParams(window.location.search);
+    const scale = Number(params.get('scale'));
+    if (scale >= 0.5 && scale <= 1.5) xr.setFramebufferScaleFactor(scale);
     // Full VR has no room to scan: ask for hands and nothing else.
     if (mode === SessionMode.ImmersiveVR) world.launchXR({ sessionMode: mode, features: { planeDetection: false, meshDetection: false, anchors: false, hitTest: false } });
+    else if (params.has('lean')) world.launchXR({ sessionMode: mode, features: { handTracking: true, planeDetection: true, meshDetection: false, anchors: false, hitTest: false } });
     else world.launchXR({ sessionMode: mode });
     window.setTimeout(() => {
       if (system != null && original != null) system.requestSession = original;

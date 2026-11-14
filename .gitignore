@@ -47,3 +47,6 @@ pids/
 # Local dev server output
 dev-log.txt
 .claude/settings.local.json
+
+# Quest screen recordings (large; never commit)
+/com.oculus.*.mp4
