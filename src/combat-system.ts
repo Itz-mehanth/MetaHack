@@ -79,6 +79,7 @@ import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
 import { PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
 import { menuStillFacing } from './combat/menuaim.js';
+import { skipHiddenBranches } from './combat/sceneperf.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
 import { Cinema, type CinemaHooks } from './combat/cinema.js';
 import { ChapterCinema } from './combat/chaptercinema.js';
@@ -972,6 +973,8 @@ export class CombatSystem extends createSystem({
   init(): void {
     this.root = new Group();
     this.root.name = 'Combat';
+    // Thousands of pooled objects sit hidden under here; Three must not walk them every frame.
+    if (!new URLSearchParams(window.location.search).has('allnodes')) skipHiddenBranches(this.root);
     this.world.createTransformEntity(this.root, { persistent: true });
 
     this.particles = new Particles();
@@ -1035,6 +1038,25 @@ export class CombatSystem extends createSystem({
         this.applyQuality(this.governor.tier);
       }
       (window as unknown as { __surgePerf: () => PerfReadout }).__surgePerf = () => this.perfReadout();
+      // Scene-graph size by branch (every object is visited by Three each frame, visible or not): where the nodes are.
+      (window as unknown as { __surgeNodes: () => unknown }).__surgeNodes = () => {
+        const count = (o: { children: readonly unknown[] }): number => {
+          let n = 1;
+          for (const c of o.children as { children: readonly unknown[] }[]) n += count(c);
+          return n;
+        };
+        const rows: { path: string; nodes: number; visible: boolean }[] = [];
+        let total = 0;
+        for (const a of this.world.scene.children) {
+          const nodes = count(a);
+          total += nodes;
+          const name = a.name || a.type;
+          rows.push({ path: name, nodes, visible: a.visible });
+          for (const b of a.children) rows.push({ path: `${name} > ${b.name || b.type}`, nodes: count(b), visible: b.visible });
+        }
+        rows.sort((x, y) => y.nodes - x.nodes);
+        return { total, top: rows.slice(0, 28) };
+      };
       (window as unknown as { __surgeWorld: () => unknown }).__surgeWorld = () => ({
         arena: this.arena?.visible ?? null,
         arenaPos: this.arena ? [this.arena.position.x, this.arena.position.z] : null,

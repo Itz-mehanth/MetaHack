@@ -46,10 +46,7 @@
       "physics": false,
       "sceneUnderstanding": true,
       "environmentRaycast": true,
-      "spatialUI": {
-        "kit": "horizon",
-        "preferredColorScheme": "dark"
-      }
+      "spatialUI": false
     }
   },
   "dev": {
