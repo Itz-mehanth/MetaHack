@@ -1348,6 +1348,7 @@ export class CombatSystem extends createSystem({
       this.sfx.unlock();
       this.veilT = 0;
       this.veil.visible = true;
+      void this.warmShaders();
       this.hudPlaced = false;
       if (this.panel.visible) this.replaceMenuAt = this.elapsed + 0.6;
       this.music.play(this.run.phase === 'title' ? 'menu' : this.run.stage.world.id);
@@ -1744,6 +1745,31 @@ export class CombatSystem extends createSystem({
       jobs.push(job);
     }
     return Promise.all(jobs).then(() => undefined);
+  }
+
+  /**
+   * Compiles the shaders of everything in the scene, hidden pools included, ahead of time.
+   * Otherwise each one is built the first time its enemy, boss or effect appears, in the middle
+   * of a frame, as a hitch of tens to hundreds of milliseconds. Never waits more than 3 s, and
+   * only ever an optimisation: a failure is ignored. (Test hook: `__surgeWarmMs`.)
+   */
+  private warmShaders(): Promise<void> {
+    const started = performance.now();
+    const renderer = this.world.renderer;
+    const done = new Promise<void>((resolve) => {
+      try {
+        void renderer.compileAsync(this.world.scene, this.world.camera).then(
+          () => resolve(),
+          () => resolve(),
+        );
+      } catch {
+        resolve();
+      }
+    });
+    const limit = new Promise<void>((resolve) => window.setTimeout(resolve, 3000));
+    return Promise.race([done, limit]).then(() => {
+      (window as unknown as { __surgeWarmMs?: number }).__surgeWarmMs = Math.round(performance.now() - started);
+    });
   }
 
   /** The region boss as a giant creature (the mech stays as the fallback). */
@@ -3150,7 +3176,7 @@ export class CombatSystem extends createSystem({
     }
     // The world's creatures download while the jump tunnel plays.
     const go = () => {
-      const ready = this.prepareCreatures(stage.world.id);
+      const ready = this.prepareCreatures(stage.world.id).then(() => this.warmShaders());
       this.travel(stage, () => void ready.then(() => this.launchStage(hero, stage)));
     };
     const ids: (string | null)[] = [];
