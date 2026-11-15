@@ -44,6 +44,9 @@ export const GUIDE_CSS = `
 #landing .gscreen em{display:block;font-style:normal;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:.2em;color:var(--c);margin-bottom:2px}
 #landing .gnav .gstep{border-color:var(--ink);background:rgba(13,8,32,.9)}
 #landing .gnote{margin:14px auto 0;max-width:720px;font-size:15px;line-height:1.3;opacity:.8}
+#landing .gvideo{margin:0 auto 34px;max-width:880px}
+#landing .gvideo video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#06020F;border:4px solid var(--ink);border-radius:14px;box-shadow:6px 6px 0 var(--ink),0 0 0 2px #3DF5FF inset,0 0 30px rgba(61,245,255,.25)}
+#landing .gvideo figcaption{margin:10px auto 0;max-width:640px;font-size:15px;line-height:1.3;opacity:.8}
 `;
 
 interface Live {
@@ -85,6 +88,9 @@ export function guideHTML(): string {
     (n) => `<div class="gstep" style="--c:${n.color}"><canvas width="400" height="400" data-g="${n.gesture}" data-c="${n.color}" aria-hidden="true"></canvas><b>${n.title}</b><p>${n.text}</p></div>`,
   ).join('');
   return `
+  <h2>HOW TO PLAY</h2>
+  <p class="gsub">The short version, with a voice-over and captions: finding your way around the menus, picking a hero and fighting.</p>
+  <figure class="gvideo"><video controls preload="none" playsinline poster="/video/how-to-play.jpg" aria-label="How to play SURGE: Hands of Heroes"><source src="/video/how-to-play.mp4" type="video/mp4"></video><figcaption>Recorded from the game on a flat screen. In a headset the same moves are your real hands.</figcaption></figure>
   <h2>HOW EACH HERO PLAYS</h2>
   <p class="gsub">Everything is done with your bare hands. Pick a hero to see the pose, step by step.</p>
   <div class="gtabs" id="gtabs" role="tablist">${tabs}</div>

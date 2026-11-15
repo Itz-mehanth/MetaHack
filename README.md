@@ -17,6 +17,8 @@ webs, telekinesis and a shield.
 | **Meta Quest 3 / 3S** (best) | Open the link in the Quest Browser, put the controllers down, tap **ENTER MR** (your room, passthrough) or **ENTER VR**. |
 | **Phone, tablet or computer** | Open the link and tap **PLAY NOW**. Touch, mouse or keys drive the same hero code with a "puppet hand". |
 
+Prefer to watch first? The landing page has a 1:48 how-to-play video with voice-over and captions (scroll to **HOW TO PLAY**).
+
 The first headset session plays a short opening movie and a guided prologue that teaches seven heroes. If you
 would rather jump straight in, open the pause menu and choose **SKIP TRAINING**. All nine heroes are unlocked
 from the start so you can try each of them.

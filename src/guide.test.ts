@@ -24,6 +24,12 @@ describe('landing hero guide', () => {
     expect(nav).toContain('OVERDRIVE');
   });
 
+  it('offers the how-to video without downloading it until it is played', () => {
+    expect(html).toContain('<video controls preload="none"');
+    expect(html).toContain('/video/how-to-play.mp4');
+    expect(html).toContain('poster="/video/how-to-play.jpg"');
+  });
+
   it('keeps the hero list and the guide in step (no hero left out of the roster)', () => {
     expect(html.match(/role="tab"/g)?.length).toBe(HEROES.length);
   });
