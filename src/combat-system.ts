@@ -77,7 +77,7 @@ import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
-import { CLICK_PALM_AWAY, CLICK_STILL, GAZE_DWELL, GazeDwell, PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
+import { CLICK_STILL, GAZE_DWELL, GazeDwell, PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
 import { ShieldGauge } from './combat/shieldgauge.js';
 import { Vitals } from './combat/vitals.js';
 import { MenuHandle } from './combat/menuhandle.js';
@@ -925,6 +925,7 @@ export class CombatSystem extends createSystem({
   private readonly gazeDwell = new GazeDwell();
   private readonly gazePrev = [new Vector3(), new Vector3()];
   private readonly gazeSeen = [false, false];
+  private readonly gazeSpeed = [0, 0];
   /** When a small creature last made a sound (a crowd must patter, not roar). */
   private critterAt = -10;
   /** Skips a movie with a firm pinch that begins during it (see SkipPinch). */
@@ -2710,16 +2711,18 @@ export class CombatSystem extends createSystem({
     for (let i = 0; i < 2; i += 1) {
       // A closed fist also brings the thumb and index tips together: it must not count as a pinch.
       const distance = this.hands[i].tracked && isPinchPose(this.hands[i].joints) ? this.pinchPoint(i, this.gazePoint) : null;
-      // A click has to be meant: the hand still enough to be aiming, and not the Meta menu gesture (palm turned to the face).
+      // A click has to be meant: not a hand swinging through (the speed is smoothed, because tracking jitters from frame to frame).
       let meant = true;
       if (distance != null) {
-        const speed = this.gazeSeen[i] ? this.gazePoint.distanceTo(this.gazePrev[i]) / Math.max(dt, 1e-3) : 0;
+        const instant = this.gazeSeen[i] ? this.gazePoint.distanceTo(this.gazePrev[i]) / Math.max(dt, 1e-3) : 0;
+        this.gazeSpeed[i] += (instant - this.gazeSpeed[i]) * 0.3;
         this.gazePrev[i].copy(this.gazePoint);
         this.gazeSeen[i] = true;
-        const gauntlet = this.hands[i].gauntlet;
-        this.v1.subVectors(this.head, gauntlet.palmPoint).normalize();
-        meant = speed < CLICK_STILL && gauntlet.palmNormal.dot(this.v1) < CLICK_PALM_AWAY;
-      } else this.gazeSeen[i] = false;
+        meant = this.gazeSpeed[i] < CLICK_STILL;
+      } else {
+        this.gazeSeen[i] = false;
+        this.gazeSpeed[i] = 0;
+      }
       if (this.pinchEdges[i].update(distance, this.elapsed) && !this.rigNear[i] && meant) pinched = true;
       if (distance != null && distance < SKIP_PINCH) firm = true;
     }

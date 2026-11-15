@@ -92,11 +92,11 @@ export class MenuHandle {
   }
 
   /** True when a world point is over the bar (with `margin` metres to spare, for a pinch that is near rather than exact). */
-  overBar(world: Vector3, margin = 0.05): boolean {
+  overBar(world: Vector3, margin = 0.03): boolean {
     this.toLocal(world);
     const left = -WIDTH_M / 2;
     const right = left + WIDTH_M * BAR_SHARE;
-    return this.local.x > left - margin && this.local.x < right + margin && Math.abs(this.local.y) < HEIGHT_M / 2 + margin && Math.abs(this.local.z) < 0.07;
+    return this.local.x > left - margin && this.local.x < right + margin && Math.abs(this.local.y) < HEIGHT_M / 2 + margin && Math.abs(this.local.z) < 0.05;
   }
 
   /** True when a fingertip is over the RECENTER chip. */

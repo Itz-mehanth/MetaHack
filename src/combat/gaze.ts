@@ -14,29 +14,27 @@
 export const PINCH_ON = 0.037;
 
 /**
- * A menu click is stricter than a grab, because a click you did not mean is worse
- * than one you have to repeat: the gap must be under CLICK_ON, and a pinch that is
- * not quite finished (over CLICK_SURE) has to stay closed for CLICK_SETTLE, so
- * fingers on their way to a pinch, or a loose hand, do not click.
+ * A menu click: the gap must be under CLICK_ON, and a pinch that is not quite
+ * finished (over CLICK_SURE) has to stay closed for CLICK_SETTLE, so fingers on
+ * their way to a pinch do not click. These are the values that worked on a Quest 3
+ * (a deliberate pinch bottoms out at 3 cm). A tighter set (3.3 cm, settle 0.12 s)
+ * left a few millimetres of slack for tracking noise and stopped real pinches
+ * from counting, so what keeps a click deliberate now is the gaze dwell and the
+ * stillness check below, which do not depend on how precisely the fingers are measured.
  */
-export const CLICK_ON = 0.033;
+export const CLICK_ON = 0.037;
 /** ...and the pinch is released once they pass this. */
 export const CLICK_OFF = 0.045;
 /** Tips this close are a finished pinch: it counts at once. */
-export const CLICK_SURE = 0.027;
+export const CLICK_SURE = 0.03;
 /** Seconds a pinch between CLICK_SURE and CLICK_ON must stay closed before it counts. */
-export const CLICK_SETTLE = 0.12;
+export const CLICK_SETTLE = 0.07;
 /** Minimum seconds between two clicks from one hand. */
-export const CLICK_GAP = 0.5;
+export const CLICK_GAP = 0.4;
 /** Seconds the gaze must have rested on the same button before a pinch can press it. */
-export const GAZE_DWELL = 0.3;
-/** A pinch made while the pinch point moves faster than this (m/s) is a hand on its way somewhere, not a click. */
-export const CLICK_STILL = 0.5;
-/**
- * Cosine of how squarely a palm may face the head before its pinch is the Meta
- * menu gesture (palm toward you, then pinch), which must never press a button.
- */
-export const CLICK_PALM_AWAY = 0.55;
+export const GAZE_DWELL = 0.25;
+/** A pinch made while the (smoothed) speed of the pinch point is over this (m/s) is a hand swinging through, not a click. */
+export const CLICK_STILL = 1.0;
 
 /**
  * How long the gaze has rested on one thing (a button, a planet). Pass the id of
