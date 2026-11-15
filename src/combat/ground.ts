@@ -21,7 +21,7 @@ const TILES_PER_METRE = 0.6;
 /** How much of the scanned floor polygon is painted (the edges are the least reliable). */
 const INSET = 0.94;
 
-export type GroundStyle = 'grid' | 'lava' | 'rock' | 'ice' | 'void' | 'sand' | 'garden' | 'moss' | 'plate' | 'rune';
+export type GroundStyle = 'grid' | 'lava' | 'rock' | 'ice' | 'void' | 'sand' | 'garden' | 'moss' | 'plate';
 
 /** The ground each world paints over the scanned floor. */
 export function groundStyleFor(worldId: string): GroundStyle {
@@ -34,7 +34,6 @@ export function groundStyleFor(worldId: string): GroundStyle {
   if (worldId.startsWith('moon')) return 'garden';
   if (worldId.startsWith('sky')) return 'moss';
   if (worldId.startsWith('iron')) return 'plate';
-  if (worldId.startsWith('veil')) return 'rune';
   return 'rock';
 }
 
@@ -224,26 +223,6 @@ function paint(c: CanvasRenderingContext2D, style: GroundStyle, base: string, gl
       c.shadowBlur = 0;
       break;
     }
-    case 'rune':
-      speckle(180, ['#2A1A4A', '#0A0618'], 3, 14);
-      c.strokeStyle = glow;
-      c.shadowColor = glow;
-      c.shadowBlur = 16;
-      c.lineWidth = 4;
-      for (const r of [190, 150, 90]) {
-        c.beginPath();
-        c.arc(SIZE / 2, SIZE / 2, r, 0, Math.PI * 2);
-        c.stroke();
-      }
-      for (let i = 0; i < 8; i += 1) {
-        const a = (i / 8) * Math.PI * 2;
-        c.beginPath();
-        c.moveTo(SIZE / 2 + Math.cos(a) * 90, SIZE / 2 + Math.sin(a) * 90);
-        c.lineTo(SIZE / 2 + Math.cos(a) * 190, SIZE / 2 + Math.sin(a) * 190);
-        c.stroke();
-      }
-      c.shadowBlur = 0;
-      break;
   }
 }
 

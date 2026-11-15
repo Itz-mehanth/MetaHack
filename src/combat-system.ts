@@ -71,7 +71,7 @@ import {
 } from './combat/saga.js';
 import { addOutline, Onomatopoeia } from './combat/comic.js';
 import { Gauntlet, HAND_JOINTS, HandPose, J } from './combat/gauntlet.js';
-import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isPinchPose, isSigilPose, isWebPose, setSensitivity, tuning } from './combat/gestures.js';
+import { fingerExtension, type HandJoints, isBlastPose, isFist, isOpenPalm, isPinchPose, isWebPose, setSensitivity, tuning } from './combat/gestures.js';
 import { type HeroId, HEROES } from './combat/heroes.js';
 import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
@@ -111,8 +111,6 @@ import { BlobShadows } from './combat/shadows.js';
 import { FloorGlow, ScorchMarks, Telegraphs, WallCracks } from './combat/decals.js';
 import { Scenery } from './combat/scenery.js';
 import { FrameStats, planFor, QualityGovernor, type QualityPlan } from './combat/quality.js';
-import { rollSpell, type SpellId, spellById } from './combat/spells.js';
-import { SpellFx } from './combat/spellfx.js';
 import { BeamFx } from './combat/beamfx.js';
 import { Haptics } from './combat/haptics.js';
 import { RoomBorder } from './combat/roomborder.js';
@@ -261,8 +259,8 @@ const ENEMY_COLOR: Readonly<Record<EnemyKind, Color>> = {
   pod: GOLD,
 };
 const OBLIVAX_COLOR = new Color(OBLIVAX.color);
-const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins', 'iron-bastion', 'veil-sanctum', 'oblivion'];
-type PickupKind = 'heal' | 'rapid' | 'power' | 'rune';
+const REGIONS = ['neon-grid', 'ember-foundry', 'storm-peak', 'frost-spire', 'void-rift', 'scrap-wastes', 'moon-temple', 'sky-ruins', 'iron-bastion', 'oblivion'];
+type PickupKind = 'heal' | 'rapid' | 'power';
 const BUFF_SECONDS = 8;
 
 interface HandState {
@@ -905,26 +903,8 @@ export class CombatSystem extends createSystem({
   private roomAsked = false;
   /** Which power-ups are on ('', 'rapid', 'power', 'both') and the colour they give the kit. */
   private buffKey = '';
-  /** VESPER: the loaded spell, its charge, and the lasting effects. */
-  private spell: SpellId | '' = '';
-  private spellLife = 0;
-  private spellHold = 0;
-  private spellArmed = false;
-  private readonly dartCool = [0, 0];
   private readonly fistAt = [-10, -10];
   private readonly meteorArmed = [false, false];
-  private mandalaT = 0;
-  private mandalaHand = -1;
-  private readonly mandalaAt = new Vector3();
-  private readonly mandalaN = new Vector3(0, 0, -1);
-  private riftT = 0;
-  private riftTick = 0;
-  private readonly riftAt = new Vector3();
-  private bubbleT = 0;
-  private readonly bubbleAt = new Vector3();
-  private twinsT = 0;
-  private readonly sigilMeteors: Array<{ t: number; at: Vector3; warned: boolean }> = [];
-  private spellFx!: SpellFx;
   /** Wall footprints from the scan, and a counter that changes when they do. */
   private wallSegs: Segment[] = [];
   private wallVersion = 0;
@@ -1150,7 +1130,6 @@ export class CombatSystem extends createSystem({
       });
     }
     this.suit = new Suit(this.root, CYAN);
-    this.spellFx = new SpellFx(this.root, CYAN);
     this.handBeams = [new BeamFx(this.root, WHITE), new BeamFx(this.root, WHITE)];
     this.chestBeam = new BeamFx(this.root, CYAN);
     this.reactor = createGlowSprite(CYAN, 0);
@@ -1575,7 +1554,7 @@ export class CombatSystem extends createSystem({
         pack: 1,
       });
     }
-    for (const kind of ['heal', 'rapid', 'power', 'rune'] as const) {
+    for (const kind of ['heal', 'rapid', 'power'] as const) {
       for (let n = 0; n < 5; n += 1) {
         const object = await this.world.assets.instantiate(`pickup-${kind}`);
         object.visible = false;
@@ -2193,12 +2172,6 @@ export class CombatSystem extends createSystem({
     (window as unknown as { __surgeSpawn: (kind: string, n?: number) => void }).__surgeSpawn = (kind: string, n = 1) => {
       for (let k = 0; k < n; k += 1) this.spawnDrone(kind as EnemyKind, 0.8, false);
     };
-    // Test hook: loads a spell by id and casts it straight ahead.
-    (window as unknown as { __surgeSpell: (id: string) => void }).__surgeSpell = (id: string) => {
-      this.spell = id as SpellId;
-      this.spellLife = 20;
-      this.castSpell(this.forward, -1);
-    };
     // Test hook: takes a power-up ('rapid' or 'power') as if it were collected.
     (window as unknown as { __surgeBuff: (kind: string) => void }).__surgeBuff = (kind: string) => {
       const pickup = this.pickups.find((p) => p.kind === kind);
@@ -2514,7 +2487,6 @@ export class CombatSystem extends createSystem({
     this.updateMovie(realDt);
     this.updateVeil(realDt);
     if (this.quality.auras) this.updateAuras(realDt, time);
-    this.updateSorcerer(realDt, time);
     // The suit: forearm sleeves and the chest emblem, while a stage runs.
     if (this.powersLive) {
       for (let i = 0; i < 2; i += 1) {
@@ -2921,8 +2893,7 @@ export class CombatSystem extends createSystem({
       const clap = hasUnlock(this.profile, `overdrive-${this.hero}`) && this.overdrive >= 1;
       const storm = this.hero === 'tempest' && this.stormCooldown <= 0 && this.hammerState === 'gripped';
       const uni = this.hero === 'arc' && this.uniCooldown <= 0 && this.uniState === 'idle';
-      const cast = this.hero === 'vesper' && this.spell !== '';
-      this.screen.setSpecial(clap ? 'CLAP!' : this.hero === 'ronin' && this.xCooldown <= 0 ? 'X-STRIKE' : storm ? 'STORM' : uni ? 'UNI-BEAM' : cast ? 'CAST' : '');
+      this.screen.setSpecial(clap ? 'CLAP!' : this.hero === 'ronin' && this.xCooldown <= 0 ? 'X-STRIKE' : storm ? 'STORM' : uni ? 'UNI-BEAM' : '');
       this.screen.setSwap(this.squad.length > 1 && this.run.phase === 'fighting' && this.script == null);
     } else {
       intent.special = false;
@@ -3389,7 +3360,6 @@ export class CombatSystem extends createSystem({
     this.webShots.clear();
     this.stormActive = 0;
     this.stormCharge = 0;
-    this.endSpells();
     this.syncMap();
     this.syncArmory();
     this.setTheme(stage.world.id);
@@ -4395,373 +4365,8 @@ export class CombatSystem extends createSystem({
     }
   }
 
-  // ---------------------------------------------------------------- VESPER
-
-  /**
-   * VESPER: two fingers out fire runic darts. Defeated enemies drop rune
-   * orbs; touching one loads a spell (see spells.ts) that is cast with a hand
-   * gesture, or the CAST button on a screen, before its charge fades.
-   */
-  private updateSorcerer(dt: number, time: number): void {
-    const live = this.powersLive && this.hero === 'vesper';
-    if (!live) {
-      if (this.mandalaT > 0 || this.riftT > 0 || this.bubbleT > 0 || this.twinsT > 0 || this.spell) this.endSpells();
-      return;
-    }
-    const power = 1 + 0.15 * this.level('vesper-power');
-    // Darts: the sigil pose on either hand.
-    for (let i = 0; i < 2; i += 1) {
-      this.dartCool[i] -= dt;
-      const hand = this.hands[i];
-      if (hand.tracked && this.dartCool[i] <= 0 && isSigilPose(hand.joints)) {
-        this.dartCool[i] = 0.24 * (1 - 0.08 * this.level('vesper-rate')) * (this.buffRapid > 0 ? 0.5 : 1);
-        this.fireDart(i, power);
-      }
-    }
-    // The loaded spell: a charge that fades, and the gesture that casts it.
-    if (this.spell) {
-      this.spellLife -= dt;
-      if (this.spellLife <= 0) {
-        this.comic.pop('FIZZLE!', this.v1.copy(this.head).addScaledVector(this.forward, 0.8), GOLD, 0.35);
-        this.spell = '';
-      } else if (this.flat) {
-        if (this.screen.intent.special) {
-          this.screenAim(this.v3);
-          this.castSpell(this.v3, -1);
-        }
-      } else this.detectCast(dt);
-    }
-    this.updateSpellEffects(dt, time, power);
-  }
-
-  /** One dart along the index finger of hand `i` (and from each astral twin). */
-  private fireDart(i: number, power: number): void {
-    const hand = this.hands[i];
-    hand.pose.position(J.knuckles[0], this.rb);
-    hand.pose.position(J.tips[0], this.ra);
-    this.rb.subVectors(this.ra, this.rb).normalize();
-    this.shootDart(this.ra, this.rb, power);
-    if (this.twinsT > 0) {
-      for (const side of [-1, 1]) {
-        this.twinPoint(side, this.rc);
-        this.rd.copy(this.ra).addScaledVector(this.rb, 6).sub(this.rc).normalize();
-        this.shootDart(this.rc, this.rd, power * 0.7);
-      }
-    }
-    this.sfx.weapon(this.weaponDef.id);
-  }
-
-  private shootDart(origin: Vector3, direction: Vector3, power: number): void {
-    const bolt = this.fire(origin, direction, true);
-    if (bolt == null) return;
-    const id = this.weaponDef.id;
-    (bolt.bolt.children[1] as Sprite).material.color.copy(this.weaponColor);
-    bolt.speed = 18;
-    bolt.velocity.setLength(18);
-    bolt.damage = 1 * power;
-    bolt.radius = 0.07;
-    bolt.force = 1.4;
-    if (id === 'vesper-astral') {
-      bolt.homing = 4;
-      let best = 0.75;
-      bolt.target = null;
-      for (const drone of this.drones) {
-        if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'pod' || drone.kind === 'orb') continue;
-        const cos = this.v2.subVectors(drone.object.position, origin).normalize().dot(direction);
-        if (cos > best) {
-          best = cos;
-          bolt.target = drone;
-        }
-      }
-    } else if (id === 'vesper-nova') bolt.blast = 0.7;
-    this.flashes.spawn(origin, this.weaponColor, 0.04, 0.25, 0.1);
-  }
-
-  /** The ghost casters' positions: either side and a little ahead of the head. */
-  private twinPoint(side: number, out: Vector3): Vector3 {
-    this.sa.set(-this.forward.z, 0, this.forward.x).normalize();
-    out.copy(this.head).addScaledVector(this.sa, side * 0.65).addScaledVector(this.forward, 0.25);
-    out.y -= 0.12;
-    return out;
-  }
-
-  /** Loads a random spell from a rune orb. */
-  private loadSpell(): void {
-    const def = rollSpell(this.run.health < this.run.maxHealth);
-    this.spell = def.id;
-    this.spellLife = 20 + 3 * this.level('vesper-well');
-    this.spellHold = 0;
-    this.spellArmed = false;
-    this.upgradeBurst(def.name, new Color(def.color));
-    this.teach([{ gesture: 'palm', title: def.name, sub: this.flat ? 'Press CAST. ' + def.effect : def.gesture }]);
-  }
-
-  /** Watches the hands for the loaded spell's gesture. */
-  private detectCast(dt: number): void {
-    const a = this.hands[0];
-    const b = this.hands[1];
-    const both = a.tracked && b.tracked;
-    const gap = both ? a.gauntlet.palmPoint.distanceTo(b.gauntlet.palmPoint) : 99;
-    const facing = (h: HandState) => h.tracked && isBlastPose(h.joints, h.handedness, this.headTriple);
-    let cast = false;
-    let who = -1;
-    switch (this.spell) {
-      case 'mandala':
-        for (let i = 0; i < 2; i += 1) if (facing(this.hands[i])) who = i;
-        this.spellHold = who >= 0 ? this.spellHold + dt : 0;
-        cast = this.spellHold > 0.35;
-        break;
-      case 'rift':
-        this.spellHold = both && facing(a) && facing(b) && gap < 0.55 ? this.spellHold + dt : 0;
-        cast = this.spellHold > 0.35;
-        break;
-      case 'bubble':
-        if (both && gap < 0.14) this.spellArmed = true;
-        cast = this.spellArmed && both && gap > 0.4;
-        break;
-      case 'bind':
-        for (let i = 0; i < 2; i += 1) {
-          const h = this.hands[i];
-          if (!h.tracked) continue;
-          if (isFist(h.joints)) {
-            this.fistAt[i] = this.elapsed;
-          } else if (this.elapsed - this.fistAt[i] < 0.5 && facing(h)) {
-            cast = true;
-            who = i;
-          }
-        }
-        break;
-      case 'clones':
-        this.spellHold = both && isOpenPalm(a.joints) && isOpenPalm(b.joints) && gap > 0.95 ? this.spellHold + dt : 0;
-        cast = this.spellHold > 0.3;
-        break;
-      case 'meteor':
-        for (let i = 0; i < 2; i += 1) {
-          const h = this.hands[i];
-          if (!h.tracked) continue;
-          const y = h.gauntlet.palmPoint.y;
-          if (y > this.head.y + 0.05) this.meteorArmed[i] = true;
-          else if (this.meteorArmed[i] && h.palmVel.y < -2 * tuning.swing) {
-            cast = true;
-            who = i;
-          }
-          if (y < this.head.y - 0.35) this.meteorArmed[i] = false;
-        }
-        break;
-      case 'ankh': {
-        this.chest.copy(this.head);
-        this.chest.y -= 0.3;
-        const near = both && a.gauntlet.palmPoint.distanceTo(this.chest) < 0.26 && b.gauntlet.palmPoint.distanceTo(this.chest) < 0.26;
-        this.spellHold = near ? this.spellHold + dt : 0;
-        cast = this.spellHold > 0.5;
-        break;
-      }
-      default:
-        break;
-    }
-    if (!cast) return;
-    if (who >= 0) this.v3.copy(this.hands[who].gauntlet.palmNormal);
-    else this.v3.copy(this.forward);
-    this.castSpell(this.v3, who);
-  }
-
-  /** Casts the loaded spell toward `aim` (hand `who` made the gesture, -1: none). */
-  private castSpell(aim: Vector3, who: number): void {
-    const def = spellById(this.spell);
-    if (def == null) return;
-    const power = 1 + 0.15 * this.level('vesper-power');
-    const life = 1 + 0.2 * this.level('vesper-well');
-    const color = new Color(def.color);
-    this.spell = '';
-    this.spellHold = 0;
-    this.spellArmed = false;
-    this.sfx.explode(false);
-    this.sfx.swap();
-    this.comic.pop(def.name, this.v1.copy(this.head).addScaledVector(this.forward, 1.0), color, 0.6);
-    switch (def.id) {
-      case 'mandala':
-        this.mandalaT = 6 * life;
-        this.mandalaHand = who;
-        break;
-      case 'rift':
-        this.sa.set(this.forward.x, 0, this.forward.z).normalize();
-        this.riftAt.copy(this.head).addScaledVector(this.sa, 2.3);
-        this.riftAt.y = Math.max(0.95, this.head.y - 0.15);
-        this.riftT = 6 * life;
-        this.riftTick = 0;
-        break;
-      case 'bubble':
-        this.bubbleT = 5 * life;
-        break;
-      case 'bind': {
-        // The nearest few enemies in front, held in rune shackles and left wide open.
-        const picks: Drone[] = [];
-        for (const drone of this.drones) {
-          if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'pod' || drone.kind === 'orb') continue;
-          this.sb.subVectors(drone.object.position, this.head).normalize();
-          if (this.sb.dot(aim.lengthSq() > 0.1 ? aim : this.forward) < 0.55 && this.sb.dot(this.forward) < 0.55) continue;
-          picks.push(drone);
-        }
-        picks.sort((p, q) => p.object.position.distanceTo(this.head) - q.object.position.distanceTo(this.head));
-        for (const drone of picks.slice(0, 4)) {
-          if (drone.kind !== 'boss') {
-            drone.snare = 5 * life;
-            drone.stun = 5 * life;
-          } else drone.stun = 2;
-          (drone.cocoon.material as MeshBasicMaterial).color.copy(color);
-          this.lightningFx.strike(this.head, drone.object.position, color, 0.3, 0.02);
-          this.flashes.spawn(drone.object.position, color, 0.15, 1.1, 0.4);
-          this.particles.burst(drone.object.position, color, 30, 2, 0.5, this.v2);
-        }
-        break;
-      }
-      case 'clones':
-        this.twinsT = 8 * life;
-        break;
-      case 'meteor': {
-        // On the thickest knot of enemies ahead, else a spot down the aim.
-        let best: Drone | null = null;
-        let bestScore = -1;
-        for (const drone of this.drones) {
-          if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'pod' || drone.kind === 'orb') continue;
-          this.sb.subVectors(drone.object.position, this.head).setY(0).normalize();
-          if (this.sb.dot(this.forward) < 0.2) continue;
-          let score = 1;
-          for (const other of this.drones) if (other !== drone && other.state !== 'off' && other.object.position.distanceTo(drone.object.position) < 2.2) score += 1;
-          if (score > bestScore) {
-            bestScore = score;
-            best = drone;
-          }
-        }
-        if (best) this.sc.copy(best.object.position);
-        else this.sc.copy(this.head).addScaledVector(this.forward, 5);
-        this.sc.y = 0;
-        for (let k = 0; k < 8; k += 1) {
-          this.sigilMeteors.push({ t: 0.4 + k * 0.2, at: new Vector3(this.sc.x + (Math.random() - 0.5) * 3.2, 0, this.sc.z + (Math.random() - 0.5) * 3.2), warned: false });
-        }
-        break;
-      }
-      case 'ankh':
-        this.run.heal(2);
-        for (let k = 0; k < 3; k += 1) {
-          this.v2.copy(this.head);
-          this.v2.y -= 0.45 - k * 0.2;
-          this.flashes.spawn(this.v2, color, 0.1, 1.2, 0.6);
-          this.particles.burst(this.v2, color, 40, 1.5, 0.8, this.v4);
-        }
-        this.sfx.coin();
-        break;
-    }
-    void power;
-  }
-
-  /** The lasting spells: wheel, portal, bubble, twins and falling meteors. */
-  private updateSpellEffects(dt: number, time: number, power: number): void {
-    const fx = this.spellFx;
-    // MANDALA: follows the hand; shots that touch it are sent back.
-    if (this.mandalaT > 0) {
-      this.mandalaT -= dt;
-      const hand = this.mandalaHand >= 0 ? this.hands[this.mandalaHand] : null;
-      if (hand?.tracked) {
-        this.mandalaAt.copy(hand.gauntlet.palmPoint).addScaledVector(hand.gauntlet.palmNormal, 0.3);
-        this.mandalaN.copy(hand.gauntlet.palmNormal);
-      } else {
-        this.mandalaAt.copy(this.head).addScaledVector(this.forward, 0.7);
-        this.mandalaAt.y -= 0.15;
-        this.mandalaN.copy(this.forward);
-      }
-      fx.mandala(this.mandalaAt, this.mandalaN, time, Math.min(1, this.mandalaT * 2, (6 - this.mandalaT) * 4 + 0.2));
-      for (const shot of this.drones) {
-        if (shot.state !== 'shot' && shot.state !== 'fly') continue;
-        if (shot.object.position.distanceTo(this.mandalaAt) > 0.55) continue;
-        this.ra.copy(shot.object.position);
-        this.retireDrone(shot);
-        this.deflect(this.ra);
-      }
-      if (this.mandalaT <= 0) fx.hideMandala();
-    }
-    // RIFT: returns shots, drags enemies in, banishes the nearest.
-    if (this.riftT > 0) {
-      this.riftT -= dt;
-      fx.rift(this.riftAt, this.head, time, Math.min(1, this.riftT * 2, (6 - this.riftT) * 3 + 0.2));
-      for (const drone of this.drones) {
-        if (drone.state === 'off' || drone.state === 'emerging' || drone.kind === 'pod' || drone.kind === 'boss') continue;
-        if (drone.state === 'shot' || drone.state === 'fly') {
-          if (drone.object.position.distanceTo(this.riftAt) < 1.0) {
-            this.ra.copy(drone.object.position);
-            this.retireDrone(drone);
-            this.deflect(this.ra);
-          }
-          continue;
-        }
-        this.sb.subVectors(this.riftAt, drone.object.position).setY(0);
-        const d = this.sb.length();
-        if (d < 3.6 && d > 0.3) drone.object.position.addScaledVector(this.sb.normalize(), 1.4 * dt);
-      }
-      this.riftTick -= dt;
-      if (this.riftTick <= 0) {
-        this.riftTick = 0.9;
-        const victim = this.nearestEnemy(this.riftAt, null, 1.5);
-        if (victim) {
-          this.v1.copy(victim.object.position);
-          this.markHit('blast', this.v1, this.sb.subVectors(this.riftAt, this.v1), undefined, 2);
-          this.lightningFx.strike(this.v1, this.riftAt, this.accent, 0.25, 0.02);
-          this.damageDrone(victim, 2.5 * power);
-          this.comic.pop('BANISHED!', this.v4.copy(this.v1).setY(this.v1.y + 0.4), this.accent, 0.4);
-        }
-      }
-      if (this.riftT <= 0) fx.hideRift();
-    }
-    // TIME BUBBLE: the shell follows the player.
-    if (this.bubbleT > 0) {
-      this.bubbleT -= dt;
-      this.bubbleAt.copy(this.head);
-      this.bubbleAt.y = Math.max(0.5, this.head.y - 0.5);
-      fx.bubble(this.bubbleAt, 3.6, time, Math.min(1, this.bubbleT * 2, (5 - this.bubbleT) * 3 + 0.2));
-      if (this.bubbleT <= 0) fx.hideBubble();
-    }
-    // ASTRAL TWINS.
-    if (this.twinsT > 0) {
-      this.twinsT -= dt;
-      for (let k = 0; k < 2; k += 1) {
-        this.twinPoint(k === 0 ? -1 : 1, this.rc);
-        this.v3.copy(this.rc).addScaledVector(this.forward, 3);
-        fx.twin(k, this.rc, this.v3, time);
-      }
-      if (this.twinsT <= 0) fx.hideTwins();
-    }
-    // METEORS: a warning glow, then the fall.
-    for (let i = this.sigilMeteors.length - 1; i >= 0; i -= 1) {
-      const m = this.sigilMeteors[i];
-      m.t -= dt;
-      if (!m.warned) {
-        m.warned = true;
-        this.v2.set(m.at.x, 0.03, m.at.z);
-        this.flashes.spawn(this.v2, ORANGE, 0.2, 1.4, 0.45);
-      }
-      if (m.t > 0) continue;
-      this.sigilMeteors.splice(i, 1);
-      this.sb.set(m.at.x + 0.8, 7, m.at.z + 0.4);
-      this.lightningFx.streak(this.sb, m.at, ORANGE, 0.3, 0.07);
-      this.explodeAt(m.at, 1.4, 2.5 * power);
-      this.sfx.thunderHit();
-    }
-  }
-
-  /** Ends every spell at once (the stage ended or the hero changed). */
-  private endSpells(): void {
-    this.spell = '';
-    this.mandalaT = 0;
-    this.riftT = 0;
-    this.bubbleT = 0;
-    this.twinsT = 0;
-    this.sigilMeteors.length = 0;
-    this.spellFx?.hideAll();
-  }
-
-  /** Where the held mandala or portal blocks; `out` receives it. */
+  /** Where a block lands: the worn shield, else the head; `out` receives it. */
   private blockPoint(out: Vector3): Vector3 {
-    if (this.mandalaT > 0) return out.copy(this.mandalaAt);
     if (this.shield) return this.shield.getWorldPosition(out);
     return out.copy(this.head);
   }
@@ -6109,9 +5714,7 @@ export class CombatSystem extends createSystem({
         ? 'FIST'
         : isWebPose(hand.joints)
           ? 'WEB'
-          : isSigilPose(hand.joints)
-            ? 'SIGIL'
-            : isOpenPalm(hand.joints)
+          : isOpenPalm(hand.joints)
               ? 'OPEN'
               : pinch < PINCH_ON
                 ? 'PINCH'
@@ -7332,10 +6935,6 @@ export class CombatSystem extends createSystem({
 
   /** The worn shield faces the attacker: the strike is blocked. */
   private shieldBlocks(from: Vector3): boolean {
-    if (this.mandalaT > 0 && this.hero === 'vesper') {
-      this.sb.subVectors(from, this.mandalaAt).normalize();
-      return this.sb.dot(this.mandalaN) > 0.1 && this.mandalaAt.distanceTo(this.head) < 1.1;
-    }
     if (this.hero !== 'vanguard' || this.shieldState !== 'worn' || this.shield == null || !this.shield.visible) return false;
     this.shield.getWorldPosition(this.sa);
     if (this.sa.distanceTo(this.head) > 0.75) return false;
@@ -8769,12 +8368,9 @@ export class CombatSystem extends createSystem({
   }
 
   private dropPickup(at: Vector3, always = false): void {
-    if (!always && Math.random() > (this.hero === 'vesper' ? 0.3 + 0.04 * this.level('vesper-well') : 0.22)) return;
+    if (!always && Math.random() > 0.22) return;
     const roll = Math.random();
-    const kind: PickupKind =
-      this.hero === 'vesper'
-        ? this.run.health < this.run.maxHealth && roll < 0.2 ? 'heal' : 'rune'
-        : this.run.health < this.run.maxHealth && roll < 0.4 ? 'heal' : roll < 0.7 ? 'rapid' : 'power';
+    const kind: PickupKind = this.run.health < this.run.maxHealth && roll < 0.4 ? 'heal' : roll < 0.7 ? 'rapid' : 'power';
     const pickup = this.pickups.find((p) => !p.active && p.kind === kind);
     if (pickup == null) return;
     pickup.active = true;
@@ -8852,8 +8448,6 @@ export class CombatSystem extends createSystem({
     if (pickup.kind === 'heal') {
       this.run.heal(1);
       this.comic.pop('HEAL!', at, new Color('#39FF88'), 0.35);
-    } else if (pickup.kind === 'rune') {
-      this.loadSpell();
     } else if (pickup.kind === 'rapid') {
       this.buffRapid = BUFF_SECONDS;
       this.syncBuffLook();
@@ -8977,8 +8571,7 @@ export class CombatSystem extends createSystem({
     this.gore.update(dtAll);
     this.pools.update(dtAll);
     for (const drone of this.drones) {
-      // TIME BUBBLE: everything inside crawls at a fifth of its speed.
-      const dt = this.bubbleT > 0 && drone.state !== 'off' && drone.object.position.distanceTo(this.bubbleAt) < 3.6 ? dtAll * 0.2 : dtAll;
+      const dt = dtAll;
       if (drone.state === 'off') {
         if (drone.dying >= 0) this.updateDeath(drone, dt);
         continue;
@@ -10301,7 +9894,6 @@ export class CombatSystem extends createSystem({
     this.hud.extras.buffs = [
       this.buffRapid > 0 ? `RAPID ${Math.ceil(this.buffRapid)}s` : '',
       this.buffPower > 0 ? `POWER ${Math.ceil(this.buffPower)}s` : '',
-      this.spell ? `${spellById(this.spell)?.name ?? ''} ${Math.ceil(this.spellLife)}s` : '',
     ]
       .filter(Boolean)
       .join('  ');

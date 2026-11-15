@@ -44,7 +44,6 @@ const CHARACTERS = {
   'IRON ONI': { voice: 'bm_lewis', speed: 0.8, pitch: 0.7, fx: `tremolo=f=22:d=0.3,equalizer=f=200:t=q:w=1:g=5,${ECHO_CHAMBER}` },
   MONOLITH: { voice: 'am_onyx', speed: 0.72, pitch: 0.62, fx: `equalizer=f=70:t=q:w=1:g=8,aecho=0.9:0.7:90|200|420:0.5|0.35|0.2` },
   KRAG: { voice: 'am_eric', speed: 0.95, pitch: 0.85, fx: 'highpass=f=200,lowpass=f=4200,acrusher=bits=11:mode=lin:mix=0.3,aecho=0.7:0.5:30:0.2,volume=1.2' },
-  MORVETH: { voice: 'bm_fable', speed: 0.82, pitch: 0.88, fx: `tremolo=f=5:d=0.3,equalizer=f=3500:t=q:w=1.4:g=3,aecho=0.9:0.7:70|150|310:0.5|0.35|0.25` },
   // Heroes: clear, heroic, lightly reverbed.
   'hero:arc': { voice: 'am_adam', speed: 1.02, pitch: 1.0, fx: 'aecho=0.6:0.4:35:0.12' },
   'hero:talon': { voice: 'af_nova', speed: 1.05, pitch: 0.97, fx: 'aecho=0.6:0.4:35:0.12' },
@@ -55,7 +54,6 @@ const CHARACTERS = {
   'hero:ronin': { voice: 'bm_daniel', speed: 0.92, pitch: 0.96, fx: 'aecho=0.6:0.4:40:0.15' },
   'hero:psion': { voice: 'am_puck', speed: 1.0, pitch: 1.0, fx: 'aecho=0.7:0.5:50|110:0.3|0.2' },
   'hero:vanguard': { voice: 'am_eric', speed: 0.96, pitch: 0.94, fx: 'aecho=0.6:0.4:35:0.12' },
-  'hero:vesper': { voice: 'bf_isabella', speed: 0.96, pitch: 0.97, fx: 'aecho=0.7:0.5:60|120:0.3|0.2' },
 };
 const character = (who) => {
   const c = CHARACTERS[who];

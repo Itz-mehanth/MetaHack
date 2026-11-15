@@ -14,7 +14,6 @@ export const ICON_NAMES = [
   'ronin',
   'psion',
   'vanguard',
-  'vesper',
   'coins',
   'shield',
   'skull',

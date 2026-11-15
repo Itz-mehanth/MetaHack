@@ -64,7 +64,6 @@ const SKYLINES: Readonly<Record<string, Skyline>> = {
   'moon-temple': { shape: 'cone', h: [0.5, 1.5], w: [0.45, 1.0], lift: [0, 0], tilt: 0 },
   'sky-ruins': { shape: 'box', h: [0.2, 0.45], w: [0.7, 1.4], lift: [0.2, 1.8], tilt: 0.1 },
   'iron-bastion': { shape: 'box', h: [0.6, 1.7], w: [0.5, 1.15], lift: [0, 0], tilt: 0 },
-  'veil-sanctum': { shape: 'cone', h: [1.1, 2.9], w: [0.3, 0.65], lift: [0, 0], tilt: 0 },
 };
 
 const COUNT = 72;

@@ -18,7 +18,7 @@ export const SWAP_COOLDOWN = 2.2;
  * Heroes lent to a squad that has no other owned heroes (a new player still
  * gets to swap on the first mission): the flashiest first.
  */
-export const LENT_ORDER: readonly HeroId[] = ['ronin', 'tempest', 'psion', 'orion', 'weaver', 'havoc', 'talon', 'vesper', 'vanguard', 'arc'];
+export const LENT_ORDER: readonly HeroId[] = ['ronin', 'tempest', 'psion', 'orion', 'weaver', 'havoc', 'talon', 'vanguard', 'arc'];
 
 /** The lead hero, then owned heroes in unlock order, then lent heroes. */
 export function buildSquad(lead: HeroId, owned: readonly HeroId[], size = SQUAD_SIZE): HeroId[] {

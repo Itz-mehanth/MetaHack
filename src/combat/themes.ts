@@ -101,18 +101,6 @@ export const THEMES: Readonly<Record<string, Theme>> = {
     bandB: '#FF8A3D',
     ambient: 'embers',
   },
-  'veil-sanctum': {
-    top: '#07031A',
-    mid: '#1A0E3A',
-    horizon: '#FFC857',
-    accent: '#8A5CFF',
-    gridMinor: '#3A2A7A',
-    gridMajor: '#8A5CFF',
-    ring: '#FFC857',
-    bandA: '#8A5CFF',
-    bandB: '#FFC857',
-    ambient: 'motes',
-  },
   oblivion: {
     top: '#000000',
     mid: '#12001A',

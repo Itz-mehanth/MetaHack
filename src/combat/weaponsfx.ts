@@ -15,14 +15,6 @@ export type WeaponPart = 'fire' | 'draw' | 'swing' | 'hit';
 type Recipe = (s: Sfx, power: number) => void;
 type Recipes = Partial<Record<WeaponPart, Recipe>>;
 
-/** A minor pentatonic ladder, so VESPER's runes ring like a spell instrument. */
-const RUNES = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.51];
-let rune = 0;
-const nextRune = (): number => {
-  rune = (rune + 1 + Math.floor(Math.random() * 3)) % RUNES.length;
-  return RUNES[rune];
-};
-
 /** A scatter of tiny fire pops. */
 const crackle = (s: Sfx, count: number, span: number, gain = 0.1): void => {
   for (let i = 0; i < count; i += 1) s.noiseSweep('highpass', 4500, 2200, 0.025, gain, 0.02 + Math.random() * span);
@@ -294,32 +286,6 @@ const RECIPES: Readonly<Record<string, Recipes>> = {
     },
   },
 
-  // ------------------------------------------------------------ VESPER
-  'vesper-sigil': {
-    fire: (s) => {
-      const f = nextRune();
-      s.fm(f, 3.01, f * 0.6, f * 0.98, 0.35, 0.17, 0, 0.5);
-      s.tone('sine', f * 2, f * 2, 0.25, 0.06, 0.02, 0.5);
-      s.noiseSweep('highpass', 6000, 9000, 0.08, 0.1);
-    },
-  },
-  'vesper-astral': {
-    fire: (s) => {
-      const f = nextRune() * 0.5;
-      s.fm(f, 2, f * 0.8, f * 3, 0.45, 0.09, 0, 0.6);
-      s.tone('triangle', f * 2, f * 4, 0.4, 0.04, 0.05, 0.5);
-      s.noiseSweep('highpass', 5000, 10000, 0.3, 0.07, 0, 0.3, 0.8, 0.15);
-    },
-  },
-  'vesper-nova': {
-    fire: (s) => {
-      const f = nextRune();
-      s.fm(f, 3.01, f * 0.6, f * 0.98, 0.35, 0.08, 0, 0.5);
-      s.thump(0.4, 0.3, 85, 0.02);
-      s.noiseSweep('lowpass', 2000, 100, 0.3, 0.22, 0.04, 0.4);
-      s.tone('sine', f * 0.5, f * 0.25, 0.5, 0.06, 0.1, 0.6);
-    },
-  },
 
   // ------------------------------------------------------------ PSION
   'psion-mind': {

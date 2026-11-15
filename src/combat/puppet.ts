@@ -37,8 +37,6 @@ export const SHAPES = {
   /** Index and pinky out, middle and ring in: WEAVER's web shooter. */
   web: { curl: [0, 1, 1, 0], thumb: 0.4, pinch: 0 },
   pinch: { curl: [0.35, 0.55, 0.6, 0.65], thumb: 0, pinch: 1 },
-  /** Index and middle out, ring and pinky curled: VESPER's sigil pose. */
-  sigil: { curl: [0, 0, 1, 1], thumb: 0.7, pinch: 0 },
   /** A pistol grip with the index finger off the trigger. */
   point: { curl: [0, 1, 1, 1], thumb: 0.8, pinch: 0 },
 } satisfies Record<string, HandShape>;

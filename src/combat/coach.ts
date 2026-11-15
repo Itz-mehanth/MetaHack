@@ -64,11 +64,6 @@ export const HERO_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
     { gesture: 'throw', title: 'SWING AND LET GO', sub: 'The shield ricochets between enemies and comes back.' },
     { gesture: 'swing', title: 'PUNCH', sub: 'Your other fist hits like a truck.' },
   ],
-  vesper: [
-    { gesture: 'poke', title: 'TWO FINGERS OUT', sub: 'Index and middle point: runic darts fly where you aim.' },
-    { gesture: 'grab', title: 'GRAB SPELL ORBS', sub: 'Defeated enemies drop them. Touch one to load a spell.' },
-    { gesture: 'palm', title: 'CAST WITH YOUR HANDS', sub: 'The HUD shows how to cast the spell you hold.' },
-  ],
   psion: [
     { gesture: 'palm', title: 'PALM AT A CRATE', sub: 'Or at an alien. A ring locks on.' },
     { gesture: 'grab', title: 'CLOSE YOUR HAND', sub: 'Lift it with your mind.' },
@@ -107,10 +102,6 @@ export const SCREEN_TIPS: Readonly<Record<HeroId, readonly Tip[]>> = {
   vanguard: [
     { gesture: 'throw', title: 'TAP TO THROW THE SHIELD', sub: 'It bounces between enemies and comes back.' },
     { gesture: 'fist', title: 'HOLD TO BLOCK', sub: 'Shots bounce off it. Tap close enemies to punch.' },
-  ],
-  vesper: [
-    { gesture: 'poke', title: 'TAP OR HOLD TO FIRE DARTS', sub: 'Runic darts fly at what you aim at.' },
-    { gesture: 'grab', title: 'TOUCH SPELL ORBS', sub: 'Enemies drop them; the CAST button fires the spell.' },
   ],
   psion: [
     { gesture: 'palm', title: 'PRESS ON A CRATE OR ALIEN', sub: 'Keep holding: you lift it with your mind.' },

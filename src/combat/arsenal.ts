@@ -57,9 +57,6 @@ export const ARSENAL: readonly WeaponDef[] = [
   W('vanguard-aegis', 'vanguard', 'AEGIS', 'Blocks, deflects, ricochets', 0, 0),
   W('vanguard-solar', 'vanguard', 'SOLAR AEGIS', 'A burning shield that sets them alight', 700, 1, '#FFB01F'),
   W('vanguard-storm', 'vanguard', 'STORM AEGIS', 'More bounces, each hit arcs lightning', 1300, 2, '#3DC8FF'),
-  W('vesper-sigil', 'vesper', 'RUNE DARTS', 'Fast runic darts', 0, 0),
-  W('vesper-astral', 'vesper', 'ASTRAL DARTS', 'Darts that curve onto enemies', 600, 1, '#7CE8FF'),
-  W('vesper-nova', 'vesper', 'VOID SIGILS', 'Darts burst on impact', 1200, 2, '#FF7AC6'),
   W('psion-mind', 'psion', 'MIND', 'Lift and throw anything', 0, 0),
   W('psion-inferno', 'psion', 'INFERNO MIND', 'Thrown things explode in fire', 900, 1, '#FF6A1A'),
 ];

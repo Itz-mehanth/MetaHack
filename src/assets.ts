@@ -18,7 +18,6 @@ import { createDebris } from './scene-assets/props.scene-asset.js';
 import { createOblivax } from './scene-assets/oblivax.scene-asset.js';
 import { createHeroFigure, createPedestal } from './scene-assets/heroes.scene-asset.js';
 import {
-  createSigilDisplay,
   createBowDisplay,
   createClawDisplay,
   createGauntletDisplay,
@@ -100,10 +99,6 @@ export default defineAssets({
   'hero-ronin': createHeroFigure('ronin'),
   'hero-psion': createHeroFigure('psion'),
   'hero-vanguard': createHeroFigure('vanguard'),
-  'hero-vesper': createHeroFigure('vesper'),
-  'weapon-vesper': createSigilDisplay(),
-  'boss-veil-sanctum': createBoss('#8A5CFF'),
-  'pickup-rune': createPickup('rune'),
   'weapon-vanguard': createShield('#3D6BFF'),
   shield: createShield('#3D6BFF'),
   pedestal: createPedestal(),

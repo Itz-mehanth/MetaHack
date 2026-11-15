@@ -77,11 +77,6 @@ const RECIPES: Readonly<Record<GroundStyle, readonly Recipe[]>> = {
     { kit: 'tower', count: 26, r: [13, 34], h: [6, 24], w: [2, 5], glow: 0.9 },
     { kit: 'rock', count: 14, r: [7, 16], h: [0.6, 1.6], w: [1.6, 3], glow: 0.4 },
   ],
-  rune: [
-    { kit: 'column', count: 14, r: [8, 22], h: [3, 6], w: [0.6, 0.9], glow: 1.5 },
-    { kit: 'shard', count: 12, r: [10, 28], h: [2, 5], w: [0.8, 1.8], lift: [3, 12], glow: 1.3 },
-    { kit: 'spire', count: 8, r: [20, 34], h: [8, 18], w: [1.5, 3], glow: 1 },
-  ],
 };
 
 const CAPACITY = 32;

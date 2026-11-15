@@ -27,7 +27,6 @@ export const WORDS: Readonly<Record<string, readonly string[]>> = {
   ronin: ['SHING!', 'SLICE!', 'ZANN!', 'SHAK!'],
   psion: ['CRUNCH!', 'SMASH!', 'WHUMP!', 'CRASH!'],
   vanguard: ['KLANG!', 'WHANG!', 'BONG!', 'THWACK!'],
-  vesper: ['SIGIL!', 'ZING!', 'ARCANE!', 'HEX!'],
   hurt: ['OOF!', 'ARGH!'],
   big: ['KA-BOOM!', 'BOOM!'],
 };

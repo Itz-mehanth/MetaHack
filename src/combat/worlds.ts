@@ -78,10 +78,6 @@ export const WORLD_LOOKS: Readonly<Record<string, WorldLook>> = {
   'iron-bastion-1': L('#0A1428', '#FF9A3D', '#060A14', '#5A3A2A', '#3D6BFF', '#FFD08A', [0.3, 0.12, -1], 0.13, false, 0.2, 0.22),
   'iron-bastion-2': L('#05060C', '#FF3B1F', '#030306', '#3A1A10', '#FF8A3D', '#FF3B1F', [-0.4, 0.4, -0.8], 0.06, false, 0.6, 0.32),
   'iron-bastion-3': L('#101820', '#3D6BFF', '#080C10', '#2A3A5A', '#FF8A3D', '#9CC8FF', [0, 0.3, -1], 0.22, true, 0.5, 0.42),
-  // VESPER: the Veil, a sanctum of living runes.
-  'veil-sanctum-1': L('#07031A', '#FFC857', '#04020C', '#3A1A7A', '#8A5CFF', '#FFE8A8', [0.25, 0.2, -1], 0.12, true, 0.7, 0.22),
-  'veil-sanctum-2': L('#0A0420', '#8A5CFF', '#05020E', '#5A2AAA', '#FFC857', '#C9B0FF', [-0.45, 0.4, -0.8], 0.07, false, 0.9, 0.32),
-  'veil-sanctum-3': L('#10002A', '#FF7AC6', '#080014', '#6A1A9A', '#FFC857', '#000000', [0, 0.3, -1], 0.24, true, 0.8, 0.42),
   // The saga: OBLIVAX unmaking everything.
   oblivion: L('#000000', '#FF4FD8', '#000000', '#3A0A3A', '#FF4FD8', '#FFFFFF', [0, 0.5, -0.9], 0.03, false, 1, 0.55),
 };
@@ -101,7 +97,6 @@ const TRANSIT: Readonly<Record<string, TransitStyle>> = {
   'moon-temple': 'wormhole',
   'sky-ruins': 'sky',
   'iron-bastion': 'sky',
-  'veil-sanctum': 'wormhole',
   oblivion: 'blackhole',
 };
 

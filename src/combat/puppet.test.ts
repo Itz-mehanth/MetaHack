@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type HandJoints, fingerExtension, isBlastPose, isFist, isFistRatios, isOpenPalm, isPinchPose, isSigilPose, isWebPose, palmNormal } from './gestures.js';
+import { type HandJoints, fingerExtension, isBlastPose, isFist, isFistRatios, isOpenPalm, isPinchPose, isWebPose, palmNormal } from './gestures.js';
 import { type HandShape, type Quat, type Vec, handFrame, handPoint, qrot, SHAPES, writeHand } from './puppet.js';
 
 function pose() {
@@ -49,9 +49,6 @@ describe('puppet hands', () => {
         expect(isFist(build(left, SHAPES.fist, frame).j)).toBe(true);
         expect(isOpenPalm(build(left, SHAPES.fist, frame).j)).toBe(false);
         expect(isWebPose(build(left, SHAPES.web, frame).j)).toBe(true);
-        expect(isSigilPose(build(left, SHAPES.sigil, frame).j)).toBe(true);
-        expect(isSigilPose(build(left, SHAPES.web, frame).j)).toBe(false);
-        expect(isSigilPose(build(left, SHAPES.open, frame).j)).toBe(false);
         const relaxed = build(left, SHAPES.relaxed, frame).j;
         expect(isOpenPalm(relaxed)).toBe(false);
         expect(isFist(relaxed)).toBe(false);

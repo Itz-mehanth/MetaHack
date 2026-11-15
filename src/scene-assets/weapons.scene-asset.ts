@@ -321,26 +321,3 @@ export function createShield(color: string): Group {
   return root;
 }
 
-/** VESPER: a gold sigil gauntlet with a floating runic mandala and a spell orb. */
-export function createSigilDisplay(): Group {
-  const root = new Group();
-  root.name = 'Weapon-vesper';
-  const f = forge('#8A5CFF');
-  tube(root, 0.052, 0.05, 0.13, f.metal, 0, 0, -0.08, 20);
-  for (const z of [-0.14, -0.08, -0.02]) band(root, 0.053, 0.004, z, f.trim);
-  piece(root, bevelBox(0.07, 0.012, 0.08, 0.004), f.dark, 0, 0.048, -0.03);
-  // The mandala: nested rings with spokes and a core orb, hovering over the hand.
-  for (const [r, w, c] of [[0.1, 0.004, f.trim], [0.075, 0.0035, f.energy], [0.05, 0.003, f.trim]] as const) {
-    const ring = new Mesh(new TorusGeometry(r, w, 6, 56), c);
-    ring.position.set(0, 0.11, -0.03);
-    ring.rotation.x = Math.PI / 2;
-    root.add(ring);
-  }
-  for (let i = 0; i < 6; i += 1) {
-    const a = (i / 6) * Math.PI * 2;
-    piece(root, new BoxGeometry(0.004, 0.004, 0.09), f.energy, Math.cos(a) * 0.04, 0.11, -0.03 + Math.sin(a) * 0.04, 0, -a, 0);
-  }
-  piece(root, new OctahedronGeometry(0.03, 0), f.core, 0, 0.11, -0.03);
-  root.rotation.y = Math.PI / 2;
-  return root;
-}

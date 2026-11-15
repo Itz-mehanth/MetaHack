@@ -75,11 +75,6 @@ const WRITTEN: Readonly<Record<HeroId, Written>> = {
     arrival: 'Then came Krag, the Siege Commander. He rolled his artillery to the gates, and promised the walls would fall in a day.',
     fall: 'Shells rained on the old town. The outer wall burst, and the families sheltering at the gate were trapped. The Anchor was carried to the citadel roof.',
   },
-  vesper: {
-    lore: 'The Veil, a library of living spells, where every book was a door to somewhere safe.',
-    arrival: 'Then came Morveth, the Hollow Magus. He gave his name to the Unmaker, and was emptied of everything but hunger.',
-    fall: 'He burned the library page by page, and every spell went silent. The scholars were caged among the ashes, and the Anchor went dark.',
-  },
 };
 
 /** "NULL WARDEN" -> "Null Warden" (for a voice that spells all-capitals). */

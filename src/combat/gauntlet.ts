@@ -96,7 +96,6 @@ const STYLES: Readonly<Record<string, { armor: string; metal: number; rough: num
   ronin: { armor: '#121218', metal: 0.6, rough: 0.18, trim: '#C9973A', emitter: false },
   psion: { armor: '#1E1430', metal: 0.7, rough: 0.3, trim: '#B9A6FF', emitter: false },
   vanguard: { armor: '#1C2A4A', metal: 0.85, rough: 0.3, trim: '#C8D0DC', emitter: false },
-  vesper: { armor: '#1A1230', metal: 0.7, rough: 0.35, trim: '#FFC857', emitter: false },
 };
 
 /** Armour colours of a hero's glove, for the matching forearm sleeves. */
@@ -132,7 +131,6 @@ export class Gauntlet {
   /** Hero-specific extras, keyed by hero id; only the current one shows. */
   private readonly extras = new Map<string, Group>();
   private readonly orbits: Mesh[] = [];
-  private readonly runeRings: Mesh[] = [];
   private readonly tipGlows: InstancedMesh;
   private style = 'arc';
   private fingerless = false;
@@ -245,15 +243,6 @@ export class Gauntlet {
     vbracer.rotateX(Math.PI / 2);
     add('vanguard', this.cuff, at(new Mesh(vbracer, this.armor), 0, 0, 0.08));
     add('vanguard', this.cuff, at(new Mesh(new CylinderGeometry(0.012, 0.012, 0.006, 6), this.accent), 0, 0.05, 0.08, 0, 0, 0));
-    // VESPER: a gold mandala hovering over the back of the hand, two runic rings turning in it.
-    add('vesper', this.back, at(new Mesh(new CylinderGeometry(0.034, 0.034, 0.003, 6), this.trim), 0, 0.052, -0.01));
-    for (let i = 0; i < 2; i += 1) {
-      const ring = new Mesh(new TorusGeometry(0.036 + i * 0.012, 0.0018, 4, 36), this.accent);
-      ring.position.set(0, 0.052, -0.01);
-      this.runeRings.push(ring);
-      add('vesper', this.back, ring);
-    }
-    add('vesper', this.cuff, at(new Mesh(new TorusGeometry(0.05, 0.004, 6, 32), this.trim), 0, 0, 0.02));
     // PSION: two rings orbiting the wrist (animated) and glowing fingertips.
     for (let i = 0; i < 2; i += 1) {
       const ring = new Mesh(new TorusGeometry(0.058 + i * 0.012, 0.0025, 4, 40), this.accent);
@@ -349,10 +338,6 @@ export class Gauntlet {
     this.cuff.position.copy(this.a).add(this.s);
     this.cuff.scale.set(1.12, 0.82, 1);
 
-    if (this.style === 'vesper') {
-      this.runeRings[0].rotation.set(Math.PI / 2, 0, time * 1.4);
-      this.runeRings[1].rotation.set(Math.PI / 2, 0, -time * 2.1);
-    }
     if (this.style === 'psion') {
       this.orbits[0].rotation.set(time * 2.1, time * 1.3, 0);
       this.orbits[1].rotation.set(-time * 1.6, 0, time * 2.4);

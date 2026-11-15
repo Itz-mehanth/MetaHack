@@ -147,7 +147,7 @@ function heroCards(): string {
 const how = (icon: string, color: string, title: string, text: string) =>
   `<div style="--c:${color};--i:url('${ICONS}${icon}.svg')"><b>${title}</b>${text}</div>`;
 
-const TAGLINE = 'OBLIVAX, the Unmaker, is erasing reality, starting with the room you stand in. Ten heroes. <b>No controllers.</b> Your bare hands are the last line.';
+const TAGLINE = 'OBLIVAX, the Unmaker, is erasing reality, starting with the room you stand in. Nine heroes. <b>No controllers.</b> Your bare hands are the last line.';
 
 const HTML = () => `
 <div class="fx"></div><div class="shade"></div>
@@ -159,7 +159,7 @@ const HTML = () => `
     <div class="kicker">
       <span class="badge">HAND TRACKING ONLY</span>
       <span class="badge alt">MIXED REALITY</span>
-      <span class="badge alt2">10 HEROES &middot; 30 MISSIONS</span>
+      <span class="badge alt2">9 HEROES &middot; 27 MISSIONS</span>
     </div>
     <h1>SURGE</h1>
     <div class="sub">HANDS OF HEROES</div>
@@ -182,7 +182,7 @@ const HTML = () => `
   </aside>
 </section>
 <section class="more"><div class="wrap">
-  <h2>TEN HEROES, ONE PAIR OF HANDS</h2>
+  <h2>NINE HEROES, ONE PAIR OF HANDS</h2>
   <div class="roster">${heroCards()}</div>
   <h2>HOW TO PLAY</h2>
   <div class="how">
@@ -193,7 +193,7 @@ const HTML = () => `
   ${guideHTML()}
   <h2>FROM MENU TO MISSION</h2>
   <div class="how">
-    ${how('arc', '#3DF5FF', 'PICK A HERO', 'Ten heroes stand as holograms. Poke one, or look at it and pinch, to see their power and deploy.')}
+    ${how('arc', '#3DF5FF', 'PICK A HERO', 'Nine heroes stand as holograms. Poke one, or look at it and pinch, to see their power and deploy.')}
     ${how('map', '#FFD23F', 'THE WAR MAP', 'A spiral galaxy. Each hero has a region of three levels; poke a planet to deploy.')}
     ${how('radar', '#FF2D9A', 'THE MISSION', 'Aliens breach your real walls in waves. Each level ends on a champion or the region boss, and adds a twist like meteor rain or blackout.')}
     ${how('garage', '#9D8CFF', 'RESULTS AND ARMORY', 'Earn stars and coins, then spend them on weapons, upgrades and skins for each hero.')}

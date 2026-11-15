@@ -120,15 +120,6 @@ export function isBlastPose(
 }
 
 /**
- * Sorcerer's sigil pose: index and middle fingers out together, ring and
- * pinky curled (the thumb is ignored). Fires VESPER's runic darts.
- */
-export function isSigilPose(hand: HandJoints): boolean {
-  const e = fingerExtension(hand);
-  return e[0] > tuning.open && e[1] > tuning.open && e[2] < tuning.fist && e[3] < tuning.fist;
-}
-
-/**
  * Web-shooter pose: index and pinky extended, middle and ring curled into
  * the palm (thumb is ignored, so both "horns" and the classic flick count).
  */
