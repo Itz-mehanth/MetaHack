@@ -59,6 +59,8 @@ export interface MenuActions {
   play(hero: HeroId, stage: Stage): void;
   resume(): void;
   restart(): void;
+  /** Ends the guided prologue at once (counts as finished). */
+  skipTraining(): void;
   quit(): void;
   /** Profile changed (purchase, setting): persist and re-apply. */
   changed(): void;
@@ -131,6 +133,8 @@ export class GameMenus {
   hero: HeroId = 'arc';
   /** Played on a flat screen (taps instead of pokes and wrist buttons). */
   flat = false;
+  /** The guided prologue is running: the pause menu offers SKIP TRAINING in place of RESTART. */
+  training = false;
   /** Hero under the carousel spotlight. */
   heroFocus = 0;
   /** Planet (hero index) selected on the galaxy map. */
@@ -723,7 +727,9 @@ export class GameMenus {
       accent,
       widgets: [
         { id: 'resume', x: 400, y: 230, w: 800, h: 150, label: 'RESUME', selected: true, color: accent, size: 56, icon: 'play' },
-        { id: 'restart', x: 400, y: 410, w: 800, h: 130, label: 'RESTART STAGE', icon: 'timer' },
+        this.training
+          ? { id: 'skip-training', x: 400, y: 410, w: 800, h: 130, label: 'SKIP TRAINING', sub: 'Jump straight into the game', icon: 'play', color: '#FFD23F' }
+          : { id: 'restart', x: 400, y: 410, w: 800, h: 130, label: 'RESTART STAGE', icon: 'timer' },
         { id: 'pause-settings', x: 400, y: 570, w: 800, h: 130, label: 'SETTINGS', icon: 'settings' },
         { id: 'quit', x: 400, y: 730, w: 800, h: 130, label: 'QUIT TO WAR MAP', color: '#FF3B5C', icon: 'map' },
         { id: 'exit', x: 1236, y: 150, w: 300, h: 70, label: this.flat ? 'HOME' : 'EXIT', size: 32, color: '#FF3B5C' },
@@ -1130,6 +1136,9 @@ export class GameMenus {
       case 'restart':
       case 'retry':
         this.actions.restart();
+        return;
+      case 'skip-training':
+        this.actions.skipTraining();
         return;
       case 'quit':
       case 'menu':

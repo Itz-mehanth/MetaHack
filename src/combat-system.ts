@@ -1152,6 +1152,7 @@ export class CombatSystem extends createSystem({
       play: (hero, stage) => this.startStage(hero, stage),
       resume: () => this.resumeStage(),
       restart: () => this.startStage(this.hero, this.run.stage),
+      skipTraining: () => this.skipTraining(),
       quit: () => this.quitToMenu(),
       changed: () => this.profileChanged(),
       preview: (worldId) => this.setTheme(worldId),
@@ -2598,7 +2599,7 @@ export class CombatSystem extends createSystem({
       this.sfx.muffle(muffle);
     }
     this.blood.update(dt, armed ? this.vitals.danger : 0);
-    const show = !this.attract && run.phase !== 'title' && !(this.panel.visible && !this.paused) && !this.movieActive;
+    const show = !this.attract && run.phase !== 'title' && !this.panel.visible && !this.movieActive;
     this.shieldGauge.update(this.vitals, show, dt, this.profile.settings.calm, !this.flat && !this.pad);
   }
 
@@ -3488,8 +3489,9 @@ export class CombatSystem extends createSystem({
   /** Left wrist: pause during a stage, resume when paused, else go back. */
   private wristPressed(): void {
     this.flashes.spawn(this.wrist.center, WHITE, 0.05, 0.3, 0.25);
-    // The wrist button always skips a transmission.
-    if (this.tx != null || this.menus.screen === 'transmission') {
+    // The wrist button always skips a transmission. A finished one leaves the menu's screen name behind with the
+    // panel hidden, so the name alone must not count (it made the button do nothing for the rest of the mission).
+    if (this.tx != null || (this.panel.visible && this.menus.screen === 'transmission')) {
       this.sfx.click();
       this.endTransmission();
       return;
@@ -3516,6 +3518,15 @@ export class CombatSystem extends createSystem({
     this.sfx.click();
   }
 
+  /** Pause > SKIP TRAINING: the prologue counts as done (and pays its coins) and the main menu opens. */
+  private skipTraining(): void {
+    this.paused = false;
+    this.resultTimer = -1;
+    this.tx = null;
+    this.hideDebris();
+    this.finishPrologue(true);
+  }
+
   private quitToMenu(): void {
     this.endScript();
     this.paused = false;
@@ -3533,6 +3544,7 @@ export class CombatSystem extends createSystem({
     this.world.camera.getWorldPosition(this.head);
     this.world.camera.getWorldDirection(this.forward);
     this.anchorMenu();
+    this.menus.training = this.script === 'prologue';
     this.menus.open(screen);
     this.panel.setContent(this.menus.content());
     this.placePanel();
@@ -6719,11 +6731,12 @@ export class CombatSystem extends createSystem({
         if (this.tipIndex < tips.length && (this.screenTipHero !== this.hero || this.screenTipIndex !== this.tipIndex)) {
           this.screenTipHero = this.hero;
           this.screenTipIndex = this.tipIndex;
-          this.screen.showTip(tips[this.tipIndex].title, tips[this.tipIndex].sub, TIP_SECONDS);
+          this.screen.showTip(tips[this.tipIndex].title, this.script === 'prologue' ? `${tips[this.tipIndex].sub} (Pause > SKIP TRAINING to jump in.)` : tips[this.tipIndex].sub, TIP_SECONDS);
         }
       } else if (this.tipQueue.length > 0) {
         const n = this.tipQueue.length;
-        this.coach.show(this.tipQueue[this.tipIndex], this.accentHex, n > 1 ? `${this.tipIndex + 1} / ${n}` : '');
+        const count = n > 1 ? `${this.tipIndex + 1} / ${n}` : '';
+        this.coach.show(this.tipQueue[this.tipIndex], this.accentHex, this.script === 'prologue' ? `${count}${count ? '   ' : ''}PAUSE: SKIP TRAINING` : count);
       } else this.coach.hide();
     }
     if (this.script === 'prologue') this.updatePrologue(dt);
@@ -6773,7 +6786,7 @@ export class CombatSystem extends createSystem({
     }
   }
 
-  private finishPrologue(): void {
+  private finishPrologue(skipped = false): void {
     if (!hasUnlock(this.profile, PROLOGUE_DONE)) {
       this.profile.unlocks.push(PROLOGUE_DONE);
       this.profile.coins += 300;
@@ -6782,7 +6795,8 @@ export class CombatSystem extends createSystem({
     for (const drone of this.drones) if (drone.state !== 'off') this.retireDrone(drone);
     this.run.toTitle();
     this.endScript();
-    this.sfx.victory();
+    if (skipped) this.sfx.click();
+    else this.sfx.victory();
     this.showMenu('main');
   }
 

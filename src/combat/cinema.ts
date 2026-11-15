@@ -27,10 +27,10 @@ import { Caption, clamp01, createDome, glowTexture, hit, outBack, planetMaterial
 
 /**
  * The opening movie: ~53 seconds that play all around the player, in a
- * headset or on a screen. Ten Anchors hold the sky together; OBLIVAX, a black
+ * headset or on a screen. Nine Anchors hold the sky together; OBLIVAX, a black
  * sun with eyes, opens in it; worlds shatter; the Hollow Legion's ship and
  * drop pods darken the horizon; the erasure reaches the player's own room;
- * ten heroes rise; and the title lands. A narrator, OBLIVAX, VEX and ECHO
+ * nine heroes rise; and the title lands. A narrator, OBLIVAX, VEX and ECHO
  * speak (rendered voice-over, see scripts/vo) over captions. Skippable at any
  * time.
  *
@@ -62,7 +62,7 @@ const T = {
 } as const;
 
 /** When each voice line starts. */
-const VOICE_AT: Readonly<Record<string, number>> = { m01: 1.0, m02: 8.6, m03: 11.6, m04: 19.2, m05: 25.0, m06: 30.4, m07: 36.0, m08: 40.2, m09: 45.6, m10: 47.7 };
+const VOICE_AT: Readonly<Record<string, number>> = { m01: 1.0, m02: 8.9, m03: 11.6, m04: 19.2, m05: 25.0, m06: 30.4, m07: 36.0, m08: 40.2, m09: 45.6, m10: 47.7 };
 
 // -------------------------------------------------------------- looks
 interface Look {
@@ -107,7 +107,7 @@ const WHITE = new Color('#FFFFFF');
 const Y_AXIS = new Vector3(0, 1, 0);
 const Z_AXIS = new Vector3(0, 0, 1);
 const PODS = 22;
-const ANCHOR_COUNT = 10;
+const ANCHOR_COUNT = 9;
 const PLANETS = 6;
 const RINGS = 8;
 

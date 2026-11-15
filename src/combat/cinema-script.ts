@@ -17,7 +17,7 @@ export interface MovieLine {
 }
 
 export const MOVIE_LINES: readonly MovieLine[] = [
-  { id: 'm01', voice: 'narrator', text: 'Long ago, ten Anchors held reality together. A light in every sky. A life in every world.' },
+  { id: 'm01', voice: 'narrator', text: 'Long ago, nine Anchors held reality together. A light in every sky. A life in every world.' },
   { id: 'm02', voice: 'narrator', text: 'Then something answered the dark.' },
   { id: 'm03', voice: 'oblivax', text: 'I am OBLIVAX. The Unmaker. Nothing I touch remains.' },
   { id: 'm04', voice: 'narrator', text: 'He tore the Anchors from the heavens, and whole worlds fell like glass.' },
