@@ -8,8 +8,8 @@ Items marked **[UPDATE]** describe work not shipped yet: change them before you 
 **Project name** (60 max, 22 used)
 SURGE: Hands of Heroes
 
-**Elevator pitch** (200 max, 179 used)
-Your bare hands become ten heroes. In mixed reality, OBLIVAX is unmaking your real room: blast, slash, grab and hurl alien creatures with hand tracking only. No controllers, ever.
+**Elevator pitch** (200 max, 186 used)
+Your bare hands become nine heroes. OBLIVAX is unmaking your real room: blast, slash, grab and hurl alien creatures with hand tracking only. No controllers, ever. Open the link and play.
 
 ## Project details
 
@@ -19,11 +19,11 @@ Your bare hands become ten heroes. In mixed reality, OBLIVAX is unmaking your re
 ## Inspiration
 Hand tracking is the one input everybody already owns, yet most hand games feel like tech demos. I wanted the
 opposite: a full action game where your hands *are* the superpower, and the room around you is the battlefield.
-So I built a saga: OBLIVAX, the Unmaker, has pulled the ten Anchors that hold reality together, and he starts
+So I built a saga: OBLIVAX, the Unmaker, has pulled the nine Anchors that hold reality together, and he starts
 by erasing your actual room. Every hero you play fights to put it back.
 
 ## What it does
-SURGE is a hands-only mixed-reality (and VR) hero-combat game. Ten original heroes, each with a power that
+SURGE is a hands-only mixed-reality (and VR) hero-combat game. Nine original heroes, each with a power that
 lives in a different hand pose:
 
 - **ARC** fires a palm blaster and a chest-reactor beam you steer with your hand
@@ -35,35 +35,35 @@ lives in a different hand pose:
 - **RONIN** ignites twin katanas with two fists, parries and cuts enemy blades
 - **PSION** lifts props and aliens with telekinesis and hurls them
 - **VANGUARD** wears an energy shield on the off hand and throws it to ricochet
-- **VESPER**, a sorcerer, casts spells with seven distinct hand gestures
 
-Each mission is fought by a squad of three: swap heroes on the fly by pinching a portrait for a TAG-IN strike and a burst of extra damage. Any hero can also reach out, close a fist on a creature's head, arm or leg, then lift, slam, disarm or trip it.
-Enemies are nearly 40 rigged creatures and mechs that walk out of your real walls (found with plane
-detection), wind up telegraphed attacks, dodge, flinch, ragdoll and break into gibs. There are 30 missions across
-10 worlds, shielded multi-phase bosses, a guided prologue, an armory with weapons, upgrades and finishes, a
+All nine heroes are open from the first launch, so anyone can try any of them. Any hero can also reach out, close a fist on a creature's head, arm or leg, then lift, slam, disarm or trip it.
+Enemies are 30 rigged creatures (from small, cute swarms to giants) plus alien soldiers and mechs that walk out of your real walls (found with plane
+detection), wind up telegraphed attacks, dodge, flinch, ragdoll and break into gibs. There are 27 missions across
+nine worlds, shielded multi-phase bosses, a guided prologue that teaches seven heroes (and can be skipped from the pause menu), an armory with 29 weapons, upgrades and finishes (open it from the level screen to change a weapon before you start), a
 galaxy-map campaign and a convergence finale where every hero joins the last strike. After the story, ENDLESS keeps going with escalating waves and a tougher boss every fifth wave, and a DAILY CHALLENGE rolls a new world and rule every UTC day, with a streak to keep. Every hero has a leaderboard (name entry works with bare hands). A 55-second cinematic opens the game around you, ending with the Unmaker's erasure reaching your actual room. Every hero then has a story movie of their own: how their region fell to its boss, and the road of three trials (two lords, then the boss) you must fight to win the Anchor back. Every story line and villain taunt is voiced.
 
 ## How I built it
 SURGE is a WebXR app built with the Immersive Web SDK (IWSDK), TypeScript, Vite and Three.js. It opens from a
 link on Quest with no install. Hand poses are classified from the 25 WebXR hand joints (fist, open palm,
-pinch, web pose, sigil pose) with tunable thresholds. Plane detection gives the app your walls, floor and
+pinch, web pose) with thresholds measured from real Quest 3 hand-tracking recordings and tunable in Settings. Plane detection gives the app your walls, floor and
 tables: enemies emerge from real walls, props and a ragdoll solver collide with the room, and a border shows
-where the scanned room ends. All music and sound effects are synthesised in code (each of the 40+ weapons has its own sound design); the voice-over is
+where the scanned room ends. All music and sound effects are synthesised in code (every weapon has its own sound design); the voice-over is
 original dialogue rendered offline with an open-source text-to-speech model and per-character effects; heroes, story and VFX are
-original. Creatures come from CC0 packs (credited). Game rules are pure TypeScript with 80+ unit tests, and
+original. Creatures come from CC0 packs (credited). Game rules are pure TypeScript with about 200 unit tests, and
 the whole game also runs on phones and desktops through a "puppet hand" layer that feeds the same gesture code.
 
 ## Challenges
 - No haptics on bare hands: I faked weight with hit-stop, sound, flashes and physical recoil.
 - Gesture reliability across different hands: thresholds are tunable in Settings, with a live hand-debug readout.
+- Menus that never press themselves: a click needs a settled pinch, a steady gaze on one button and a hand that is not swinging; the whole menu can be pinched by a handle and moved anywhere in the room.
 - Keeping a skinned-creature MR game fast: pooling, instanced particles, additive sprites instead of post-processing.
 
 ## Accomplishments
-Ten heroes that feel different in the hand, a story that uses the player's real room, and a game that is
+Nine heroes that feel different in the hand, a story that uses the player's real room, and a game that is
 fully playable end to end without ever touching a controller.
 
 ## What's next
-Tuning gaze-and-pinch on real Meta VR Glasses hardware (menus already use it), a shared world leaderboard (the code is in; it needs a database connected), and co-op for friends on phones.
+Tuning gaze-and-pinch on real Meta VR Glasses hardware (menus already use it), a shared world leaderboard (the code is in; **[UPDATE]** say it is live only once /api/board reports enabled), and co-op for friends on phones.
 ```
 
 ### Built with (25 max, 19 used)
@@ -107,14 +107,14 @@ tunable thresholds and a live debug readout.
 - Open palm facing out: ARC palm blaster and PSION telekinesis lock-on
 - Fist: TALON claws, RONIN blade ignition, TEMPEST hammer grip, grabbing any enemy by head, arm or leg
 - Pinch (with the off hand): ORION bow draw; in menus, look at a button and pinch to press it (head or eye gaze), or poke it with the index finger
-- Web pose / two-finger sigil: WEAVER web bullets, VESPER runic darts; seven spell gestures for VESPER
+- Web pose: WEAVER web bullets
 - Palm to chest, then push out: ARC chest beam. Clap: overdrive and the finale volley
 - Swings are measured by tip and palm velocity: slashes, parries against enemy weapons, slaps that return
   shots, hammer and shield throws, slam-downs
-TAG-IN: touch both fists together, then pull them apart to swap to the next hero in your squad.
+Heroes are chosen before a mission, not by a gesture, so a stray pose can never swap your hero in a fight.
 Physical weapons (hammer, bow, pistol, shield) can be dropped, land on real tables or the floor, and are
 re-grabbed or recalled by either hand. A flat-screen "puppet hand" layer feeds the same gesture code on phones
-and desktops. Menus are poked with a finger or pressed with look-and-pinch; nothing ever requires a controller.
+and desktops. Menus are poked with a finger or pressed with look-and-pinch (the gaze must rest on a button before a pinch counts), and the menu has a handle you pinch to drag it anywhere; nothing ever requires a controller.
 ```
 
 ### What makes you excited about the future of VR? (150 words max, 79 used)

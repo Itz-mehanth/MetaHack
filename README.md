@@ -1,45 +1,101 @@
-# IWSDK App
+# SURGE: Hands of Heroes
 
-This project uses `iwsdk.config.json` for declarative scene, asset, component,
-XR, and emulator configuration. Application systems remain explicit in
-`src/index.ts`.
+**A hands-only mixed-reality hero-combat game for Meta Quest, in the browser. No controllers, no install.**
+
+OBLIVAX, the Unmaker, is erasing reality, starting with your room. Aliens tear out of your real walls, and you
+fight them with nine heroes whose powers are all made with your bare hands: blasters, hammers, bows, katanas,
+webs, telekinesis and a shield.
+
+- **Play it:** https://surge.mehanth.com/
+- Built for the **Meta VR Start Developer Competition 2026**, Gaming track, New Experience division.
+- Original story, heroes, weapons, music and sound effects. No third-party characters or designs.
+
+## Play it in 30 seconds
+
+| Where | What to do |
+|---|---|
+| **Meta Quest 3 / 3S** (best) | Open the link in the Quest Browser, put the controllers down, tap **ENTER MR** (your room, passthrough) or **ENTER VR**. |
+| **Phone, tablet or computer** | Open the link and tap **PLAY NOW**. Touch, mouse or keys drive the same hero code with a "puppet hand". |
+
+The first headset session plays a short opening movie and a guided prologue that teaches seven heroes. If you
+would rather jump straight in, open the pause menu and choose **SKIP TRAINING**. All nine heroes are unlocked
+from the start so you can try each of them.
+
+## How your hands work
+
+| Hero | Power | Hand language |
+|---|---|---|
+| **ARC** | Palm blaster, chest beam | Open palm facing out fires. Palm to chest, then push out: a giant beam. |
+| **TALON** | Energy claws | Make a fist and the claws extend. Skewer, slash, throw. |
+| **TEMPEST** | Storm hammer | Grab it, throw it, call it back. Hold it overhead for a sky barrage of lightning. |
+| **ORION** | Light bow | Pinch and pull a string, release to fire. |
+| **WEAVER** | Web bullets | Web pose or palm thrust shoots webs. Whip your hand to hurl a webbed alien. |
+| **HAVOC** | Plasma pistol and heavier guns | Grab the pistol, point and fire. Upgrades: shotgun, minigun, homing missiles. |
+| **RONIN** | Twin katanas | Each fist lights a blade. Cross both blades for an X-strike. Parry enemy weapons. |
+| **PSION** | Telekinesis | Open palm locks on to a prop or alien, close to lift, open to throw. |
+| **VANGUARD** | Energy shield | Worn on the off hand: block, deflect shots, then throw it to ricochet. |
+
+Any hero can also close a fist on a creature's head, arm or leg to lift, slam, disarm or trip it, and a clap
+spends a full OVERDRIVE meter.
+
+**Menus are made for hands.** Poke a button with a fingertip, or look at it and pinch your thumb and index finger
+together (the gaze must rest on the button first, so nothing presses by accident). The menu stays where you put it,
+and a handle under the panel lets you pinch and drag it anywhere in the room. Pause with the button on your left
+wrist.
+
+## What is in the game
+
+- **27 missions in nine worlds**, a champion at the end of the first two levels of every region, a boss per
+  region, a finale (CONVERGENCE) where all nine heroes join the last fight, and a story movie for every hero.
+- **Mixed reality that uses your room.** Enemies break through your scanned walls, ragdolls, gibs, thrown props
+  and dropped weapons collide with real tables and walls, and the villain's erasure eats the room and grows
+  back at the end.
+- **Replay:** ENDLESS runs, a DAILY challenge (same world and rule for everyone), per-hero leaderboards, an
+  armory with 29 weapons, upgrades, skins and finishes. Open the armory straight from the level screen.
+- **30 animated creatures** (small cute swarms up to giants), shielded multi-phase bosses, destructible and
+  explosive props, level twists (meteors, lightning, low gravity, blackout, enemies from the ceiling).
+- **Fully voiced story** and a synthesised score and sound design, all original.
+- **Comfort and access:** seated mode, reduce flashes, aim assist, adjustable gesture sensitivity, a swappable
+  bow hand, left-handed layouts, gaze-and-pinch selection.
+
+## How it is built
+
+- **IWSDK** (Immersive Web SDK) on **Three.js r185**, TypeScript, Vite, WebXR hand tracking, plane and mesh
+  detection for walls. Deployed on Vercel; it is a web page, so there is nothing to install.
+- **Gestures from measurements:** every threshold was taken from real Quest 3 hand-tracking recordings (an in-game
+  HAND DEBUG overlay), for example an open palm reads 1.8 to 2.0, a real fist 0.6 to 0.95, and a deliberate
+  pinch bottoms out at about 3 cm.
+- **Our own physics:** a time-corrected Verlet solver with room colliders built from the scan, pooled ragdolls
+  that freeze at rest.
+- **Performance:** everything is pooled, no per-frame allocation, hidden scene branches are skipped, shaders are
+  compiled while the jump tunnel plays, and a quality governor sheds particles, outlines and crowd size if frames
+  slip. The headset is asked for 72 Hz.
+- **Tests:** about 200 unit tests cover the pure game logic (waves, progression, physics, gestures, leaderboards,
+  menus).
+
+The full project brief and design notes are in [HANDFORGE.md](HANDFORGE.md).
+
+## Run it yourself
 
 ```sh
 npm install
-npm run dev
+npm run dev        # dev server with the IWSDK managed browser
+npm run typecheck
+npm test           # unit tests (Vitest)
+npm run build      # production build into dist/
 ```
 
-Use the Runtime and Editor controls in the managed browser to switch between
-the running experience and its authored scene.
+A shared world leaderboard is optional. With a Redis database connected (Vercel KV / Upstash over REST:
+`KV_REST_API_URL` and `KV_REST_API_TOKEN`; or any Redis over TCP: `REDIS_URL`) the leaderboard screen also shows
+a world board served by `api/board.ts`. Without it the board reads as offline and nothing else changes.
 
-## Starter content
+On Windows, `scripts/patch-iwsdk-windows.mjs` runs after `npm install` to raise a PowerShell timeout in IWSDK
+1.1.0-rc.2.
 
-The robot and welcome panel are small examples of authored scene content plus
-runtime systems. The robot turns toward the player's head and plays a sound
-when pressed. To remove the robot, delete its scene node, its `RobotSystem`
-registration from `src/index.ts` or `src/index.js`, and its `Robot` registration
-from `src/components.ts` or `src/components.js`; you can then delete the unused
-robot component and system files. To remove the welcome panel, delete its scene
-node and its `PanelSystem` registration from the application entry point.
+## Credits and licences
 
-The robot stands on the second of three numbered stations. The first holds dark
-pieces you can grab and move, and the third holds a ring you can spin in place.
-The studio props (the plinths and the dark pieces, plus the floor and stage in VR
-and Desktop 3D) are built in code in `src/scene-assets/studio.scene-asset.ts` or
-`.js`. The VR and Desktop 3D background furniture is built the same way in
-`src/scene-assets/decor.scene-asset.ts` or `.js`, so the starter downloads no
-extra models. To remove any of them, delete their scene nodes and their entries
-in `src/assets.ts` or `src/assets.js`, then delete the files you no longer use.
-The station labels are `public/ui/label-*.uikitml`.
-
-The rest of the look is built-in components in the scene, which you can edit in
-the editor without code. The soft light on every object is the scene root's
-`IBLGradient` (select the Level Root to edit it), and the soft shadows under
-each object are `ContactShadow` nodes. In VR and Desktop 3D, the sky is the
-scene root's `DomeGradient` (its colors, tilt and dither are also on the Level
-Root), and the floor fades into it through the `DomeFade` on the floor node. AR
-projects have no sky or floor, so passthrough stays visible, and a
-`ShadowCatcher` node grounds the stations.
-
-- Minimal scene walkthrough: https://iwsdk.dev/guides/01b-minimal-scene.html
-- XR-enabled projects — IWER emulator controls: https://iwsdk.dev/guides/02-testing-experience.html#iwer-controls
+Creature models are Quaternius "Ultimate Monsters" and "Animated Mech Pack" (CC0). Icons are from game-icons.net
+by Lorc and Delapouite (CC BY 3.0), recoloured. Textures and HDRI from Poly Haven (CC0). Fonts: Bangers, Orbitron
+and Rajdhani (SIL OFL). Voice-over is rendered offline with Kokoro-82M (Apache 2.0); no recordings of real people.
+Everything else, including heroes, story, weapons, music and sound effects, is original. The full list is in
+[public/CREDITS.txt](public/CREDITS.txt).
