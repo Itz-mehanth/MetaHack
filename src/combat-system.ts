@@ -80,7 +80,21 @@ import { PadInput } from './combat/pad.js';
 import { PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
 import { ShieldGauge } from './combat/shieldgauge.js';
 import { Vitals } from './combat/vitals.js';
-import { menuStillFacing } from './combat/menuaim.js';
+import { MenuHandle } from './combat/menuhandle.js';
+import {
+  copyRig,
+  DEFAULT_PREFS,
+  dragRig,
+  freshRig,
+  glideRig,
+  isLost,
+  newRig,
+  prefsFrom,
+  type MenuRig,
+  rigGap,
+  type RigPrefs,
+  sanitizePrefs,
+} from './combat/menurig.js';
 import { skipHiddenBranches } from './combat/sceneperf.js';
 import type { WeaponPart } from './combat/weaponsfx.js';
 import { Cinema, type CinemaHooks } from './combat/cinema.js';
@@ -109,7 +123,7 @@ import { HoloMap } from './combat/holomap.js';
 import { GameMenus, wrap } from './combat/menus.js';
 import { ENEMIES, type EnemyKind } from './combat/missions.js';
 import { Music } from './combat/music.js';
-import { Panel } from './combat/panel-ui.js';
+import { PANEL_H_M, Panel } from './combat/panel-ui.js';
 import { newView, Pilot } from './combat/pilot.js';
 import { AttractBot, Director, REEL_CROWD, REEL_KINDS, SHOT_SECONDS, SHOWCASE } from './combat/attract.js';
 import { ScreenInput } from './combat/screen-input.js';
@@ -540,6 +554,28 @@ function jointSlots(hand: HandJoints): Array<[Triple, number]> {
   return slots;
 }
 
+const RIG_KEY = 'handforge.menurig.v1';
+/** A pinch on the menu handle lets go past this gap between thumb and index tips (m); wider than a click so a drag does not drop. */
+const RIG_LET_GO = 0.055;
+
+/** Where the player last left their menu (relative to their head), from this browser's storage. */
+function loadRigPrefs(): RigPrefs {
+  try {
+    const raw = window.localStorage.getItem(RIG_KEY);
+    return sanitizePrefs(raw ? JSON.parse(raw) : null);
+  } catch {
+    return sanitizePrefs(null);
+  }
+}
+
+function saveRigPrefs(prefs: RigPrefs): void {
+  try {
+    window.localStorage.setItem(RIG_KEY, JSON.stringify(prefs));
+  } catch {
+    // Storage can be blocked; the menu simply opens at the default spot next time.
+  }
+}
+
 /**
  * The whole Day 1 combat loop: palm-blaster input from tracked hands, pooled
  * bolts with aim assist, drones that breach detected walls (or a fallback
@@ -813,8 +849,31 @@ export class CombatSystem extends createSystem({
   private powersLive = false;
   /** Elapsed time at which to re-place the menu once XR head tracking settles. */
   private replaceMenuAt = -1;
-  /** The way the open menu faces, fixed when it opens (see anchorMenu). */
+  /**
+   * Where the open menu stands: the point its panel and 3D props are measured from,
+   * and the way it faces. Set when a menu opens fresh, then fixed until the player
+   * drags it by the handle or brings it back (see anchorMenu and updateMenuRig).
+   */
   private readonly menuDir = new Vector3(0, 0, -1);
+  private readonly menuOrigin = new Vector3();
+  private readonly rig: MenuRig = newRig();
+  private readonly rigNext: MenuRig = newRig();
+  private readonly rigStart: MenuRig = newRig();
+  private readonly rigGoal: MenuRig = newRig();
+  private rigPrefs: RigPrefs = loadRigPrefs();
+  private rigGliding = false;
+  private readonly menuHandle = new MenuHandle();
+  /** The hand holding the handle (0 or 1), or -1. */
+  private rigHand = -1;
+  private readonly rigHandStart = new Vector3();
+  private readonly rigPoint = new Vector3();
+  private readonly rigPinched = [false, false];
+  private readonly rigNear = [false, false];
+  private rigChipArmed = true;
+  private rigLostFor = 0;
+  private rigShownFor = 0;
+  /** Test only: shows the handle on a flat screen (1 plain, 2 hand near, 3 held, 4 over the chip, 5 first-time hint). */
+  private rigDebug = 0;
 
   private head = new Vector3();
   private headTriple: Triple = [0, 0, 0];
@@ -1093,6 +1152,7 @@ export class CombatSystem extends createSystem({
     this.comic = new Onomatopoeia(this.root);
     this.panel = new Panel();
     this.root.add(this.panel.group);
+    this.menuHandle.mount(this.panel.group, PANEL_H_M);
     this.music = new Music(this.sfx);
     this.sfx.setVolumes(this.profile.settings.sfx, this.profile.settings.music);
     setSensitivity(this.profile.settings.gestures);
@@ -2092,6 +2152,7 @@ export class CombatSystem extends createSystem({
       live: this.powersLive,
       enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}${d.species ? `/${d.species}` : ''}:${d.state}`),
       enemyHp: this.drones.filter((d) => d.state !== 'off').map((d) => Math.round(d.hp * 10) / 10),
+      menuAt: { origin: this.menuOrigin.toArray().map((v) => Math.round(v * 1000) / 1000), panel: this.panel.group.position.toArray().map((v) => Math.round(v * 1000) / 1000) },
       kills: this.run.kills,
       hands: this.hands.map((h) => h.tracked),
       debug: {
@@ -2127,6 +2188,22 @@ export class CombatSystem extends createSystem({
     (window as unknown as { __surgeWidget: (id: string) => number[] | null }).__surgeWidget = (id: string) => {
       const point = this.panel.visible ? this.panel.widgetPoint(id, new Vector3()) : null;
       return point ? point.project(this.world.camera).toArray().slice(0, 2) : null;
+    };
+    // Test hook: drags the menu by (dx, dy, dz) metres as a pinch on its handle would; no arguments stands it in front of the head again.
+    (window as unknown as { __surgeRig: (dx?: number, dy?: number, dz?: number) => object }).__surgeRig = (dx?: number, dy?: number, dz?: number) => {
+      if (dx == null) this.freshAnchor();
+      else {
+        copyRig(this.rigStart, this.rig);
+        dragRig(this.rigStart, { x: 0, y: 0, z: 0 }, { x: dx, y: dy ?? 0, z: dz ?? 0 }, this.head, this.rigNext);
+        copyRig(this.rig, this.rigNext);
+        this.useRig();
+      }
+      this.reanchorMenu();
+      return { origin: this.menuOrigin.toArray(), dir: this.menuDir.toArray(), panel: this.panel.group.position.toArray() };
+    };
+    // Test hook: shows the menu handle on a flat screen (see rigDebug); 0 turns it off.
+    (window as unknown as { __surgeHandle: (mode: number) => void }).__surgeHandle = (mode: number) => {
+      this.rigDebug = mode;
     };
     // Test hook: live projectiles (kind, position, velocity, target position).
     (window as unknown as { __surgeBolts: () => object[] }).__surgeBolts = () =>
@@ -2382,10 +2459,11 @@ export class CombatSystem extends createSystem({
     if (this.replaceMenuAt > 0 && time > this.replaceMenuAt) {
       this.replaceMenuAt = -1;
       if (this.panel.visible) {
-        this.menuDir.copy(this.forward);
-        this.panel.place(this.head, this.menuDir);
+        this.freshAnchor();
+        this.reanchorMenu();
       }
     }
+    this.updateMenuRig(realDt);
     this.updateGaze(realDt);
     const event = this.panel.update(realDt, this.tips);
     if (event) this.onPanelEvent(event.point, () => this.menus.handle(event));
@@ -2636,7 +2714,7 @@ export class CombatSystem extends createSystem({
     for (let i = 0; i < 2; i += 1) {
       // A closed fist also brings the thumb and index tips together: it must not count as a pinch.
       const distance = this.hands[i].tracked && isPinchPose(this.hands[i].joints) ? this.pinchPoint(i, this.gazePoint) : null;
-      if (this.pinchEdges[i].update(distance, this.elapsed)) pinched = true;
+      if (this.pinchEdges[i].update(distance, this.elapsed) && !this.rigNear[i]) pinched = true;
       if (distance != null && distance < SKIP_PINCH) firm = true;
     }
     // A movie is skipped by a firm pinch held for most of a second that begins during it, never by a passing hand shape.
@@ -3455,27 +3533,166 @@ export class CombatSystem extends createSystem({
     if (this.flat) {
       // Flat screen: the panel and any 3D content fit one view (see frameMenu).
       const screen = this.menus.screen;
-      if (screen === 'heroes' || screen === 'garage') this.panel.place(this.head, this.menuDir, 0.62, 0.42);
-      else if (screen === 'galaxy') this.panel.place(this.head, this.menuDir, 1.0, -0.1);
-      else this.panel.place(this.head, this.menuDir, 0.62, 0.02);
+      if (screen === 'heroes' || screen === 'garage') this.panel.place(this.menuOrigin, this.menuDir, 0.62, 0.42);
+      else if (screen === 'galaxy') this.panel.place(this.menuOrigin, this.menuDir, 1.0, -0.1);
+      else this.panel.place(this.menuOrigin, this.menuDir, 0.62, 0.02);
       return;
     }
-    if (this.menus.screen === 'heroes') this.panel.place(this.head, this.menuDir, 0.42, 0.58);
-    else if (this.menus.screen === 'map') this.panel.place(this.head, this.menuDir, 0.55, 0.02);
-    else if (this.menus.screen === 'garage') this.panel.place(this.head, this.menuDir, 0.42, 0.58);
-    else if (this.menus.screen === 'galaxy') this.panel.place(this.head, this.menuDir, 0.8, -0.06);
-    else this.panel.place(this.head, this.menuDir);
+    if (this.menus.screen === 'heroes') this.panel.place(this.menuOrigin, this.menuDir, 0.42, 0.58);
+    else if (this.menus.screen === 'map') this.panel.place(this.menuOrigin, this.menuDir, 0.55, 0.02);
+    else if (this.menus.screen === 'garage') this.panel.place(this.menuOrigin, this.menuDir, 0.42, 0.58);
+    else if (this.menus.screen === 'galaxy') this.panel.place(this.menuOrigin, this.menuDir, 0.8, -0.06);
+    else this.panel.place(this.menuOrigin, this.menuDir);
   }
 
   /**
-   * Fixes which way the menu faces. A menu that is already up keeps its direction
-   * through every selection, so pressing a button you are looking at the edge of
-   * no longer swings the panel (and its 3D props) toward your gaze; it is only
-   * brought round again when you have turned well away from it, and a menu that
-   * opens fresh faces you. Screens (flat) re-frame the view themselves.
+   * Sets what the menu is measured from. A menu that opens fresh (none was up) stands
+   * where the player likes it, in front of them; after that it stays put through every
+   * selection and change of screen (before, each screen was placed again from wherever
+   * the head was, so the menu crept about), until the player drags it by the handle or
+   * brings it back with the RECENTER chip. Screens (flat) re-frame the view themselves,
+   * so their menu is always at the head.
    */
   private anchorMenu(): void {
-    if (this.flat || !this.panel.visible || !menuStillFacing(this.menuDir, this.forward)) this.menuDir.copy(this.forward);
+    if (this.flat || !this.panel.visible) this.freshAnchor();
+  }
+
+  /** Stands the menu in front of the player, at the spot they last chose. */
+  private freshAnchor(): void {
+    this.rigGliding = false;
+    // A flat screen has no handle and always puts the menu at the head; a headset uses the spot the player chose.
+    freshRig(this.head, this.forward, this.flat ? DEFAULT_PREFS : this.rigPrefs, this.rig);
+    this.useRig();
+  }
+
+  /** Copies the rig into the origin and heading the panel and props are placed from. */
+  private useRig(): void {
+    this.menuOrigin.set(this.rig.x, this.rig.y, this.rig.z);
+    this.menuDir.set(this.rig.dx, 0, this.rig.dz);
+  }
+
+  /** Moves the panel and every visible 3D prop to the rig's place (after a fresh anchor, a drag or a recenter). */
+  private reanchorMenu(): void {
+    this.placePanel();
+    if (this.holomap.visible) this.holomap.show(this.menuOrigin, this.menuDir);
+    if (this.armory.visible) this.armory.show(this.menuOrigin, this.menuDir);
+    if (this.carousel.visible) this.carousel.reanchor(this.menuOrigin, this.menuDir);
+    if (this.galaxy.visible) this.placeGalaxy();
+  }
+
+  private placeGalaxy(): void {
+    this.galaxy.show(this.menuOrigin, this.menuDir, this.flat ? 0.55 : 0.35, this.flat ? 0.62 : 0.62, this.flat ? 1.05 : 1.0, this.flat ? -0.75 : 0);
+  }
+
+  /** The RECENTER chip (or a menu left behind): the menu glides back in front of the player. */
+  private recenterMenu(reset: boolean): void {
+    if (reset) {
+      // The chip also forgets the remembered spot, so "centred" means centred from now on.
+      this.rigPrefs = { ...DEFAULT_PREFS, hinted: true };
+      saveRigPrefs(this.rigPrefs);
+    }
+    freshRig(this.head, this.forward, this.rigPrefs, this.rigGoal);
+    this.rigGliding = true;
+    this.menuHandle.bump();
+    this.sfx.unlock();
+    this.sfx.swap();
+  }
+
+  private endRigGrab(): void {
+    this.rigHand = -1;
+    // Remember where the menu was left, relative to the head and gaze, for next time.
+    this.rigPrefs = prefsFrom(this.rig, this.head, this.forward, true);
+    saveRigPrefs(this.rigPrefs);
+    this.menuHandle.bump();
+    this.sfx.click();
+  }
+
+  /**
+   * The menu handle, each frame. Pinch the bar (a pinch that closes with the hand over it) and
+   * the whole menu, panel and 3D props, follows that hand, kept in reach and facing you; poke the
+   * chip and it glides back in front of you; walk too far away and it comes to you on its own.
+   * Not used on flat screens or with controllers, which have their own pointers.
+   */
+  private updateMenuRig(dt: number): void {
+    const handle = this.menuHandle;
+    const on = (this.rigDebug > 0 && this.panel.visible) || (!this.flat && !this.pad && this.panel.visible && this.tx == null && !this.movieActive && this.menus.screen !== 'transmission');
+    if (handle.visible !== on) {
+      handle.setVisible(on);
+      this.rigShownFor = 0;
+    }
+    if (!on) {
+      this.rigHand = -1;
+      this.rigGliding = false;
+      this.rigLostFor = 0;
+      this.rigNear[0] = false;
+      this.rigNear[1] = false;
+      return;
+    }
+    this.rigShownFor += dt;
+
+    // Drifting back to a chosen spot, or finding a menu that was left behind.
+    if (this.rigGliding) {
+      glideRig(this.rig, this.rigGoal, 1 - Math.exp(-dt * 7), this.head, this.rigNext);
+      if (rigGap(this.rigNext, this.rigGoal) < 0.01) {
+        copyRig(this.rig, this.rigGoal);
+        this.rigGliding = false;
+      } else copyRig(this.rig, this.rigNext);
+      this.useRig();
+      this.reanchorMenu();
+    } else if (this.rigHand < 0 && isLost(this.rig, this.head)) {
+      this.rigLostFor += dt;
+      if (this.rigLostFor > 1.5) {
+        this.rigLostFor = 0;
+        this.recenterMenu(false);
+      }
+    } else this.rigLostFor = 0;
+
+    // The handle moves with the panel; its hit tests need this frame's matrices.
+    this.panel.group.updateMatrixWorld(true);
+    for (let i = 0; i < 2; i += 1) {
+      const distance = this.hands[i].tracked && isPinchPose(this.hands[i].joints) ? this.pinchPoint(i, this.rigPoint) : null;
+      const over = distance != null && handle.overBar(this.rigPoint);
+      if (this.rigHand === i) {
+        if (distance == null || distance > RIG_LET_GO) this.endRigGrab();
+        else {
+          dragRig(this.rigStart, this.rigHandStart, this.rigPoint, this.head, this.rigNext);
+          copyRig(this.rig, this.rigNext);
+          this.useRig();
+          this.reanchorMenu();
+        }
+      } else if (distance != null && distance < PINCH_ON && !this.rigPinched[i] && over && this.rigHand < 0 && this.rigShownFor > 0.5) {
+        // A pinch that closed with the hand on the bar: pick the menu up.
+        this.rigHand = i;
+        this.rigHandStart.copy(this.rigPoint);
+        copyRig(this.rigStart, this.rig);
+        this.rigGliding = false;
+        handle.bump();
+        this.sfx.unlock();
+        this.sfx.click();
+      }
+      if (distance == null || distance > RIG_LET_GO) this.rigPinched[i] = false;
+      else if (distance < PINCH_ON) this.rigPinched[i] = true;
+      this.rigNear[i] = over || this.rigHand === i;
+    }
+
+    // The chip: a fingertip through it.
+    let chip = false;
+    for (const tip of this.tips) if (handle.overChip(tip)) chip = true;
+    if (chip && this.rigChipArmed && this.rigHand < 0) {
+      this.rigChipArmed = false;
+      this.recenterMenu(true);
+    }
+    if (!chip) this.rigChipArmed = true;
+
+    // The first-time hint stays up until the handle has been used (or a while has passed).
+    if (!this.rigPrefs.hinted && this.rigShownFor > 20) {
+      this.rigPrefs.hinted = true;
+      saveRigPrefs(this.rigPrefs);
+    }
+    if (this.rigHand >= 0 && !this.rigPrefs.hinted) this.rigPrefs.hinted = true;
+    const d = this.rigDebug;
+    handle.setState(d > 0 ? d === 2 : this.rigNear[0] || this.rigNear[1], d > 0 ? d === 3 : this.rigHand >= 0, d > 0 ? d === 5 : !this.rigPrefs.hinted && this.rigShownFor > 0.6, d > 0 ? d === 4 : chip);
+    handle.update(dt);
   }
 
   /** Shows the war map only on the map screen, reflecting progress. */
@@ -3495,7 +3712,7 @@ export class CombatSystem extends createSystem({
       this.holomap.setNode(i, !unlocked ? 'locked' : stars > 0 ? 'cleared' : 'open', stars, `${i + 1}. ${chapter.levels[i].location}`);
     });
     this.holomap.selected = this.menus.mapLevel;
-    if (!this.holomap.visible) this.holomap.show(this.head, this.menuDir);
+    if (!this.holomap.visible) this.holomap.show(this.menuOrigin, this.menuDir);
   }
 
   /** Poking a node on the war map selects that level. */
@@ -3515,7 +3732,7 @@ export class CombatSystem extends createSystem({
     });
     this.galaxy.build(nodes, finaleUnlocked(p), anchorsRecovered(p).length);
     this.galaxy.selected = this.menus.galaxyIndex;
-    if (!this.galaxy.visible) this.galaxy.show(this.head, this.menuDir, this.flat ? 0.55 : 0.35, this.flat ? 0.62 : 0.62, this.flat ? 1.05 : 1.0, this.flat ? -0.75 : 0);
+    if (!this.galaxy.visible) this.placeGalaxy();
   }
 
   /** Poking a planet picks that hero's front; the core starts the finale. */
@@ -3805,7 +4022,7 @@ export class CombatSystem extends createSystem({
     const finish = finishFor(this.profile, hero);
     if (model) applyFinish(model, finish, '');
     if (model) this.armory.setWeapon(`${id}:${finish.id}`, model, finish.energy ?? def?.color ?? equippedColor(this.profile, hero), weaponTier(this.profile, hero));
-    if (!this.armory.visible) this.armory.show(this.head, this.menuDir);
+    if (!this.armory.visible) this.armory.show(this.menuOrigin, this.menuDir);
   }
 
   /** Weapon tier visuals in a mission: auras on held weapons, sparks on hands. */
@@ -3819,7 +4036,7 @@ export class CombatSystem extends createSystem({
     const on = this.panel.visible && this.menus.screen === 'heroes';
     if (on && !this.carousel.visible) {
       this.carousel.setFocus(this.menus.heroFocus);
-      this.carousel.show(this.head, this.menuDir);
+      this.carousel.show(this.menuOrigin, this.menuDir);
     } else if (!on && this.carousel.visible) this.carousel.hide();
     if (!on) return;
     this.carousel.setFocus(this.menus.heroFocus);
@@ -4044,7 +4261,7 @@ export class CombatSystem extends createSystem({
     this.world.camera.getWorldPosition(this.head);
     this.world.camera.getWorldDirection(this.forward);
     this.anchorMenu();
-    this.panel.place(this.head, this.menuDir);
+    this.panel.place(this.menuOrigin, this.menuDir);
     this.panel.show();
     this.music.play('menu');
   }

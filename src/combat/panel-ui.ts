@@ -16,6 +16,9 @@ export const PANEL_PX_W = 1600;
 export const PANEL_PX_H = 1000;
 const WIDTH_M = 0.78;
 const HEIGHT_M = WIDTH_M * (PANEL_PX_H / PANEL_PX_W);
+/** The panel's size in metres (the menu handle hangs under it). */
+export const PANEL_W_M = WIDTH_M;
+export const PANEL_H_M = HEIGHT_M;
 const FONT = "'Orbitron', 'Rajdhani', system-ui, sans-serif";
 const BODY = "'Rajdhani', system-ui, sans-serif";
 const COMIC = "'Bangers', 'Impact', sans-serif";

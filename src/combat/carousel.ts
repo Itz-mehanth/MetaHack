@@ -229,6 +229,14 @@ export class HeroCarousel {
     this.group.visible = true;
   }
 
+  /** Moves the ring to a new centre and heading without disturbing its spin or focus (the menu was dragged). */
+  reanchor(head: Vector3, forward: Vector3): void {
+    this.center.set(head.x, 0, head.z);
+    this.flat.set(forward.x, 0, forward.z);
+    if (this.flat.lengthSq() < 1e-4) this.flat.set(0, 0, -1);
+    this.flat.normalize();
+  }
+
   hide(): void {
     this.visible = false;
     this.group.visible = false;
