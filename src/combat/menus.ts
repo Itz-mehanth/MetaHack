@@ -140,6 +140,8 @@ export class GameMenus {
   transmission: TransmissionView | null = null;
   private garageHero: HeroId = 'arc';
   private garageTab: 'weapons' | 'upgrades' | 'skins' = 'weapons';
+  /** Where the garage's BACK goes: the main menu, or the level screen it was opened from (so a weapon can be changed without leaving the level choice). */
+  private garageReturn: Screen = 'main';
   /** Weapon shown on the armory projector (null: the equipped one). */
   private garageWeapon: string | null = null;
 
@@ -485,7 +487,8 @@ export class GameMenus {
         size: 32,
         color: accent,
       },
-      { id: 'start', x: 64, y: 790, w: 960, h: 150, label: boss ? 'FACE THE BOSS' : 'START MISSION', selected: true, color: accent, size: 56, icon: boss ? 'skull' : 'play' },
+      { id: 'start', x: 64, y: 790, w: 620, h: 150, label: boss ? 'FACE THE BOSS' : 'START MISSION', selected: true, color: accent, size: 56, icon: boss ? 'skull' : 'play' },
+      { id: 'map-garage', x: 704, y: 790, w: 320, h: 150, label: 'ARMORY', sub: `${HEROES.find((h) => h.id === this.hero)!.name}: weapons, upgrades`, color: accent, size: 44, icon: 'garage' },
       { id: 'difficulty', x: 1056, y: 790, w: 480, h: 150, label: 'DIFFICULTY', sub: this.profile.settings.difficulty.toUpperCase(), color: accent },
       { id: 'chapter-movie', x: 1056, y: 698, w: 480, h: 80, label: 'WATCH STORY', size: 32 },
     );
@@ -896,6 +899,14 @@ export class GameMenus {
     if (event.id !== 'reset') this.confirmReset = false;
     switch (kind) {
       case 'back':
+        if (this.screen === 'garage' && this.garageReturn === 'map') {
+          // Back to the level choice with the same level still selected.
+          const level = this.mapLevel;
+          this.open('map');
+          this.mapLevel = level;
+          this.actions.mapSelect(level);
+          return;
+        }
         this.open(this.screen === 'settings' ? this.settingsReturn : this.screen === 'map' ? 'galaxy' : 'main');
         return;
       case 'main-hero':
@@ -918,6 +929,13 @@ export class GameMenus {
         return;
       case 'garage':
         this.garageHero = this.hero;
+        this.garageReturn = 'main';
+        this.open('garage');
+        return;
+      case 'map-garage':
+        // The armory for the hero about to deploy, straight from the level choice.
+        this.garageHero = this.hero;
+        this.garageReturn = 'map';
         this.open('garage');
         return;
       case 'settings':
