@@ -2,6 +2,7 @@ import { SessionMode, type World } from '@iwsdk/core';
 import { HEROES } from './combat/heroes.js';
 import { requestMotion } from './combat/screen-input.js';
 import { chapterFor } from './combat/story.js';
+import { GUIDE_CSS, guideHTML, setupGuide } from './guide.js';
 import { shell } from './shell.js';
 
 const ICONS = `${import.meta.env.BASE_URL}icons/`;
@@ -131,13 +132,13 @@ const CSS = `
   #landing .tag{font-size:15px;margin-bottom:10px;min-height:0;max-width:520px}#landing .stage{grid-template-columns:1fr;padding-top:calc(var(--bar) + 8px);padding-bottom:calc(var(--bar) + 8px)}
   #landing button.primary{font-size:24px;padding:10px 22px}#landing button{font-size:20px;padding:8px 16px;width:auto}#landing .row2{margin-top:8px}}
 @media (prefers-reduced-motion:reduce){#landing *,#landing *::before{animation:none!important}}
-`;
+${GUIDE_CSS}`;
 
 const TILTS = ['-2deg', '1.5deg', '-1deg', '2deg', '-1.5deg'];
 
 function heroCards(): string {
   return HEROES.map(
-    (h, i) => `<div class="hero" style="--c:${h.color};--r:${TILTS[i % TILTS.length]}">
+    (h, i) => `<div class="hero" data-h="${h.id}" role="button" tabindex="0" aria-label="How ${h.name} plays" style="--c:${h.color};--r:${TILTS[i % TILTS.length]}">
       <div class="icon" style="--i:url('${ICONS}${h.id}.svg')"></div>
       <b>${h.name}</b><span>${h.power}</span><i>${h.how}</i></div>`,
   ).join('');
@@ -189,6 +190,16 @@ const HTML = () => `
     ${how('hostage', '#FFD23F', 'WIN BACK THE ANCHORS', 'Aliens breach your real walls. Free the caged, beat each region boss, recover its Anchor.')}
     ${how('overdrive', '#FF2D9A', 'CONVERGENCE', 'With three Anchors, face OBLIVAX in your own room. Every hero joins in. Clap to end it.')}
   </div>
+  ${guideHTML()}
+  <h2>FROM MENU TO MISSION</h2>
+  <div class="how">
+    ${how('arc', '#3DF5FF', 'PICK A HERO', 'Ten heroes stand as holograms. Poke one, or look at it and pinch, to see their power and deploy.')}
+    ${how('map', '#FFD23F', 'THE WAR MAP', 'A spiral galaxy. Each hero has a region of three levels; poke a planet to deploy.')}
+    ${how('radar', '#FF2D9A', 'THE MISSION', 'Aliens breach your real walls in waves. Each level ends on a champion or the region boss, and adds a twist like meteor rain or blackout.')}
+    ${how('garage', '#9D8CFF', 'RESULTS AND ARMORY', 'Earn stars and coins, then spend them on weapons, upgrades and skins for each hero.')}
+    ${how('timer', '#5DFFB0', 'ENDLESS AND DAILY', '40 waves with a boss every fifth. DAILY rolls the same world and twist for everyone.')}
+    ${how('trophy', '#FF9A3D', 'LEADERBOARDS', 'Every finished run lands on its hero\'s board. Beat the best score.')}
+  </div>
   <footer>
     Original heroes, story, weapons, music and sound, made for the Meta VR Start Developer Competition 2026. Creature models: Quaternius (CC0).<br>
     No headset? PLAY NOW works on phones, tablets and computers: tap, hold and swipe.<br>
@@ -217,6 +228,7 @@ export function setupLanding(world: World): void {
   landing.id = 'landing';
   landing.innerHTML = HTML();
   document.body.appendChild(landing);
+  setupGuide(landing);
   const home = document.createElement('button');
   home.id = 'home-btn';
   home.textContent = 'HOME';

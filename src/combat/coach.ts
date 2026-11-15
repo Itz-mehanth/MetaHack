@@ -381,7 +381,8 @@ function blade(c: CanvasRenderingContext2D, x: number, y: number, angle: number,
   c.restore();
 }
 
-function drawGesture(c: CanvasRenderingContext2D, gesture: Gesture, x: number, y: number, color: string, t: number): void {
+/** Draws the animated hand pictogram for `gesture` around (x, y); the landing page's hero guide reuses it. */
+export function drawGesture(c: CanvasRenderingContext2D, gesture: Gesture, x: number, y: number, color: string, t: number): void {
   const pulse = (Math.sin(t * 6) + 1) / 2;
   const cycle = (t % 1.6) / 1.6;
   switch (gesture) {

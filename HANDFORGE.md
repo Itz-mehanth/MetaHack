@@ -190,6 +190,7 @@ throughout (no Marvel or other third-party names/designs).
   and tapped; SCREEN_TIPS replace the hand coach; portrait shows a rotate
   prompt. Tests: ?dtmax=0.2 (real-time steps on slow renderers),
   __surgeTargets(), __surgeWidget(id), __surgeBolts().
+- Hero guide on the landing page (guide.ts): below the roster, HOW EACH HERO PLAYS has a tab per hero (a roster card click picks it too) and shows that hero's steps from coach.ts HERO_TIPS as the same animated hand pictograms the in-game coach uses (`drawGesture` is exported for it), plus the phone/computer control line; GETTING AROUND shows how to press a button (poke, or look and pinch), tag in, pause (left wrist) and clap for OVERDRIVE, with a note that a palm-facing pinch opens the Meta menu; FROM MENU TO MISSION lists the flow. Pictograms draw at about 12 fps and only while on screen, the page is visible and the landing page is up (IntersectionObserver), and stay still with REDUCED MOTION or when `roundRect` is missing.
 - Landing page (landing.ts): cinematic overlay on a live attract reel
   (attract.ts): a bot plays each hero with its flashiest weapon in its own
   world while a director moves the camera and OBLIVAX looms on the horizon;
