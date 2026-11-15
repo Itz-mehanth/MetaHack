@@ -1,12 +1,10 @@
 import { type HeroId, HEROES, PLAYABLE } from './heroes.js';
 import type { PanelContent, PanelEvent, Widget } from './panel-ui.js';
 import {
-  buyHero,
   buySkin,
   buyUpgrade,
   type Difficulty,
   equippedColor,
-  HERO_PRICE,
   levelsCleared,
   isStageUnlocked,
   MAX_UPGRADE,
@@ -337,7 +335,6 @@ export class GameMenus {
     const p = this.profile;
     const hero = HEROES[this.galaxyIndex] ?? HEROES[0];
     const chapter = chapterFor(hero.id);
-    const owned = p.heroes.includes(hero.id);
     const cleared = chapter.levels.filter((_, i) => (p.stars[`${chapter.worldId}-${i + 1}`] ?? 0) > 0).length;
     const anchors = anchorsRecovered(p).length;
     const finale = finaleUnlocked(p);
@@ -366,8 +363,8 @@ export class GameMenus {
           y: 440,
           w: 900,
           h: 150,
-          label: owned ? `DEPLOY ${hero.name}` : `UNLOCK ${hero.name}`,
-          sub: owned ? `${chapter.region}: ${chapter.levels[Math.min(2, cleared)].location}` : `${HERO_PRICE[hero.id]} coins`,
+          label: `DEPLOY ${hero.name}`,
+          sub: `${chapter.region}: ${chapter.levels[Math.min(2, cleared)].location}`,
           icon: hero.id,
           selected: true,
           color,
@@ -394,7 +391,7 @@ export class GameMenus {
   heroStatus(id: HeroId): string {
     if (!PLAYABLE.includes(id)) return 'COMING SOON';
     if (id === this.hero) return 'SELECTED';
-    return this.profile.heroes.includes(id) ? 'READY' : `UNLOCK ${HERO_PRICE[id]} C`;
+    return 'READY';
   }
 
   /** Moves the carousel focus; returns true if it changed. */
@@ -408,10 +405,8 @@ export class GameMenus {
   private heroesScreen(_accent: string): PanelContent {
     const hero = HEROES[this.heroFocus];
     const color = equippedColor(this.profile, hero.id);
-    const owned = this.profile.heroes.includes(hero.id);
     const playable = PLAYABLE.includes(hero.id);
-    const price = HERO_PRICE[hero.id];
-    const pick = !playable ? 'COMING SOON' : hero.id === this.hero ? 'SELECTED - TAP TO PLAY' : owned ? 'SELECT HERO' : `UNLOCK FOR ${price} C`;
+    const pick = !playable ? 'COMING SOON' : hero.id === this.hero ? 'SELECTED - TAP TO PLAY' : 'SELECT HERO';
     return {
       title: 'CHOOSE YOUR HERO',
       subtitle: this.flat ? 'Tap the arrows to meet each hero' : 'Swipe an open hand sideways (one hero per swipe), or poke the arrows',
@@ -435,7 +430,7 @@ export class GameMenus {
           icon: hero.id,
         },
         { id: 'hero-next', x: 1316, y: 250, w: 220, h: 520, label: '>', size: 110, disabled: this.heroFocus === HEROES.length - 1, color },
-        { id: 'hero-pick', x: 310, y: 800, w: 980, h: 140, label: pick, selected: playable, disabled: !playable, color, size: 48, icon: owned ? 'play' : 'coins' },
+        { id: 'hero-pick', x: 310, y: 800, w: 980, h: 140, label: pick, selected: playable, disabled: !playable, color, size: 48, icon: 'play' },
       ],
     };
   }
@@ -912,13 +907,6 @@ export class GameMenus {
         return;
       case 'galaxy-go': {
         const id = HEROES[this.galaxyIndex].id;
-        if (!p.heroes.includes(id)) {
-          if (!buyHero(p, id)) {
-            this.actions.denied();
-            return;
-          }
-          this.actions.bought();
-        }
         this.hero = id;
         this.actions.changed();
         this.open('map');
@@ -992,16 +980,9 @@ export class GameMenus {
       case 'hero-pick': {
         const id = HEROES[this.heroFocus].id;
         if (!PLAYABLE.includes(id)) return;
-        if (id === this.hero && p.heroes.includes(id)) {
+        if (id === this.hero) {
           this.open('map');
           return;
-        }
-        if (!p.heroes.includes(id)) {
-          if (!buyHero(p, id)) {
-            this.actions.denied();
-            return;
-          }
-          this.actions.bought();
         }
         this.hero = id;
         this.actions.changed();

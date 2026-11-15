@@ -144,18 +144,13 @@ export function missionsCleared(profile: Profile): number {
 
 // ---------------------------------------------------------------- economy
 
-export const HERO_PRICE: Readonly<Record<HeroId, number>> = {
-  arc: 0,
-  talon: 300,
-  tempest: 600,
-  orion: 900,
-  weaver: 1200,
-  havoc: 1500,
-  ronin: 1800,
-  psion: 2100,
-  vanguard: 2400,
-  vesper: 2700,
-};
+/**
+ * Every hero is open from the first launch: heroes used to cost 300 to 2,700
+ * coins (13,500 in all), so a first session only ever met ARC and the squad's two
+ * lent heroes. Coins now go on weapons, upgrades, skins and finishes. The order
+ * is the tag-in order of a new squad (the lead, then the next two), the flashiest first.
+ */
+export const STARTING_HEROES: readonly HeroId[] = ['arc', 'ronin', 'tempest', 'psion', 'orion', 'weaver', 'havoc', 'talon', 'vesper', 'vanguard'];
 
 export const ENEMY_COINS: Readonly<Record<EnemyKind, number>> = {
   drone: 5,
@@ -328,7 +323,7 @@ export function defaultProfile(): Profile {
   return {
     version: 1,
     coins: 150,
-    heroes: ['arc'],
+    heroes: [...STARTING_HEROES],
     upgrades: {},
     skins: SKINS.filter((s) => s.price === 0).map((s) => s.id),
     equipped: {},
@@ -353,7 +348,8 @@ export function normalizeProfile(raw: unknown): Profile {
   return {
     version: 1,
     coins: typeof r.coins === 'number' && r.coins >= 0 ? Math.floor(r.coins) : base.coins,
-    heroes: Array.isArray(r.heroes) && r.heroes.length > 0 ? r.heroes : base.heroes,
+    // An older save keeps its own order and gains the heroes it did not have yet.
+    heroes: Array.from(new Set([...(Array.isArray(r.heroes) ? r.heroes : []), ...STARTING_HEROES])),
     upgrades: { ...(r.upgrades ?? {}) },
     skins: Array.from(new Set([...base.skins, ...(Array.isArray(r.skins) ? r.skins : [])])),
     equipped: { ...(r.equipped ?? {}) },
@@ -407,13 +403,6 @@ export function buyUpgrade(profile: Profile, id: string): boolean {
   if (cost == null || profile.coins < cost || upgradeLevel(profile, id) >= upgradeCap(profile, id)) return false;
   profile.coins -= cost;
   profile.upgrades[id] = upgradeLevel(profile, id) + 1;
-  return true;
-}
-
-export function buyHero(profile: Profile, hero: HeroId): boolean {
-  if (profile.heroes.includes(hero) || profile.coins < HERO_PRICE[hero]) return false;
-  profile.coins -= HERO_PRICE[hero];
-  profile.heroes.push(hero);
   return true;
 }
 

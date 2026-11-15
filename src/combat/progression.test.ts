@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { PLAYABLE } from './heroes.js';
 import {
-  buyHero,
   buySkin,
   buyUpgrade,
   defaultProfile,
@@ -16,6 +16,7 @@ import {
   SKINS,
   STAGES,
   STAGES_PER_WORLD,
+  STARTING_HEROES,
   starsFor,
   upgradeCap,
   weaponTier,
@@ -70,16 +71,12 @@ describe('economy', () => {
     const p = defaultProfile();
     p.coins = 50;
     expect(buyUpgrade(p, 'shield')).toBe(false);
-    expect(buyHero(p, 'talon')).toBe(false);
     expect(p.coins).toBe(50);
-    expect(p.heroes).toEqual(['arc']);
   });
 
-  it('buys heroes once and skins equip on purchase', () => {
+  it('skins equip on purchase', () => {
     const p = defaultProfile();
     p.coins = 5000;
-    expect(buyHero(p, 'talon')).toBe(true);
-    expect(buyHero(p, 'talon')).toBe(false);
     const solar = SKINS.find((s) => s.id === 'arc-solar')!;
     expect(equippedColor(p, 'arc')).toBe('#3DF5FF');
     expect(buySkin(p, solar.id)).toBe(true);
@@ -107,6 +104,21 @@ describe('economy', () => {
     p.upgrades.shield = 2;
     p.settings.difficulty = 'hard';
     expect(maxHealth(p)).toBe(5);
+  });
+});
+
+describe('opening roster', () => {
+  it('opens every playable hero from the first launch, each once', () => {
+    expect(new Set(STARTING_HEROES).size).toBe(STARTING_HEROES.length);
+    expect([...STARTING_HEROES].sort()).toEqual([...PLAYABLE].sort());
+    expect(defaultProfile().heroes).toEqual([...STARTING_HEROES]);
+  });
+
+  it('gives an older save the heroes it lacked and keeps its own order', () => {
+    const old = normalizeProfile({ coins: 10, heroes: ['talon', 'arc'] });
+    expect(old.heroes.slice(0, 2)).toEqual(['talon', 'arc']);
+    expect([...old.heroes].sort()).toEqual([...STARTING_HEROES].sort());
+    expect(normalizeProfile({ heroes: [] }).heroes).toEqual([...STARTING_HEROES]);
   });
 });
 
@@ -196,18 +208,17 @@ describe('profile', () => {
     expect(partial.coins).toBe(999);
     expect(partial.settings.music).toBe(0.1);
     expect(partial.settings.difficulty).toBe('normal');
-    expect(partial.heroes).toEqual(['arc']);
+    expect(partial.heroes).toEqual([...STARTING_HEROES]);
   });
 });
 
 describe('new heroes', () => {
-  it('gives RONIN and PSION a region, upgrades, skins and a price', () => {
+  it('gives RONIN and PSION a region, upgrades and skins', () => {
     for (const hero of ['ronin', 'psion'] as const) {
       expect(STAGES.filter((s) => s.world.id === (hero === 'ronin' ? 'moon-temple' : 'sky-ruins'))).toHaveLength(STAGES_PER_WORLD);
       expect(SKINS.filter((s) => s.hero === hero)).toHaveLength(3);
       const p = defaultProfile();
-      p.coins = 100000;
-      expect(buyHero(p, hero)).toBe(true);
+      expect(p.heroes).toContain(hero);
       expect(upgradeCap(p, `${hero === 'ronin' ? 'ronin-edge' : 'psion-mass'}`)).toBe(1);
     }
   });
