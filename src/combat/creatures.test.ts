@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BOSSES, CUTE_PACK, ROLE_FAMILY, ROLE_HEIGHT, ROLE_POOL, ROSTER, SPECIES, speciesById, speciesFor, speciesIn, voicePitch } from './creatures.js';
-import { STAGES } from './progression.js';
 import { STAGES, WORLDS } from './progression.js';
 
 describe('creature roster', () => {
