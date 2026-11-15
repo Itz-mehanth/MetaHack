@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { CLICK_GAP, PINCH_OFF, PINCH_ON, PINCH_SETTLE, PINCH_SURE, PinchEdge, SKIP_ARM, SKIP_HOLD, SkipPinch } from './gaze.js';
+import { CLICK_GAP, CLICK_OFF, CLICK_ON, CLICK_SETTLE, CLICK_SURE, GAZE_DWELL, GazeDwell, PinchEdge, SKIP_ARM, SKIP_HOLD, SkipPinch } from './gaze.js';
 
 describe('PinchEdge', () => {
   it('clicks once when the fingers close', () => {
     const pinch = new PinchEdge();
     expect(pinch.update(0.1, 0)).toBe(false);
-    expect(pinch.update(PINCH_SURE - 0.005, 0.1)).toBe(true);
-    expect(pinch.update(PINCH_SURE - 0.005, 0.2)).toBe(false);
+    expect(pinch.update(CLICK_SURE - 0.005, 0.1)).toBe(true);
+    expect(pinch.update(CLICK_SURE - 0.005, 0.2)).toBe(false);
     expect(pinch.held).toBe(true);
   });
 
@@ -16,33 +16,33 @@ describe('PinchEdge', () => {
     expect(pinch.update(0.08, 0)).toBe(false);
     expect(pinch.update(0.06, 0.014)).toBe(false);
     expect(pinch.update(0.045, 0.028)).toBe(false);
-    expect(pinch.update(PINCH_ON - 0.002, 0.042)).toBe(false);
+    expect(pinch.update(CLICK_ON - 0.002, 0.042)).toBe(false);
     expect(pinch.held).toBe(false);
     // ...and the click lands as they finish closing.
-    expect(pinch.update(PINCH_SURE - 0.004, 0.056)).toBe(true);
+    expect(pinch.update(CLICK_SURE - 0.004, 0.056)).toBe(true);
   });
 
   it('clicks a loose pinch that stays closed, and not one that opens again', () => {
     const slow = new PinchEdge();
-    expect(slow.update(PINCH_ON - 0.003, 0)).toBe(false);
-    expect(slow.update(PINCH_ON - 0.003, PINCH_SETTLE / 2)).toBe(false);
-    expect(slow.update(PINCH_ON - 0.003, PINCH_SETTLE + 0.01)).toBe(true);
+    expect(slow.update(CLICK_ON - 0.003, 0)).toBe(false);
+    expect(slow.update(CLICK_ON - 0.003, CLICK_SETTLE / 2)).toBe(false);
+    expect(slow.update(CLICK_ON - 0.003, CLICK_SETTLE + 0.01)).toBe(true);
     const flick = new PinchEdge();
-    expect(flick.update(PINCH_ON - 0.003, 0)).toBe(false);
-    expect(flick.update(0.05, PINCH_SETTLE / 2)).toBe(false);
+    expect(flick.update(CLICK_ON - 0.003, 0)).toBe(false);
+    expect(flick.update(0.05, CLICK_SETTLE / 2)).toBe(false);
     // The wait starts over when the tips come back inside the line.
-    expect(flick.update(PINCH_ON - 0.003, PINCH_SETTLE)).toBe(false);
-    expect(flick.update(PINCH_ON - 0.003, PINCH_SETTLE * 1.5)).toBe(false);
-    expect(flick.update(PINCH_ON - 0.003, PINCH_SETTLE * 2.2)).toBe(true);
+    expect(flick.update(CLICK_ON - 0.003, CLICK_SETTLE)).toBe(false);
+    expect(flick.update(CLICK_ON - 0.003, CLICK_SETTLE * 1.5)).toBe(false);
+    expect(flick.update(CLICK_ON - 0.003, CLICK_SETTLE * 2.2)).toBe(true);
   });
 
   it('needs a real release before it can click again (hysteresis)', () => {
     const pinch = new PinchEdge();
     expect(pinch.update(0.01, 0)).toBe(true);
     // Fingers drift between the two thresholds: still held, no new click.
-    expect(pinch.update((PINCH_ON + PINCH_OFF) / 2, 1)).toBe(false);
+    expect(pinch.update((CLICK_ON + CLICK_OFF) / 2, 1)).toBe(false);
     expect(pinch.update(0.01, 2)).toBe(false);
-    expect(pinch.update(PINCH_OFF + 0.02, 3)).toBe(false);
+    expect(pinch.update(CLICK_OFF + 0.02, 3)).toBe(false);
     expect(pinch.update(0.01, 4)).toBe(true);
   });
 
@@ -105,5 +105,37 @@ describe('skipping a movie with a pinch', () => {
     run(skip, true, false, 1);
     run(skip, false, false, 0.1);
     expect(run(skip, true, true, SKIP_HOLD * 2)).toBe(false);
+  });
+});
+
+describe('GazeDwell', () => {
+  it('counts the seconds the gaze rests on one thing, and starts over on another', () => {
+    const dwell = new GazeDwell();
+    expect(dwell.update('play', 0.1)).toBe(0);
+    expect(dwell.update('play', 0.1)).toBeCloseTo(0.1);
+    expect(dwell.update('play', 0.25)).toBeCloseTo(0.35);
+    expect(dwell.update('garage', 0.1)).toBe(0);
+    expect(dwell.update('garage', 0.1)).toBeCloseTo(0.1);
+  });
+
+  it('forgets everything when the gaze rests on nothing', () => {
+    const dwell = new GazeDwell();
+    dwell.update('play', 0.1);
+    dwell.update('play', 0.5);
+    expect(dwell.update('', 0.1)).toBe(0);
+    expect(dwell.update('play', 0.1)).toBe(0);
+  });
+
+  it('needs a moment on a button, but not a long one', () => {
+    expect(GAZE_DWELL).toBeGreaterThan(0.2);
+    expect(GAZE_DWELL).toBeLessThan(0.6);
+  });
+});
+
+describe('click thresholds', () => {
+  it('are ordered: finished pinch, then a settled one, then released', () => {
+    expect(CLICK_SURE).toBeLessThan(CLICK_ON);
+    expect(CLICK_ON).toBeLessThan(CLICK_OFF);
+    expect(CLICK_GAP).toBeGreaterThan(0.3);
   });
 });

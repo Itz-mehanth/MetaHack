@@ -260,7 +260,7 @@ export class GameMenus {
           color: accent,
           size: 80,
         }
-      : { id: 'story', x: 640, y: 220, w: 896, h: 200, label: 'START STORY', icon: 'play', sub: 'PROLOGUE: learn your powers in 4 minutes', selected: true, color: '#FF4FD8', size: 72 };
+      : { id: 'story', x: 640, y: 220, w: 896, h: 200, label: 'START STORY', icon: 'play', sub: 'PROLOGUE: learn seven hero powers', selected: true, color: '#FF4FD8', size: 72 };
     return {
       title: 'SURGE',
       subtitle: begun ? `OBLIVAX is unmaking reality. Win back the Anchors. ${anchors}/${HEROES.length}   |   Stars ${totalStars(this.profile)}/${STAGES.length * 3}` : 'Hands of Heroes',

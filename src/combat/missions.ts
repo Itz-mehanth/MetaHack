@@ -91,6 +91,9 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
   pod: { name: 'CAGE', hp: 3, radius: 0.24, chargeDistance: 0, chargeTime: 99, weave: 0, damage: 0, score: 300 },
 };
 
+/** How many times more of the small cute enemies (blobs) a wave brings, and keeps alive at once. */
+export const CUTE_CROWD = 1.8;
+
 export interface WaveDef {
   readonly count: number;
   /** Seconds between spawn groups. */

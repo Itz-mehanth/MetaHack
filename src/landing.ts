@@ -186,7 +186,7 @@ const HTML = () => `
   <div class="roster">${heroCards()}</div>
   <h2>HOW TO PLAY</h2>
   <div class="how">
-    ${how('play', '#3DF5FF', 'JUST PLAY', 'Put the controllers down. A 4-minute prologue teaches three heroes, one gesture at a time.')}
+    ${how('play', '#3DF5FF', 'JUST PLAY', 'Put the controllers down. A short prologue teaches seven heroes, one gesture at a time.')}
     ${how('hostage', '#FFD23F', 'WIN BACK THE ANCHORS', 'Aliens breach your real walls. Free the caged, beat each region boss, recover its Anchor.')}
     ${how('overdrive', '#FF2D9A', 'CONVERGENCE', 'With three Anchors, face OBLIVAX in your own room. Every hero joins in. Clap to end it.')}
   </div>

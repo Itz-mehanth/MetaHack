@@ -349,6 +349,11 @@ export class Panel {
     return true;
   }
 
+  /** The button the gaze ray rested on at the last `aim` ('' for none). */
+  get aimedId(): string {
+    return this.aimId;
+  }
+
   /** Where the ray meets the panel plane (world point into `out`); leaves the panel-pixel position in `this.local`. */
   private rayHit(origin: Vector3, direction: Vector3, out: Vector3): boolean {
     this.face.getWorldPosition(this.flat);

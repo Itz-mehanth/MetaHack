@@ -77,18 +77,33 @@ export const ROLE_FAMILY: Partial<Record<EnemyKind, Family>> = {
   flyer: 'flying',
 };
 
+/**
+ * The small, cute creatures (the blob and flying families) used to stand about a
+ * metre tall: too big for their hops and wobbles to read in a room, and too few.
+ * They are now less than half that, come in crowds (CUTE_CROWD), pack in this much
+ * closer together (1 is the spacing of a humanoid), and each has its own voice.
+ */
+export const CUTE_PACK = 0.55;
+
+/** A species' voice pitch (a multiplier, 0.8 to 1.43): the same species always sounds the same, and species differ. */
+export function voicePitch(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) % 997;
+  return 0.8 + (h % 8) * 0.09;
+}
+
 /** Standing height (m) of the creature in each role. */
 export const ROLE_HEIGHT: Partial<Record<EnemyKind, number>> = {
   drone: 1.3,
   armored: 1.5,
   blade: 1.4,
   titan: 2.5,
-  swarmer: 0.95,
-  flyer: 0.9,
+  swarmer: 0.42,
+  flyer: 0.5,
 };
 
 /** Creatures kept ready per role (a pool slot is one skinned clone with its own mixer). */
-export const ROLE_POOL: Partial<Record<EnemyKind, number>> = { drone: 8, armored: 6, blade: 6, titan: 4, swarmer: 9, flyer: 6 };
+export const ROLE_POOL: Partial<Record<EnemyKind, number>> = { drone: 8, armored: 6, blade: 6, titan: 4, swarmer: 18, flyer: 9 };
 
 /**
  * Which species fills each role in each world. A missing role keeps the

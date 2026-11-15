@@ -9,6 +9,15 @@ const FONT = "'Orbitron', 'Rajdhani', system-ui, sans-serif";
 
 const COLOR = { ok: '#3DF5FF', low: '#FFB020', critical: '#FF3B5C' } as const;
 
+/** Share of its full size the gauge is drawn at: it sat in the middle of the view and hid what was in front of the player. */
+const BASE_SCALE = 0.72;
+/** Height of the gauge (metres, camera space at 0.85 m): up above the squad strip when that is showing, else well down toward the edge of view. */
+const Y_HIGH = -0.215;
+const Y_LOW = -0.41;
+/** At full health, with nothing happening for this many seconds, the gauge fades to REST_OPACITY; any hit, heal or warning brings it back. */
+const REST_AFTER = 3;
+const REST_OPACITY = 0.4;
+
 /** Quantises an animation value so the canvas is redrawn a few times a second, not every frame. */
 const q = (value: number, steps: number): number => Math.round(value * steps);
 
@@ -27,6 +36,10 @@ export class ShieldGauge {
   private readonly texture: CanvasTexture;
   private key = '';
   private clock = 0;
+  private readonly material: MeshBasicMaterial;
+  /** Seconds of rest still to wait before fading, and the opacity now. */
+  private busy = REST_AFTER;
+  private opacity = 1;
 
   constructor(camera: Camera) {
     this.canvas = document.createElement('canvas');
@@ -35,10 +48,8 @@ export class ShieldGauge {
     this.ctx = this.canvas.getContext('2d')!;
     this.texture = new CanvasTexture(this.canvas);
     this.texture.colorSpace = SRGBColorSpace;
-    this.mesh = new Mesh(
-      new PlaneGeometry(PLANE_W, PLANE_H),
-      new MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }),
-    );
+    this.material = new MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
+    this.mesh = new Mesh(new PlaneGeometry(PLANE_W, PLANE_H), this.material);
     this.mesh.name = 'ShieldGauge';
     this.mesh.position.set(0, -0.215, -0.85);
     this.mesh.renderOrder = 34;
@@ -53,16 +64,25 @@ export class ShieldGauge {
       });
   }
 
-  /** `show`: the gauge belongs on screen now. `calm`: no shake, swell or strong pulse (REDUCE FLASHES). */
-  update(v: Vitals, show: boolean, dt: number, calm: boolean): void {
+  /**
+   * `show`: the gauge belongs on screen now. `calm`: no shake, swell or strong pulse (REDUCE FLASHES).
+   * `low`: nothing else is on the lower view (hands only, no squad strip), so it can sit well down.
+   */
+  update(v: Vitals, show: boolean, dt: number, calm: boolean, low = false): void {
     const visible = show && v.max > 0;
     this.mesh.visible = visible;
     if (!visible) return;
     this.clock += dt;
     const swell = calm ? 0 : Math.max(v.hurt, v.heal * 0.5) * 0.3;
     const beat = v.level === 'ok' ? 0 : v.pulse * (calm ? 0.35 : 1) * 0.1;
-    this.mesh.scale.setScalar(1 + swell + beat);
+    this.mesh.scale.setScalar((1 + swell + beat) * BASE_SCALE);
     this.mesh.position.x = calm ? 0 : Math.sin(this.clock * 70) * 0.014 * v.hurt * v.hurt;
+    this.mesh.position.y = low ? Y_LOW : Y_HIGH;
+    // Quiet at rest, loud when it matters.
+    const active = v.level !== 'ok' || v.hurt > 0.02 || v.heal > 0.02 || v.ghost > v.health + 0.01;
+    this.busy = active ? REST_AFTER : Math.max(0, this.busy - dt);
+    this.opacity += ((this.busy > 0 ? 1 : REST_OPACITY) - this.opacity) * (1 - Math.exp(-dt * 4));
+    this.material.opacity = this.opacity;
     this.draw(v, calm);
   }
 

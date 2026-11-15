@@ -438,6 +438,24 @@ export class Sfx {
     this.noiseSweep('bandpass', 800, 4000, 0.25, 0.15, 0, 0.2, 3);
   }
 
+  /**
+   * A small creature's voice while it runs at you. `pitch` is its species' own (creatures.ts
+   * voicePitch), `near` (0 to 1) how close it is. Walkers patter: a soft boing and a pat. Flyers
+   * twitter: two bubbly chirps climbing. Quiet and short, because a crowd plays dozens of them.
+   */
+  critter(pitch: number, flying: boolean, near: number): void {
+    const g = 0.4 + near * 0.6;
+    if (flying) {
+      const f = 1500 * pitch;
+      this.tone('sine', f, f * 1.5, 0.07, 0.07 * g, 0, 0.1);
+      this.tone('sine', f * 1.25, f * 1.9, 0.09, 0.06 * g, 0.09, 0.1);
+    } else {
+      const f = 330 * pitch;
+      this.tone('triangle', f, f * 2.1, 0.09, 0.11 * g, 0, 0.05);
+      this.tone('sine', f * 2, f * 1.5, 0.06, 0.05 * g, 0.07);
+    }
+  }
+
   wave(): void {
     this.tone('sawtooth', 110, 220, 0.5, 0.12, 0, 0.5);
     this.tone('square', 330, 660, 0.3, 0.08, 0.15, 0.4);

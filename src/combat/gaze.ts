@@ -6,21 +6,58 @@
  */
 
 /**
- * Thumb and index tips closer than this (metres) count as a pinch. Measured on a
- * Quest 3: a deliberate pinch bottoms out at about 3 cm between the two tip
- * joints (a tight fist reads 1 cm, a relaxed hand 5 cm or more). A line at 4 cm
- * fired while the fingers were still closing, so a pinch inside this line only
- * counts once it has settled (PINCH_SURE or PINCH_SETTLE below).
+ * Thumb and index tips closer than this (metres) count as a pinch for grabs: the
+ * bow string and the menu handle. Measured on a Quest 3: a deliberate pinch
+ * bottoms out at about 3 cm between the two tip joints (a tight fist reads 1 cm, a
+ * relaxed hand 5 cm or more).
  */
 export const PINCH_ON = 0.037;
+
+/**
+ * A menu click is stricter than a grab, because a click you did not mean is worse
+ * than one you have to repeat: the gap must be under CLICK_ON, and a pinch that is
+ * not quite finished (over CLICK_SURE) has to stay closed for CLICK_SETTLE, so
+ * fingers on their way to a pinch, or a loose hand, do not click.
+ */
+export const CLICK_ON = 0.033;
 /** ...and the pinch is released once they pass this. */
-export const PINCH_OFF = 0.045;
+export const CLICK_OFF = 0.045;
 /** Tips this close are a finished pinch: it counts at once. */
-export const PINCH_SURE = 0.03;
-/** Seconds a pinch between PINCH_SURE and PINCH_ON must stay closed before it counts, so fingers still closing do not click. */
-export const PINCH_SETTLE = 0.07;
+export const CLICK_SURE = 0.027;
+/** Seconds a pinch between CLICK_SURE and CLICK_ON must stay closed before it counts. */
+export const CLICK_SETTLE = 0.12;
 /** Minimum seconds between two clicks from one hand. */
-export const CLICK_GAP = 0.4;
+export const CLICK_GAP = 0.5;
+/** Seconds the gaze must have rested on the same button before a pinch can press it. */
+export const GAZE_DWELL = 0.3;
+/** A pinch made while the pinch point moves faster than this (m/s) is a hand on its way somewhere, not a click. */
+export const CLICK_STILL = 0.5;
+/**
+ * Cosine of how squarely a palm may face the head before its pinch is the Meta
+ * menu gesture (palm toward you, then pinch), which must never press a button.
+ */
+export const CLICK_PALM_AWAY = 0.55;
+
+/**
+ * How long the gaze has rested on one thing (a button, a planet). Pass the id of
+ * what it rests on each frame ('' for nothing); a click only counts after the
+ * dwell, so sweeping the reticle across buttons while pinching presses none.
+ */
+export class GazeDwell {
+  private id = '';
+  seconds = 0;
+
+  update(id: string, dt: number): number {
+    if (id === '') {
+      this.id = '';
+      this.seconds = 0;
+    } else if (id !== this.id) {
+      this.id = id;
+      this.seconds = 0;
+    } else this.seconds += dt;
+    return this.seconds;
+  }
+}
 
 /** A firm pinch (metres) held to skip a movie: tighter than a menu click, which a loosely held hand can make. */
 export const SKIP_PINCH = 0.036;
@@ -69,8 +106,8 @@ export class PinchEdge {
   /**
    * Feed the thumb-index distance each frame (null when the hand is not
    * tracked). Returns true on the frame a pinch closes, with a short lockout
-   * so one pinch is one click. A pinch counts once the tips are under PINCH_SURE,
-   * or have stayed under PINCH_ON for PINCH_SETTLE: fingers merely passing
+   * so one pinch is one click. A pinch counts once the tips are under CLICK_SURE,
+   * or have stayed under CLICK_ON for CLICK_SETTLE: fingers merely passing
    * through on the way to a pinch do not click.
    */
   update(distance: number | null, now: number): boolean {
@@ -80,15 +117,15 @@ export class PinchEdge {
       return false;
     }
     if (this.down) {
-      if (distance > PINCH_OFF) this.down = false;
+      if (distance > CLICK_OFF) this.down = false;
       return false;
     }
-    if (distance >= PINCH_ON) {
+    if (distance >= CLICK_ON) {
       this.since = -1;
       return false;
     }
     if (this.since < 0) this.since = now;
-    if (distance >= PINCH_SURE && now - this.since < PINCH_SETTLE) return false;
+    if (distance >= CLICK_SURE && now - this.since < CLICK_SETTLE) return false;
     this.down = true;
     this.since = -1;
     if (now - this.lastClick >= CLICK_GAP) {

@@ -62,7 +62,6 @@ interface NavCard {
 /** Getting around the game with bare hands. */
 const NAV: readonly NavCard[] = [
   { gesture: 'poke', color: '#3DF5FF', title: 'PRESS A BUTTON', text: 'Poke it with a fingertip, or look at it and pinch.' },
-  { gesture: 'pinch', color: '#FFD23F', title: 'TAG IN A SQUADMATE', text: 'Pinch a hero\'s portrait on the strip below your view. A quake ring and four seconds of extra damage.' },
   { gesture: 'poke', color: '#FF2D9A', title: 'PAUSE', text: 'Poke the button on your left wrist.' },
   { gesture: 'clap', color: '#9D8CFF', title: 'OVERDRIVE', text: 'When the meter is full, clap your hands: every hero fires at once.' },
 ];

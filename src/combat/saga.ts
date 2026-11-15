@@ -5,7 +5,7 @@ import type { LevelStory, Line } from './story.js';
 /**
  * The overarching saga: OBLIVAX, the Unmaker, has pulled the ten Anchors
  * that hold reality in place; Warlord VEX is his herald. A guided prologue
- * (three lent heroes, then a fight you cannot win) opens the game, every
+ * (seven lent heroes, then a fight you cannot win) opens the game, every
  * chapter boss returns one Anchor, and with enough Anchors the finale,
  * CONVERGENCE, unites every hero. Pure data and rules.
  */
@@ -31,17 +31,22 @@ export const PROLOGUE: Stage = {
   index: -1,
   number: 0,
   name: 'PROLOGUE',
-  objective: 'Channel three heroes, then face the Unmaker',
+  objective: 'Channel seven heroes, then face the Unmaker',
   waves: [
     { count: 3, interval: 1.8, speed: 0.55, kinds: ['drone'] },
     { count: 3, interval: 2.0, speed: 0.7, kinds: ['blade'] },
     { count: 3, interval: 2.0, speed: 0.5, kinds: ['drone', 'armored'] },
+    // TEMPEST's hammer, ORION's bow, HAVOC's pistol, WEAVER's webs: the prologue used to teach only the first three.
+    { count: 3, interval: 2.0, speed: 0.55, kinds: ['drone', 'armored'] },
+    { count: 3, interval: 2.2, speed: 0.5, kinds: ['drone'] },
+    { count: 3, interval: 2.0, speed: 0.55, kinds: ['drone', 'blade'] },
+    { count: 3, interval: 2.0, speed: 0.55, kinds: ['drone', 'armored'] },
     { count: 0, interval: 3, speed: 0.6, kinds: ['drone'], boss: true },
   ],
 };
 
 /** Hero lent to the player in each prologue wave. */
-export const PROLOGUE_HEROES: readonly HeroId[] = ['arc', 'ronin', 'psion', 'arc'];
+export const PROLOGUE_HEROES: readonly HeroId[] = ['arc', 'ronin', 'psion', 'tempest', 'orion', 'havoc', 'weaver', 'arc'];
 
 export const FINALE: Stage = {
   id: 'finale',

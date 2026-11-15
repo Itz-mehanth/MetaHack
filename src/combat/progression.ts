@@ -1,6 +1,6 @@
 import type { HeroId } from './heroes.js';
 import { type Board, cleanName, normalizeBoard } from './leaderboard.js';
-import type { EnemyKind, WaveDef } from './missions.js';
+import { CUTE_CROWD, type EnemyKind, type WaveDef } from './missions.js';
 import { chapterFor, levelStory } from './story.js';
 import type { TwistId } from './twists.js';
 
@@ -71,18 +71,19 @@ function buildWaves(world: World, worldIndex: number, stage: number): WaveDef[] 
       if (kind === 'titan' && !(last || stage === 2)) continue;
       // Flyers join once the player has met the ground game (not in the very first level).
       if (kind === 'flyer' && tier < 1) continue;
-      const weight = k === 0 ? 3 : w >= k ? 1 : 0;
+      // Flyers are small and cute now, so there are twice as many.
+      const weight = k === 0 ? 3 : w >= k ? (kind === 'flyer' ? 2 : 1) : 0;
       for (let n = 0; n < weight; n += 1) kinds.push(kind);
     }
     if (stage === 2 && last && !kinds.includes('titan')) kinds.push('titan');
     waves.push({
       // Fewer enemies at a time, each worth fighting: the field is capped, and every wave ends on an elite.
-      count: (swarm ? 5 : 3) + w + Math.floor(tier / 3),
-      alive: (swarm ? 6 : 4) + Math.min(3, w) + Math.floor(tier / 8),
+      count: Math.round(((swarm ? 5 : 3) + w + Math.floor(tier / 3)) * (swarm ? CUTE_CROWD : 1)),
+      alive: Math.round(((swarm ? 6 : 4) + Math.min(3, w) + Math.floor(tier / 8)) * (swarm ? CUTE_CROWD : 1)),
       interval: Math.max(1.1, (swarm ? 2.6 : 2.2) - w * 0.15 - tier * 0.03),
       speed: (swarm ? 1.3 : 0.7) + w * 0.08 + tier * 0.04,
       kinds,
-      burst: swarm ? 2 + Math.min(1, Math.floor(w / 2)) : undefined,
+      burst: swarm ? 3 + Math.min(1, Math.floor(w / 2)) : undefined,
       boss: stage === 2 && last ? true : undefined,
       champion: stage < 2 && last ? (world.enemies[0] === 'blade' ? 'blade' : world.enemies.includes('titan') ? 'titan' : 'armored') : undefined,
     });

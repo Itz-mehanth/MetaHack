@@ -77,7 +77,7 @@ import { Lightning } from './combat/lightning.js';
 import { CreatureModel, type GrabZone } from './combat/creature.js';
 import { Ground, groundStyleFor } from './combat/ground.js';
 import { PadInput } from './combat/pad.js';
-import { PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
+import { CLICK_PALM_AWAY, CLICK_STILL, GAZE_DWELL, GazeDwell, PINCH_ON, PinchEdge, SKIP_PINCH, SkipPinch } from './combat/gaze.js';
 import { ShieldGauge } from './combat/shieldgauge.js';
 import { Vitals } from './combat/vitals.js';
 import { MenuHandle } from './combat/menuhandle.js';
@@ -118,7 +118,7 @@ import { Haptics } from './combat/haptics.js';
 import { RoomBorder } from './combat/roomborder.js';
 import { Suit } from './combat/suit.js';
 import { roomSpots, type Segment, wallSegment } from './combat/roomgeo.js';
-import { BOSSES, ROLE_HEIGHT, ROLE_POOL, ROSTER, speciesById, speciesFor } from './combat/creatures.js';
+import { BOSSES, CUTE_PACK, ROLE_HEIGHT, ROLE_POOL, ROSTER, speciesById, speciesFor, voicePitch } from './combat/creatures.js';
 import { HoloMap } from './combat/holomap.js';
 import { GameMenus, wrap } from './combat/menus.js';
 import { ENEMIES, type EnemyKind } from './combat/missions.js';
@@ -200,7 +200,6 @@ const TIP_SECONDS = 3.4;
 const MELEE_RANGE = 1.05;
 
 /** How to swap heroes, by input kind. */
-const SWAP_TIP: Tip = { gesture: 'pinch', title: 'TAG IN', sub: 'Pinch a hero portrait on the strip below your view to swap to that hero.' };
 const SWAP_TIP_PAD: Tip = { gesture: 'trigger', title: 'TAG IN', sub: 'Press the thumbstick to swap to the next hero.' };
 const SWAP_TIP_FLAT: Tip = { gesture: 'fist', title: 'TAG IN', sub: 'Press Q or the TAG IN button to swap to the next hero.' };
 
@@ -482,6 +481,10 @@ interface Drone {
   /** A walker stepped forward this frame, at `moveSpeed` m/s (picks the walk or run clip). */
   moving: boolean;
   moveSpeed: number;
+  /** A small creature's voice pitch (0: silent), the travel (walkers, m) or time (flyers, s) until its next sound, and how tightly it packs into a crowd (1: like a humanoid). */
+  voice: number;
+  chirp: number;
+  pack: number;
 }
 
 interface Pickup {
@@ -555,6 +558,11 @@ function jointSlots(hand: HandJoints): Array<[Triple, number]> {
 }
 
 const RIG_KEY = 'handforge.menurig.v1';
+/** Small creatures only patter and chirp within this many metres, no more often than this many seconds apart overall. */
+const CRITTER_RANGE = 9;
+const CRITTER_GAP = 0.09;
+/** Ids the gaze can rest on in the galaxy (a planet each, or the core). */
+const GALAXY_REST = ['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11', 'p12', 'p13', 'p14', 'p15'];
 /** A pinch on the menu handle lets go past this gap between thumb and index tips (m); wider than a click so a drag does not drop. */
 const RIG_LET_GO = 0.055;
 
@@ -933,8 +941,12 @@ export class CombatSystem extends createSystem({
   /** How far the music is muffled now (0 clear .. 1), so the filter is only touched on a change. */
   private muffled = 0;
   /** One pinch detector per hand for tagging a hero in from the strip, and where the pinch is. */
-  private readonly swapPinch = [new PinchEdge(), new PinchEdge()];
-  private readonly swapPoint = new Vector3();
+  /** How long the gaze has rested on one button, and the last pinch point of each hand (for how fast it moves). */
+  private readonly gazeDwell = new GazeDwell();
+  private readonly gazePrev = [new Vector3(), new Vector3()];
+  private readonly gazeSeen = [false, false];
+  /** When a small creature last made a sound (a crowd must patter, not roar). */
+  private critterAt = -10;
   /** Skips a movie with a firm pinch that begins during it (see SkipPinch). */
   private readonly skipPinch = new SkipPinch();
   /** The headset's system menu was up on the last frame. */
@@ -1558,6 +1570,9 @@ export class CombatSystem extends createSystem({
         elite: false,
         moving: false,
         moveSpeed: 0,
+        voice: 0,
+        chirp: 0,
+        pack: 1,
       });
     }
     for (const kind of ['heal', 'rapid', 'power', 'rune'] as const) {
@@ -1778,6 +1793,9 @@ export class CombatSystem extends createSystem({
       elite: false,
       moving: false,
       moveSpeed: 0,
+      voice: 0,
+      chirp: 0,
+      pack: 1,
     };
     this.drones.push(drone);
     return drone;
@@ -1877,6 +1895,11 @@ export class CombatSystem extends createSystem({
       this.root.add(object);
       const drone = this.makeDrone(object, kind, portalGeometry, 1000 + this.drones.length, { species: id, creature });
       if (lift != null) drone.chest = lift;
+      // The small, cute families get a voice and pack in close.
+      if (species.family !== 'big') {
+        drone.voice = voicePitch(species.id);
+        drone.pack = CUTE_PACK;
+      }
     }
   }
 
@@ -1995,6 +2018,7 @@ export class CombatSystem extends createSystem({
     const creature = drone.creature;
     this.v1.subVectors(this.head, object.position);
     const distance = this.v1.length();
+    if (drone.voice > 0) this.chirpFlyer(drone, dt, distance);
     if (drone.snare > 0) {
       drone.snare = Math.max(0, drone.snare - dt);
       drone.cocoon.visible = drone.snare > 0;
@@ -2602,7 +2626,7 @@ export class CombatSystem extends createSystem({
     }
     this.blood.update(dt, armed ? this.vitals.danger : 0);
     const show = !this.attract && run.phase !== 'title' && !(this.panel.visible && !this.paused) && !this.movieActive;
-    this.shieldGauge.update(this.vitals, show, dt, this.profile.settings.calm);
+    this.shieldGauge.update(this.vitals, show, dt, this.profile.settings.calm, !this.flat && !this.pad);
   }
 
   /** True in an MR session, where the real room replaces the arena. */
@@ -2714,7 +2738,17 @@ export class CombatSystem extends createSystem({
     for (let i = 0; i < 2; i += 1) {
       // A closed fist also brings the thumb and index tips together: it must not count as a pinch.
       const distance = this.hands[i].tracked && isPinchPose(this.hands[i].joints) ? this.pinchPoint(i, this.gazePoint) : null;
-      if (this.pinchEdges[i].update(distance, this.elapsed) && !this.rigNear[i]) pinched = true;
+      // A click has to be meant: the hand still enough to be aiming, and not the Meta menu gesture (palm turned to the face).
+      let meant = true;
+      if (distance != null) {
+        const speed = this.gazeSeen[i] ? this.gazePoint.distanceTo(this.gazePrev[i]) / Math.max(dt, 1e-3) : 0;
+        this.gazePrev[i].copy(this.gazePoint);
+        this.gazeSeen[i] = true;
+        const gauntlet = this.hands[i].gauntlet;
+        this.v1.subVectors(this.head, gauntlet.palmPoint).normalize();
+        meant = speed < CLICK_STILL && gauntlet.palmNormal.dot(this.v1) < CLICK_PALM_AWAY;
+      } else this.gazeSeen[i] = false;
+      if (this.pinchEdges[i].update(distance, this.elapsed) && !this.rigNear[i] && meant) pinched = true;
       if (distance != null && distance < SKIP_PINCH) firm = true;
     }
     // A movie is skipped by a firm pinch held for most of a second that begins during it, never by a passing hand shape.
@@ -2724,6 +2758,7 @@ export class CombatSystem extends createSystem({
     this.gazeArm = active ? this.gazeArm + dt : 0;
     if (!active) {
       this.gazeReticle.visible = false;
+      this.gazeDwell.update('', dt);
       return;
     }
     const origin = this.eyeValid ? this.eyeOrigin : this.head;
@@ -2739,10 +2774,19 @@ export class CombatSystem extends createSystem({
       this.gazeReticle.position.copy(origin).addScaledVector(direction, 0.8);
       this.gazeReticle.quaternion.copy(this.world.camera.quaternion);
     }
+    // What the gaze rests on (a button, or a planet on the galaxy): a pinch only presses it after a short dwell,
+    // so a pinch while the reticle sweeps across buttons, or just after a new screen opens under it, presses none.
+    let resting = '';
+    if (onPanel) resting = this.panel.aimedId;
+    else if (this.galaxy.visible) {
+      const index = this.galaxy.pick(origin, direction);
+      resting = index === -1 ? 'core' : index >= 0 ? (GALAXY_REST[index] ?? 'planet') : '';
+    }
+    const dwelt = this.gazeDwell.update(resting, dt) >= GAZE_DWELL;
     this.gazePulse = Math.max(0, this.gazePulse - dt * 5);
     this.gazeReticle.scale.setScalar(1 + this.gazePulse * 1.2);
     this.gazeReticle.visible = this.gazeArm > 0.25;
-    if (!pinched || this.gazeArm < 0.4) return;
+    if (!pinched || this.gazeArm < 0.4 || !dwelt) return;
     this.sfx.unlock();
     this.gazePulse = 1;
     const event = this.panel.visible ? this.panel.click(origin, direction) : null;
@@ -8426,6 +8470,7 @@ export class CombatSystem extends createSystem({
     drone.hp = ENEMIES[kind].hp * (ENEMIES[kind].ground != null || kind === 'flyer' ? this.toughness() : 1);
     drone.maxHp = drone.hp;
     drone.state = 'emerging';
+    drone.chirp = Math.random() * 0.5;
     drone.t = 0;
     drone.speed = speed;
     drone.phase = Math.random() * Math.PI * 2;
@@ -9113,7 +9158,7 @@ export class CombatSystem extends createSystem({
         if (b.state === 'off' || b.state === 'emerging' || b.lifted || b.dropY > 0 || ENEMIES[b.kind].ground == null) continue;
         const dx = b.object.position.x - a.object.position.x;
         const dz = b.object.position.z - a.object.position.z;
-        const reach = (ENEMIES[a.kind].radius * Math.max(0.5, a.size) + ENEMIES[b.kind].radius * Math.max(0.5, b.size)) * 1.25;
+        const reach = (ENEMIES[a.kind].radius * Math.max(0.5, a.size) + ENEMIES[b.kind].radius * Math.max(0.5, b.size)) * 1.25 * ((a.pack + b.pack) / 2);
         const d2 = dx * dx + dz * dz;
         if (d2 >= reach * reach) continue;
         const d = Math.sqrt(d2);
@@ -9137,6 +9182,28 @@ export class CombatSystem extends createSystem({
     this.sfx.spatial(at.x, at.y, at.z, play);
   }
 
+  /** The patter of a small creature running at the player, every half metre or so (and capped overall, so a crowd is a patter, not a roar). */
+  private critterStep(drone: Drone, step: number, distance: number): void {
+    drone.chirp -= step;
+    if (drone.chirp > 0 || distance > CRITTER_RANGE) return;
+    drone.chirp = 0.45 + Math.random() * 0.45;
+    if (this.elapsed - this.critterAt < CRITTER_GAP) return;
+    this.critterAt = this.elapsed;
+    const near = Math.max(0, 1 - distance / CRITTER_RANGE);
+    this.sfxAt(drone.object.position, () => this.sfx.critter(drone.voice, false, near));
+  }
+
+  /** The twitter of a small flyer circling in, now and then. */
+  private chirpFlyer(drone: Drone, dt: number, distance: number): void {
+    drone.chirp -= dt;
+    if (drone.chirp > 0 || distance > CRITTER_RANGE + 2) return;
+    drone.chirp = 1.1 + Math.random() * 1.4;
+    if (this.elapsed - this.critterAt < CRITTER_GAP) return;
+    this.critterAt = this.elapsed;
+    const near = Math.max(0, 1 - distance / (CRITTER_RANGE + 2));
+    this.sfxAt(drone.object.position, () => this.sfx.critter(drone.voice, true, near));
+  }
+
   // ---------------------------------------------------------------- tag team
 
   /** A squad of three for the mission: the lead, owned heroes, and lent ones for a new player. */
@@ -9145,12 +9212,13 @@ export class CombatSystem extends createSystem({
     this.swapCooldown = 0;
     this.tagBuff = 0;
     this.squadHintUntil = this.elapsed + 16;
-    if (this.squad.length > 1) this.teach([...this.tipQueue, this.pad ? SWAP_TIP_PAD : this.flat ? SWAP_TIP_FLAT : SWAP_TIP]);
+    // Hands only: nothing swaps heroes mid-mission by a gesture, so there is nothing to teach.
+    if (this.squad.length > 1 && (this.flat || this.pad)) this.teach([...this.tipQueue, this.pad ? SWAP_TIP_PAD : SWAP_TIP_FLAT]);
     this.syncSquadBar();
   }
 
   private swapHint(): string {
-    return this.pad ? 'THUMBSTICK = TAG IN' : this.flat ? 'Q = TAG IN' : 'PINCH A PORTRAIT = TAG IN';
+    return this.pad ? 'THUMBSTICK = TAG IN' : 'Q = TAG IN';
   }
 
   private syncSquadBar(): void {
@@ -9168,7 +9236,8 @@ export class CombatSystem extends createSystem({
     this.tagBuff = Math.max(0, this.tagBuff - dt);
     this.squadBar.update(dt);
     if (this.squad.length < 2) return;
-    this.squadBar.mesh.visible = this.run.phase !== 'title' && !this.paused && !this.panel.visible && this.script == null;
+    // Heroes are swapped with a button or the thumbstick, never a gesture, so the strip is for screens and controllers only.
+    this.squadBar.mesh.visible = (this.flat || !!this.pad) && this.run.phase !== 'title' && !this.paused && !this.panel.visible && this.script == null;
     if (this.squadHintUntil > 0 && this.elapsed > this.squadHintUntil) {
       this.squadHintUntil = 0;
       this.syncSquadBar();
@@ -9179,15 +9248,6 @@ export class CombatSystem extends createSystem({
       if (this.screen.takeSwap()) target = nextInSquad(this.squad, this.hero);
     } else if (this.pad) {
       if (this.padInput.swapPressed) target = nextInSquad(this.squad, this.hero);
-    } else {
-      // Hands: pinch a portrait on the strip to tag that hero in. (A gesture made of fists would
-      // also fire whenever RONIN crosses his blades or TALON crosses his claws.)
-      for (let i = 0; i < 2; i += 1) {
-        const distance = live && this.hands[i].tracked ? this.pinchPoint(i, this.swapPoint) : null;
-        if (!this.swapPinch[i].update(distance, this.elapsed)) continue;
-        const chip = this.squadBar.pickChip(this.swapPoint, 0.07);
-        if (chip >= 0 && this.squad[chip] !== this.hero) target = this.squad[chip];
-      }
     }
     if (target != null && live && this.swapCooldown <= 0) this.tagIn(target);
   }
@@ -9416,6 +9476,7 @@ export class CombatSystem extends createSystem({
         object.position.addScaledVector(this.v1, step);
         object.position.addScaledVector(this.v3, Math.sin(time * 2 + drone.phase) * def.weave * dt);
         drone.stride += step;
+        if (drone.voice > 0) this.critterStep(drone, step, distance);
         moving = true;
         drone.moving = true;
         drone.moveSpeed = dt > 0 ? step / dt : 0;

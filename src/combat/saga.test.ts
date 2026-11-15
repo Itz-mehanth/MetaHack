@@ -19,6 +19,12 @@ describe('saga', () => {
     expect(PROLOGUE.waves[PROLOGUE.waves.length - 1].boss).toBe(true);
   });
 
+  it('teaches seven different heroes before the boss', () => {
+    const taught = new Set(PROLOGUE_HEROES.slice(0, -1));
+    expect(taught.size).toBeGreaterThanOrEqual(7);
+    for (const hero of ['arc', 'ronin', 'psion', 'tempest', 'orion', 'havoc', 'weaver']) expect(taught.has(hero as never)).toBe(true);
+  });
+
   it('counts an Anchor per beaten region boss and opens the finale', () => {
     const p = defaultProfile();
     expect(anchorsRecovered(p)).toEqual([]);

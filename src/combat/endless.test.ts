@@ -67,8 +67,10 @@ describe('endless waves', () => {
       expect(late.speed).toBeGreaterThan(early.speed);
       expect(late.interval).toBeLessThanOrEqual(early.interval);
       expect(late.interval).toBeGreaterThanOrEqual(0.8);
-      expect(late.count).toBeLessThanOrEqual(24);
-      expect(late.alive ?? 0).toBeLessThanOrEqual(9);
+      // The small cute swarmers come in bigger crowds than the rest.
+      const swarm = world.enemies[0] === 'swarmer';
+      expect(late.count).toBeLessThanOrEqual(swarm ? 36 : 24);
+      expect(late.alive ?? 0).toBeLessThanOrEqual(swarm ? 16 : 9);
       for (let n = 0; n < ENDLESS_WAVES; n += 1) expect(endlessWave(world, n).kinds.length).toBeGreaterThan(0);
     }
   });

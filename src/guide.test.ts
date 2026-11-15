@@ -19,7 +19,7 @@ describe('landing hero guide', () => {
 
   it('shows the getting-around cards with a pictogram each', () => {
     const nav = html.slice(html.indexOf('id="gnav"'));
-    expect(nav.match(/<canvas /g)?.length).toBe(4);
+    expect(nav.match(/<canvas /g)?.length).toBe(3);
     expect(nav).toContain('PAUSE');
     expect(nav).toContain('OVERDRIVE');
   });

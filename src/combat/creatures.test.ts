@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BOSSES, ROLE_FAMILY, ROLE_HEIGHT, ROLE_POOL, ROSTER, SPECIES, speciesById, speciesFor, speciesIn } from './creatures.js';
+import { BOSSES, CUTE_PACK, ROLE_FAMILY, ROLE_HEIGHT, ROLE_POOL, ROSTER, SPECIES, speciesById, speciesFor, speciesIn, voicePitch } from './creatures.js';
+import { STAGES } from './progression.js';
 import { STAGES, WORLDS } from './progression.js';
 
 describe('creature roster', () => {
@@ -50,5 +51,34 @@ describe('creature roster', () => {
   it('keeps flyers out of the first stage of the first world', () => {
     const first = STAGES[0];
     for (const wave of first.waves) expect(wave.kinds).not.toContain('flyer');
+  });
+});
+
+describe('small cute creatures', () => {
+  it('are much smaller than a humanoid, and pack in close', () => {
+    expect(ROLE_HEIGHT.swarmer!).toBeLessThan(0.6);
+    expect(ROLE_HEIGHT.flyer!).toBeLessThan(0.7);
+    expect(ROLE_HEIGHT.drone!).toBeGreaterThan(1);
+    expect(CUTE_PACK).toBeLessThan(0.8);
+  });
+
+  it('come in crowds the pools can hold', () => {
+    const swarmStages = STAGES.filter((s) => s.world.enemies[0] === 'swarmer');
+    expect(swarmStages.length).toBeGreaterThan(0);
+    for (const stage of swarmStages) for (const wave of stage.waves) expect(wave.alive!).toBeLessThanOrEqual(ROLE_POOL.swarmer!);
+    // A real crowd: well over what the first levels used to field (6 to 9).
+    const biggest = Math.max(...swarmStages.flatMap((s) => s.waves.map((w) => w.alive!)));
+    expect(biggest).toBeGreaterThanOrEqual(12);
+  });
+
+  it('each species has its own steady voice', () => {
+    for (const species of SPECIES) {
+      const pitch = voicePitch(species.id);
+      expect(pitch).toBeGreaterThanOrEqual(0.8);
+      expect(pitch).toBeLessThanOrEqual(1.45);
+      expect(voicePitch(species.id)).toBe(pitch);
+    }
+    const voices = new Set(SPECIES.filter((s) => s.family !== 'big').map((s) => voicePitch(s.id)));
+    expect(voices.size).toBeGreaterThan(3);
   });
 });

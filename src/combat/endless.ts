@@ -1,6 +1,6 @@
 import type { HeroId } from './heroes.js';
 import { chapterFor } from './story.js';
-import type { EnemyKind, WaveDef } from './missions.js';
+import { CUTE_CROWD, type EnemyKind, type WaveDef } from './missions.js';
 import { DIFFICULTY, type EndlessInfo, type Profile, type Stage, WORLDS, type World } from './progression.js';
 import { CHAMPIONS, type TwistId } from './twists.js';
 
@@ -102,14 +102,14 @@ export function endlessWave(world: World, n: number, salt = 0): WaveDef {
   });
   if (kinds.length === 0) kinds.push(world.enemies[0]);
   // Boss waves bring fewer extras: the boss summons its own.
-  const base = Math.min(24, (swarm ? 6 : 4) + Math.floor(n * 0.8));
+  const base = Math.min(swarm ? 36 : 24, Math.round(((swarm ? 6 : 4) + Math.floor(n * 0.8)) * (swarm ? CUTE_CROWD : 1)));
   return {
     count: boss ? Math.max(3, Math.floor(base * 0.6)) : base,
-    alive: Math.min(9, (swarm ? 6 : 4) + Math.floor(n / 3)),
+    alive: Math.min(swarm ? 16 : 9, Math.round(((swarm ? 6 : 4) + Math.floor(n / 3)) * (swarm ? CUTE_CROWD : 1))),
     interval: Math.max(0.8, (swarm ? 2.2 : 2.0) - n * 0.04),
     speed: Math.min(1.9, (swarm ? 1.3 : 0.7) + n * 0.035),
     kinds,
-    burst: swarm ? 2 + Math.min(2, Math.floor(n / 5)) : undefined,
+    burst: swarm ? 3 + Math.min(2, Math.floor(n / 5)) : undefined,
     boss: boss ? true : undefined,
     champion: champion && !boss ? championKind(world) : undefined,
   };
