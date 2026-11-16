@@ -6769,7 +6769,7 @@ export class CombatSystem extends createSystem({
     else if (this.script === 'finale') this.updateFinale(dt, time);
     else if (this.movieActive) this.eraseTarget = this.cinemaErase;
     else if (this.run.phase === 'title') this.eraseTarget = 0;
-    else this.eraseTarget = this.isPassthrough() ? this.riftLevel * 0.3 : 1;
+    else this.eraseTarget = this.isPassthrough() || this.roomShown ? this.riftLevel * 0.3 : 1;
   }
 
   private updatePrologue(dt: number): void {
