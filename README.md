@@ -57,6 +57,7 @@ wrist.
 - **30 animated creatures** (small cute swarms up to giants), shielded multi-phase bosses, destructible and
   explosive props, level twists (meteors, lightning, low gravity, blackout, enemies from the ceiling).
 - **Fully voiced story** and a synthesised score and sound design, all original.
+- **Real room backdrop:** Settings > BACKDROP swaps the neon sky for a photographed room (an HDR image) in VR and on screens, so a flat screen reads like a room.
 - **Comfort and access:** seated mode, reduce flashes, aim assist, adjustable gesture sensitivity, a swappable
   bow hand, left-handed layouts, gaze-and-pinch selection.
 

@@ -109,6 +109,7 @@ import { PerfHud, type PerfReadout } from './combat/perfhud.js';
 import { SquadBar } from './combat/squadbar.js';
 import { BlobShadows } from './combat/shadows.js';
 import { FloorGlow, ScorchMarks, Telegraphs, WallCracks } from './combat/decals.js';
+import { DEFAULT_ROOM, RoomBackdrop } from './combat/roombackdrop.js';
 import { Scenery } from './combat/scenery.js';
 import { FrameStats, planFor, QualityGovernor, type QualityPlan } from './combat/quality.js';
 import { BeamFx } from './combat/beamfx.js';
@@ -976,6 +977,10 @@ export class CombatSystem extends createSystem({
   private cracks!: WallCracks;
   private telegraphs!: Telegraphs;
   private scenery: Scenery | null = null;
+  /** The REAL ROOM backdrop (a photographed HDR room) and whether it is on; `?room=<id>` forces it, `?room=0` forces it off. */
+  private backdrop: RoomBackdrop | null = null;
+  private roomShown = false;
+  private readonly roomParam = new URLSearchParams(window.location.search).get('room');
   private readonly frameStats = new FrameStats();
   private readonly governor = new QualityGovernor();
   private quality: QualityPlan = planFor(0);
@@ -1451,6 +1456,7 @@ export class CombatSystem extends createSystem({
     this.root.add(this.arena);
     this.arena.add(this.ground.disc);
     this.scenery = new Scenery(this.arena);
+    this.backdrop = new RoomBackdrop(this.arena);
     this.styleWorld(this.stageWorld());
     const portalGeometry = new RingGeometry(0.17, 0.26, 48);
     let index = 0;
@@ -2154,6 +2160,7 @@ export class CombatSystem extends createSystem({
       coach: this.coach.visible,
       screen: this.menus.screen,
       panel: this.panel.visible,
+      room: [this.roomShown, this.backdrop?.ready ?? false, this.backdrop?.group.visible ?? false],
       live: this.powersLive,
       enemies: this.drones.filter((d) => d.state !== 'off').map((d) => `${d.kind}${d.species ? `/${d.species}` : ''}:${d.state}`),
       enemyHp: this.drones.filter((d) => d.state !== 'off').map((d) => Math.round(d.hp * 10) / 10),
@@ -2400,7 +2407,8 @@ export class CombatSystem extends createSystem({
       this.arena.visible = !this.isPassthrough();
       // The arena travels with the player, so walking never leaves it behind.
       if (this.arena.visible) this.arena.position.set(this.world.camera.getWorldPosition(this.v1).x, 0, this.v1.z);
-      this.ground.syncDisc(this.arena.position.x, this.arena.position.z, this.arena.visible && this.quality.ground);
+      this.syncBackdrop();
+      this.ground.syncDisc(this.arena.position.x, this.arena.position.z, this.arena.visible && this.quality.ground && !this.roomShown);
     }
     // The Meta system menu (a pinch with the palm facing you opens it) blurs the app: freeze sound with the frame.
     const blurred = this.world.visibilityState.peek() === VisibilityState.VisibleBlurred;
@@ -4168,6 +4176,24 @@ export class CombatSystem extends createSystem({
     this.syncMap();
     this.syncArmory();
     this.syncGalaxy();
+  }
+
+  /** REAL ROOM: swaps the neon dome, floor, towers and skyline for the photographed room (loaded the first time it is wanted). */
+  private syncBackdrop(): void {
+    const arena = this.arena;
+    const backdrop = this.backdrop;
+    if (arena == null || backdrop == null) return;
+    const want = this.roomParam != null ? this.roomParam !== '0' : this.profile.settings.room;
+    if (want === this.roomShown) return;
+    this.roomShown = want;
+    const id = this.roomParam != null && this.roomParam !== '0' && this.roomParam !== '1' ? this.roomParam : DEFAULT_ROOM;
+    // The neon sky stays until the room has loaded, so a missing file never leaves a black void.
+    const apply = (on: boolean): void => {
+      backdrop.setVisible(on);
+      for (const child of arena.children) if (child !== backdrop.group) child.visible = !on;
+    };
+    if (want) void backdrop.load(id).then((ok) => { if (ok && this.roomShown) apply(true); });
+    else apply(false);
   }
 
   private profileChanged(): void {

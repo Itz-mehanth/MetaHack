@@ -12,7 +12,8 @@ Icons from game-icons.net, licensed under Creative Commons BY 3.0
 Icons were recoloured (background removed, tinted at runtime).
 
 Textures and HDRI from Poly Haven (https://polyhaven.com), CC0: metal_plate
-(Rob Tuytel), brown_leather, fabric_leather_02, studio_small_09.
+(Rob Tuytel), brown_leather, fabric_leather_02, studio_small_09, and the REAL ROOM backdrop
+small_empty_room_4 (Sergej Majboroda), public/env/rooms.
 
 Fonts from Google Fonts under the SIL Open Font License: Bangers, Orbitron,
 Rajdhani.

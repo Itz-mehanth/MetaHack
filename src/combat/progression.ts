@@ -272,6 +272,8 @@ export interface Settings {
   seated: 'auto' | 'on' | 'off';
   /** Reduce flashes: no slow-motion or hit-stop, much weaker lightning and damage flashes. */
   calm: boolean;
+  /** REAL ROOM backdrop: a photographed room replaces the neon sky in VR and on screens. */
+  room: boolean;
 }
 
 /** Endless and daily-challenge records. */
@@ -330,7 +332,7 @@ export function defaultProfile(): Profile {
     arcade: { endlessBest: 0, endlessScore: 0, endlessRuns: 0, dailyDay: '', dailyBest: 0, dailyScore: 0, streak: 0, streakDay: '', bestStreak: 0 },
     name: '',
     board: {},
-    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false, perfHud: false, seated: 'auto', calm: false },
+    settings: { music: 0.6, sfx: 0.8, difficulty: 'normal', aimAssist: true, leftHanded: false, allAround: false, gestures: 'normal', handDebug: false, perfHud: false, seated: 'auto', calm: false, room: false },
   };
 }
 

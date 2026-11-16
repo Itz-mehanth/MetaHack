@@ -675,9 +675,10 @@ export class GameMenus {
           color: '#FF3B5C',
           size: 34,
         },
-        { id: 'seat', x: 64, y: 850, w: 500, h: 80, label: 'PLAY STYLE', sub: s.seated === 'on' ? 'SEATED' : s.seated === 'off' ? 'STANDING' : 'AUTO (BY HEIGHT)', selected: s.seated === 'on', size: 30 },
-        { id: 'calm', x: 584, y: 850, w: 500, h: 80, label: 'REDUCE FLASHES', sub: s.calm ? 'ON: NO SLOW-MO OR STROBES' : 'OFF', selected: s.calm, size: 30 },
-        { id: 'perfhud', x: 1104, y: 850, w: 432, h: 80, label: 'PERF HUD', sub: s.perfHud ? 'ON' : 'OFF', selected: s.perfHud, size: 30 },
+        { id: 'seat', x: 64, y: 850, w: 360, h: 80, label: 'PLAY STYLE', sub: s.seated === 'on' ? 'SEATED' : s.seated === 'off' ? 'STANDING' : 'AUTO (BY HEIGHT)', selected: s.seated === 'on', size: 28 },
+        { id: 'calm', x: 444, y: 850, w: 360, h: 80, label: 'REDUCE FLASHES', sub: s.calm ? 'ON: NO STROBES' : 'OFF', selected: s.calm, size: 28 },
+        { id: 'room', x: 824, y: 850, w: 400, h: 80, label: 'BACKDROP', sub: s.room ? 'REAL ROOM' : 'WORLD SKY', selected: s.room, size: 28 },
+        { id: 'perfhud', x: 1244, y: 850, w: 292, h: 80, label: 'PERF HUD', sub: s.perfHud ? 'ON' : 'OFF', selected: s.perfHud, size: 28 },
         {
           id: 'settings-note',
           kind: 'text',
@@ -1114,6 +1115,10 @@ export class GameMenus {
         return;
       case 'calm':
         p.settings.calm = !p.settings.calm;
+        this.actions.changed();
+        return;
+      case 'room':
+        p.settings.room = !p.settings.room;
         this.actions.changed();
         return;
       case 'perfhud':
